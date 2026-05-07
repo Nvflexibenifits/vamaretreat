@@ -2,82 +2,34 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { useApp } from "@/lib/store";
 
-type NavItem = {
-  href: string;
-  icon: string;
-  label: string;
-  badgeKey?: "bookings" | "rooms";
-  badgeGreen?: boolean;
-};
+function isB2CActive(pathname: string): boolean {
+  return pathname === "/bookings" || /^\/bookings\/(?!new$).+/.test(pathname);
+}
 
-const MAIN: NavItem[] = [
-  { href: "/", icon: "⌂", label: "Dashboard" },
-  { href: "/bookings", icon: "📋", label: "All Bookings", badgeKey: "bookings" },
-  { href: "/bookings/new", icon: "＋", label: "New Booking" },
-];
-
-const OPS: NavItem[] = [
-  { href: "/room-chart", icon: "🏡", label: "Room Chart", badgeKey: "rooms", badgeGreen: true },
-  { href: "/revenue", icon: "₹", label: "Revenue" },
-  { href: "/crm", icon: "👥", label: "Guest CRM" },
-];
-
-const SYSTEM: NavItem[] = [
-  { href: "/settings", icon: "⚙", label: "Settings" },
-];
-
-function isActive(pathname: string, href: string): boolean {
+function isSimpleActive(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";
-  if (href === "/bookings") return pathname === "/bookings" || /^\/bookings\/(?!new$)/.test(pathname);
   return pathname === href || pathname.startsWith(href + "/");
 }
 
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { currentRole, currentUser, bookings, logout } = useApp();
+  const { logout } = useApp();
 
-  const openCount = bookings.filter(
-    (b) => b.status === "Draft" || b.status === "Confirmed"
-  ).length;
-  const unallocCount = bookings.filter(
-    (b) => b.status === "Confirmed" && !b.allocatedRoom
-  ).length;
+  const [bookingsOpen, setBookingsOpen] = useState<boolean>(
+    pathname.startsWith("/bookings")
+  );
 
-  const hideNew =
-    currentRole === "Room Allocator";
-  const hideSettings =
-    currentRole === "Room Allocator" || currentRole === "Sales REX";
+  useEffect(() => {
+    if (pathname.startsWith("/bookings")) setBookingsOpen(true);
+  }, [pathname]);
 
   const onLogout = () => {
     logout();
     router.replace("/login");
-  };
-
-  const renderItem = (item: NavItem) => {
-    if (item.label === "New Booking" && hideNew) return null;
-    if (item.label === "Settings" && hideSettings) return null;
-    const active = isActive(pathname, item.href);
-    let badge: number | null = null;
-    if (item.badgeKey === "bookings") badge = openCount;
-    else if (item.badgeKey === "rooms") badge = unallocCount;
-    return (
-      <Link
-        key={item.href}
-        href={item.href}
-        className={`nav-it${active ? " active" : ""}`}
-      >
-        <span className="nav-icon">{item.icon}</span>
-        {item.label}
-        {item.badgeKey === "rooms" ? (
-          <span className={`nav-badge grn${badge ? "" : " hide"}`}>{badge}</span>
-        ) : item.badgeKey === "bookings" ? (
-          <span className="nav-badge">{badge}</span>
-        ) : null}
-      </Link>
-    );
   };
 
   return (
@@ -92,26 +44,79 @@ export function Sidebar() {
         </div>
       </div>
       <nav className="sb-nav">
-        <div className="sb-sec">Main</div>
-        {MAIN.map(renderItem)}
-        <div className="sb-sec">Operations</div>
-        {OPS.map(renderItem)}
-        {!hideSettings && (
-          <>
-            <div className="sb-sec">System</div>
-            {SYSTEM.map(renderItem)}
-          </>
+        <Link
+          href="/"
+          className={`nav-it${isSimpleActive(pathname, "/") ? " active" : ""}`}
+        >
+          <span className="nav-icon">⌂</span> Home
+        </Link>
+
+        <button
+          type="button"
+          className={`nav-it${bookingsOpen ? " active" : ""}`}
+          onClick={() => setBookingsOpen((v) => !v)}
+          style={{ background: "transparent", border: "none", width: "100%", textAlign: "left" }}
+        >
+          <span className="nav-icon">📋</span>
+          Bookings
+          <span className={`nav-arrow${bookingsOpen ? " open" : ""}`}>▸</span>
+        </button>
+
+        {bookingsOpen && (
+          <div className="nav-children">
+            <Link
+              href="/bookings"
+              className={`nav-it child${isB2CActive(pathname) ? " active" : ""}`}
+            >
+              B2C Bookings
+            </Link>
+            <span className="nav-it child soon">
+              Group Bookings
+              <span className="nav-soon">Coming Soon</span>
+            </span>
+            <span className="nav-it child soon">
+              Corporate Bookings
+              <span className="nav-soon">Coming Soon</span>
+            </span>
+            <span className="nav-it child soon">
+              School Bookings
+              <span className="nav-soon">Coming Soon</span>
+            </span>
+            <span className="nav-it child soon">
+              Institute Bookings
+              <span className="nav-soon">Coming Soon</span>
+            </span>
+          </div>
         )}
+
+        <Link
+          href="/room-chart"
+          className={`nav-it${isSimpleActive(pathname, "/room-chart") ? " active" : ""}`}
+        >
+          <span className="nav-icon">🏡</span> Room Chart
+        </Link>
+
+        <Link
+          href="/revenue"
+          className={`nav-it${isSimpleActive(pathname, "/revenue") ? " active" : ""}`}
+        >
+          <span className="nav-icon">₹</span> Revenue
+        </Link>
+
+        <span className="nav-it soon">
+          <span className="nav-icon">📊</span> Reports
+          <span className="nav-soon">Coming Soon</span>
+        </span>
+
+        <span className="nav-it soon">
+          <span className="nav-icon">⚙</span> Master Setup
+          <span className="nav-soon">Coming Soon</span>
+        </span>
       </nav>
       <div className="sb-ft">
-        <div className="sb-user">
-          <div className="sb-av">{currentUser[0]}</div>
-          <div>
-            <div className="sb-uname">{currentUser}</div>
-            <div className="sb-urole">{currentRole}</div>
-          </div>
-          <button className="sb-logout" onClick={onLogout} title="Sign out">⏏</button>
-        </div>
+        <button type="button" className="sb-logout-btn" onClick={onLogout}>
+          ⏏ Logout
+        </button>
       </div>
     </div>
   );

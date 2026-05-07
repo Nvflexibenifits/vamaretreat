@@ -1,232 +1,269 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { fmt, getTimeOfDay, todayStr } from "@/lib/utils";
-import { StatusBadge } from "@/components/StatusBadge";
+import { fmt, sevenDaysFrom, todayStr, weekRange } from "@/lib/utils";
+
+type RevFilter = "today" | "week" | "month";
+type RoomFilter = "today" | "week";
+
+const ROOM_CATEGORIES: { name: string; cats: string[]; total: number }[] = [
+  { name: "Pool Villa", cats: ["PV"], total: 1 },
+  { name: "2BHK Villa", cats: ["2BHK", "2BHK-GV"], total: 5 },
+  { name: "1BHK Villa", cats: ["1BHK", "1BHK-GV"], total: 12 },
+  { name: "Family Room", cats: ["FM"], total: 4 },
+  { name: "Couple Room", cats: ["CPL"], total: 10 },
+  { name: "Tent", cats: ["TENT"], total: 6 },
+];
 
 export default function DashboardPage() {
   const router = useRouter();
   const { bookings, revenueEntries, currentUser } = useApp();
-  const [greeting, setGreeting] = useState("");
+
   const [today, setToday] = useState("");
+  const [revFilter, setRevFilter] = useState<RevFilter>("week");
+  const [roomFilter, setRoomFilter] = useState<RoomFilter>("today");
 
   useEffect(() => {
-    setGreeting(getTimeOfDay());
     setToday(todayStr());
   }, []);
 
-  const arrivals = useMemo(
-    () => bookings.filter((b) => b.checkin === today && (b.status === "Confirmed" || b.status === "Completed")),
-    [bookings, today]
+  // ───── Revenue ─────
+  const revData = useMemo(() => {
+    if (!today) return { total: 0, count: 0, label: "" };
+    const entries = revenueEntries.filter((e) => e.amount > 0);
+    let filtered = entries;
+    let label = "";
+    if (revFilter === "today") {
+      filtered = entries.filter((e) => e.date === today);
+      label = "Today";
+    } else if (revFilter === "week") {
+      const { start, end } = weekRange(today);
+      filtered = entries.filter((e) => e.date >= start && e.date <= end);
+      label = "This Week";
+    } else {
+      const month = today.slice(0, 7);
+      filtered = entries.filter((e) => e.date.startsWith(month));
+      label = "This Month";
+    }
+    return {
+      total: filtered.reduce((s, e) => s + e.amount, 0),
+      count: filtered.length,
+      label,
+    };
+  }, [revenueEntries, revFilter, today]);
+
+  // ───── Payment Pending ─────
+  const pendingBookings = useMemo(
+    () => bookings.filter((b) => b.balance > 0).sort((a, b) => b.balance - a.balance),
+    [bookings]
   );
 
-  const drafts = bookings.filter((b) => b.status === "Draft").length;
-  const totalBal = bookings.filter((b) => b.balance > 0).reduce((s, b) => s + b.balance, 0);
-  const balBookings = bookings.filter((b) => b.balance > 0).length;
-  const revThisMonth = revenueEntries
-    .filter((e) => e.date && e.date.startsWith("2026-05"))
-    .reduce((s, e) => s + e.amount, 0);
+  // ───── Room Status ─────
+  const roomDates = useMemo(() => {
+    if (!today) return [];
+    if (roomFilter === "today") return sevenDaysFrom(today);
+    const { start } = weekRange(today);
+    return sevenDaysFrom(start);
+  }, [today, roomFilter]);
 
-  const recent = bookings.slice(0, 5);
-  const unalloc = bookings.filter((b) => b.status === "Confirmed" && !b.allocatedRoom);
-
-  const lostReasons = useMemo(() => {
-    const reasons: Record<string, number> = {};
-    bookings
-      .filter((b) => b.status === "Lost" && b.lostReason)
-      .forEach((b) => {
-        reasons[b.lostReason!] = (reasons[b.lostReason!] || 0) + 1;
+  const roomStatus = useMemo(() => {
+    return ROOM_CATEGORIES.map((cat) => {
+      const cells = roomDates.map((d) => {
+        let booked = 0;
+        let tentative = 0;
+        bookings.forEach((b) => {
+          if (b.checkin <= d && d < b.checkout) {
+            const qty = b.rooms
+              .filter((r) => cat.cats.includes(r.id))
+              .reduce((s, r) => s + r.qty, 0);
+            if (qty <= 0) return;
+            if (b.status === "Confirmed" || b.status === "Completed") booked += qty;
+            else if (b.status === "Draft") tentative += qty;
+          }
+        });
+        const available = Math.max(0, cat.total - booked - tentative);
+        return { date: d, booked, tentative, available };
       });
-    return Object.entries(reasons).sort((a, b) => b[1] - a[1]);
-  }, [bookings]);
-  const maxR = Math.max(...lostReasons.map(([, c]) => c), 1);
+      return { ...cat, cells };
+    });
+  }, [bookings, roomDates]);
 
   return (
     <div className="view">
       <div className="pg-hd">
         <div>
-          <h2>{greeting ? `Good ${greeting}, ${currentUser} 👋` : `Hello, ${currentUser} 👋`}</h2>
-          <p>Here&apos;s what&apos;s happening at Vama Retreats today</p>
+          <h2>Hello, {currentUser} 👋</h2>
+          <p>Quick overview of revenue, payments and room availability</p>
         </div>
       </div>
 
-      <div className="stat-row">
-        <div className="stat-card">
-          <div className="stat-lbl">Today&apos;s Check-ins</div>
-          <div className="stat-val">{arrivals.length}</div>
-          <div className="stat-sub">
-            {arrivals.length ? arrivals.map((b) => b.guest.split(" ")[0]).join(", ") : "No arrivals today"}
+      {/* ───────── Revenue ───────── */}
+      <div className="card" style={{ marginBottom: 18 }}>
+        <div style={{ display: "flex", alignItems: "center", marginBottom: 16 }}>
+          <h3 style={{ fontSize: 15, fontWeight: 700, color: "var(--t1)" }}>Revenue</h3>
+          <div className="filter-bar" style={{ marginLeft: "auto", marginBottom: 0 }}>
+            {([
+              { id: "today", label: "Today" },
+              { id: "week", label: "This Week" },
+              { id: "month", label: "This Month" },
+            ] as { id: RevFilter; label: string }[]).map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                className={`filter-btn${revFilter === f.id ? " on" : ""}`}
+                onClick={() => setRevFilter(f.id)}
+              >
+                {f.label}
+              </button>
+            ))}
           </div>
         </div>
-        <div className="stat-card">
-          <div className="stat-lbl">Open Enquiries</div>
-          <div className="stat-val">{drafts}</div>
-          <div className="stat-sub">Awaiting confirmation</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-lbl">Balance Pending</div>
-          <div className="stat-val">{fmt(totalBal)}</div>
-          <div className="stat-sub">Across {balBookings} booking{balBookings !== 1 ? "s" : ""}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-lbl">May Revenue</div>
-          <div className="stat-val">₹{(revThisMonth / 100000).toFixed(1)}L</div>
-          <div className="stat-chg stat-up"></div>
+        <div>
+          <div
+            className="stat-val"
+            style={{ fontSize: 38 }}
+          >
+            {fmt(revData.total)}
+          </div>
+          <div className="stat-sub" style={{ marginTop: 8 }}>
+            {revData.label} · {revData.count} payment event{revData.count !== 1 ? "s" : ""}
+          </div>
         </div>
       </div>
 
-      <div className="two-col">
-        <div>
-          <div className="sec-div">Today&apos;s Arrivals</div>
-          <div className="card" style={{ padding: 0 }}>
-            <div>
-              {arrivals.length === 0 ? (
-                <div className="empty-state" style={{ padding: 28 }}>
-                  <div className="empty-icon">✓</div>
-                  <p>No arrivals today</p>
-                </div>
-              ) : (
-                arrivals.map((b) => (
-                  <div
-                    key={b.id}
-                    className="arrival-item"
-                    onClick={() => router.push(`/bookings/${b.id}`)}
-                  >
-                    <div className="arrival-av">{b.guest[0]}</div>
-                    <div>
-                      <div className="arrival-name">{b.guest}</div>
-                      <div className="arrival-meta">
-                        {b.rooms.map((r) => r.name + (r.qty > 1 ? " ×" + r.qty : "")).join(", ")} · {b.adults} Adults
-                      </div>
-                    </div>
-                    <div className="arrival-right">
-                      <div className="arrival-amt">{fmt(b.total)}</div>
-                      {b.balance > 0 ? (
-                        <div className="arrival-bal">Balance: {fmt(b.balance)}</div>
-                      ) : (
-                        <div style={{ fontSize: 11, color: "var(--grn)" }}>Fully paid ✓</div>
-                      )}
-                    </div>
+      {/* ───────── Payment Pending ───────── */}
+      <div className="tbl-wrap" style={{ marginBottom: 18 }}>
+        <div className="tbl-hd">
+          <h3>Payment Pending</h3>
+          <span className="tbl-hd-r" style={{ fontSize: 12, color: "var(--t3)" }}>
+            {pendingBookings.length} booking{pendingBookings.length !== 1 ? "s" : ""}
+          </span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Booking ID</th>
+              <th>Guest Name</th>
+              <th style={{ textAlign: "right" }}>Amount Pending</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pendingBookings.length === 0 ? (
+              <tr>
+                <td colSpan={3}>
+                  <div className="empty-state">
+                    <div className="empty-icon">✓</div>
+                    <h3>All bookings paid up</h3>
+                    <p>No pending balances right now</p>
                   </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          <div className="sec-div" style={{ marginTop: 18 }}>New Booking</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <Link
-              href="/bookings/new"
-              className="card"
-              style={{ cursor: "pointer", border: "1.5px solid var(--bd)", textDecoration: "none", color: "inherit" }}
-            >
-              <div style={{ fontSize: 20, marginBottom: 8 }}>🏠</div>
-              <div className="card-title">B2C Guest</div>
-              <p style={{ fontSize: 12, color: "var(--t3)" }}>Individual or family</p>
-              <div style={{ marginTop: 8 }}>
-                <span className="badge bd-active" style={{ fontSize: 9 }}>Phase 1 · Live</span>
-              </div>
-            </Link>
-            <div className="card phase2-lock" style={{ cursor: "not-allowed", opacity: 0.55 }}>
-              <div style={{ fontSize: 20, marginBottom: 8 }}>🐾</div>
-              <div className="card-title">B2C with Pet</div>
-              <p style={{ fontSize: 12, color: "var(--t3)" }}>Pet-friendly stay</p>
-            </div>
-            <div className="card phase2-lock" style={{ cursor: "not-allowed", opacity: 0.55 }}>
-              <div style={{ fontSize: 20, marginBottom: 8 }}>🏢</div>
-              <div className="card-title">Corporate</div>
-              <p style={{ fontSize: 12, color: "var(--t3)" }}>Day out / overnight</p>
-            </div>
-            <div className="card phase2-lock" style={{ cursor: "not-allowed", opacity: 0.55 }}>
-              <div style={{ fontSize: 20, marginBottom: 8 }}>🎊</div>
-              <div className="card-title">Events / Banquet</div>
-              <p style={{ fontSize: 12, color: "var(--t3)" }}>Weddings, functions</p>
-            </div>
-          </div>
-        </div>
-
-        <div>
-          <div className="sec-div">Recent Bookings</div>
-          <div className="tbl-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Guest</th>
-                  <th>Check-in</th>
-                  <th>Total</th>
-                  <th>Status</th>
+                </td>
+              </tr>
+            ) : (
+              pendingBookings.map((b) => (
+                <tr key={b.id} onClick={() => router.push(`/bookings/${b.id}`)}>
+                  <td>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontFamily: "var(--font-outfit), Outfit, sans-serif",
+                        color: "var(--t3)",
+                        fontWeight: 700,
+                      }}
+                    >
+                      {b.id}
+                    </span>
+                  </td>
+                  <td>
+                    <div style={{ fontWeight: 500, color: "var(--t1)" }}>{b.guest}</div>
+                    <div style={{ fontSize: 11, color: "var(--t3)" }}>{b.mobile}</div>
+                  </td>
+                  <td style={{ textAlign: "right", fontWeight: 700, color: "var(--amb)" }}>
+                    {fmt(b.balance)}
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {recent.map((b) => (
-                  <tr key={b.id} onClick={() => router.push(`/bookings/${b.id}`)}>
-                    <td>
-                      <div style={{ fontWeight: 500, color: "var(--t1)" }}>{b.guest}</div>
-                      <div style={{ fontSize: 10, color: "var(--t3)" }}>{b.id}</div>
-                    </td>
-                    <td>{b.checkin}</td>
-                    <td style={{ fontWeight: 600 }}>{fmt(b.total)}</td>
-                    <td><StatusBadge status={b.status} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
 
-          <div className="sec-div" style={{ marginTop: 16 }}>Rooms Needing Allocation</div>
-          <div>
-            {unalloc.length === 0 ? (
-              <div style={{ fontSize: 12, color: "var(--grn)", padding: "8px 0" }}>
-                All confirmed bookings allocated ✓
-              </div>
-            ) : (
-              unalloc.map((b) => (
-                <div
-                  key={b.id}
-                  className="card"
-                  style={{
-                    marginBottom: 8,
-                    cursor: "pointer",
-                    borderColor: "var(--amb-bg)",
-                    background: "var(--amb-lt)",
-                  }}
-                  onClick={() => router.push("/room-chart")}
+      {/* ───────── Room Status ───────── */}
+      <div className="tbl-wrap">
+        <div className="tbl-hd">
+          <h3>Room Status</h3>
+          <div className="tbl-hd-r">
+            <div className="filter-bar" style={{ marginBottom: 0 }}>
+              {([
+                { id: "today", label: "Today" },
+                { id: "week", label: "This Week" },
+              ] as { id: RoomFilter; label: string }[]).map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  className={`filter-btn${roomFilter === f.id ? " on" : ""}`}
+                  onClick={() => setRoomFilter(f.id)}
                 >
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 600 }}>{b.guest}</div>
-                      <div style={{ fontSize: 11, color: "var(--t3)" }}>
-                        {b.checkin} · {b.rooms.map((r) => r.name).join(", ")}
-                      </div>
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Room Category</th>
+              {roomDates.map((d) => {
+                const dt = new Date(d);
+                const wk = dt.toLocaleDateString("en-IN", { weekday: "short" });
+                const dm = dt.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+                return (
+                  <th key={d} style={{ textAlign: "center" }}>
+                    <div>{wk}</div>
+                    <div style={{ fontSize: 9, color: "var(--t4)", fontWeight: 500, marginTop: 2 }}>{dm}</div>
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {roomStatus.map((row) => (
+              <tr key={row.name} style={{ cursor: "default" }}>
+                <td>
+                  <div style={{ fontWeight: 500, color: "var(--t1)" }}>{row.name}</div>
+                  <div style={{ fontSize: 10, color: "var(--t3)" }}>{row.total} total</div>
+                </td>
+                {row.cells.map((c) => (
+                  <td key={c.date} style={{ textAlign: "center" }}>
+                    <div className="rs-cell" title={`Booked / Tentative / Available`}>
+                      <span className="rs-b">{c.booked}</span>
+                      <span className="rs-sep">/</span>
+                      <span className="rs-t">{c.tentative}</span>
+                      <span className="rs-sep">/</span>
+                      <span className="rs-a">{c.available}</span>
                     </div>
-                    <span className="badge bd-pending">Allocate room →</span>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-
-          <div className="sec-div" style={{ marginTop: 16 }}>Lost Enquiry Reasons</div>
-          <div className="card">
-            {lostReasons.length === 0 ? (
-              <div style={{ fontSize: 12, color: "var(--t3)", textAlign: "center", padding: "16px 0" }}>
-                No lost enquiries yet
-              </div>
-            ) : (
-              lostReasons.map(([reason, count]) => (
-                <div key={reason} className="lost-bar">
-                  <div className="lost-bar-label">{reason}</div>
-                  <div className="lost-bar-track">
-                    <div className="lost-bar-fill" style={{ width: `${Math.round((count / maxR) * 100)}%` }} />
-                  </div>
-                  <div className="lost-bar-count">{count}</div>
-                </div>
-              ))
-            )}
-          </div>
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div
+          style={{
+            padding: "10px 16px",
+            borderTop: "1px solid var(--bd)",
+            background: "var(--surf2)",
+            fontSize: 11,
+            color: "var(--t3)",
+            display: "flex",
+            gap: 18,
+          }}
+        >
+          <span>
+            <strong style={{ color: "var(--amb)" }}>Booked</strong> / <strong style={{ color: "var(--t3)" }}>Tentative</strong> / <strong style={{ color: "var(--grn)" }}>Available</strong>
+          </span>
         </div>
       </div>
     </div>

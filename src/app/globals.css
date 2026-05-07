@@ -130,6 +130,16 @@ button { cursor: pointer; }
 .sb-urole { font-size: 10px; color: rgba(255, 255, 255, .4); }
 .sb-logout { margin-left: auto; font-size: 11px; color: rgba(255, 255, 255, .3); cursor: pointer; padding: 4px 8px; border-radius: 4px; transition: all .15s; background: transparent; border: none; }
 .sb-logout:hover { color: rgba(255, 255, 255, .7); background: rgba(255, 255, 255, .07); }
+.sb-logout-btn { width: 100%; padding: 10px; background: rgba(255, 255, 255, .06); border: 1px solid rgba(255, 255, 255, .08); color: rgba(255, 255, 255, .85); border-radius: var(--r2); font-size: 13px; font-weight: 500; cursor: pointer; transition: all .15s; font-family: var(--font-dm-sans), 'DM Sans', sans-serif; display: flex; align-items: center; justify-content: center; gap: 8px; }
+.sb-logout-btn:hover { background: rgba(255, 255, 255, .1); color: #fff; }
+
+.nav-arrow { display: inline-block; margin-left: auto; font-size: 10px; opacity: .5; transition: transform .15s; }
+.nav-arrow.open { transform: rotate(90deg); }
+.nav-children { padding: 2px 0 4px 0; }
+.nav-it.child { padding-left: 32px; font-size: 12px; }
+.nav-it.soon { cursor: not-allowed; opacity: .45; }
+.nav-it.soon:hover { background: transparent; color: rgba(255, 255, 255, .5); }
+.nav-soon { margin-left: auto; background: rgba(255, 255, 255, .08); color: rgba(255, 255, 255, .55); font-size: 9px; font-weight: 600; padding: 2px 7px; border-radius: 20px; letter-spacing: .3px; text-transform: uppercase; font-family: var(--font-outfit), 'Outfit', sans-serif; }
 
 /* TOPBAR */
 #topbar { height: var(--top); background: var(--surf); border-bottom: 1px solid var(--bd); display: flex; align-items: center; padding: 0 24px; gap: 12px; flex-shrink: 0; }
@@ -341,6 +351,13 @@ input[type=range] { width: 100%; accent-color: var(--acc); height: 4px; cursor: 
 .rc-cell-booked:hover { opacity: .8; }
 .rc-cell-booked.status-completed { background: var(--grn-bg); color: var(--grn); }
 .rc-table tr:last-child td { border-bottom: none; }
+
+/* ROOM STATUS DASHBOARD CELL */
+.rs-cell { display: flex; gap: 4px; justify-content: center; align-items: center; font-size: 11px; font-weight: 600; }
+.rs-cell .rs-b { color: var(--amb); }
+.rs-cell .rs-t { color: var(--t3); }
+.rs-cell .rs-a { color: var(--grn); }
+.rs-cell .rs-sep { color: var(--bd2); font-weight: 400; }
 
 /* UNALLOC BANNER */
 .unalloc-banner { background: var(--amb-lt); border: 1px solid var(--amb-bg); border-radius: var(--r); padding: 14px 18px; margin-bottom: 14px; display: flex; align-items: center; gap: 12px; }

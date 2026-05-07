@@ -59,6 +59,31 @@ export function nowTime(): string {
   return new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
 }
 
+export function weekRange(dateStr: string = todayStr()): { start: string; end: string } {
+  const d = new Date(dateStr);
+  const day = d.getDay(); // 0=Sun ... 6=Sat
+  const diffToMon = day === 0 ? -6 : 1 - day;
+  const start = new Date(d);
+  start.setDate(d.getDate() + diffToMon);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  return {
+    start: start.toISOString().split("T")[0],
+    end: end.toISOString().split("T")[0],
+  };
+}
+
+export function sevenDaysFrom(dateStr: string): string[] {
+  const out: string[] = [];
+  const d = new Date(dateStr);
+  for (let i = 0; i < 7; i++) {
+    const next = new Date(d);
+    next.setDate(d.getDate() + i);
+    out.push(next.toISOString().split("T")[0]);
+  }
+  return out;
+}
+
 export function formatLongDate(d: Date = new Date()): string {
   return d.toLocaleDateString("en-IN", {
     weekday: "long",
