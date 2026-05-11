@@ -8,7 +8,6 @@ import { Topbar } from "@/components/Topbar";
 import { LostModal } from "@/components/modals/LostModal";
 import { PaymentModal } from "@/components/modals/PaymentModal";
 import { CompleteModal } from "@/components/modals/CompleteModal";
-import { QuoteModal } from "@/components/modals/QuoteModal";
 import { CrmNoteModal } from "@/components/modals/CrmNoteModal";
 
 export default function DashboardLayout({
@@ -35,7 +34,6 @@ export default function DashboardLayout({
       <LostModal />
       <PaymentModal />
       <CompleteModal />
-      <QuoteModal />
       <CrmNoteModal />
     </div>
   );

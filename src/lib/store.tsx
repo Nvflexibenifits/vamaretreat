@@ -19,23 +19,19 @@ import type {
 import { SEED_BOOKINGS } from "@/lib/data";
 import { addDays, nowTime, todayStr } from "@/lib/utils";
 
-type ModalKind =
-  | "lost"
-  | "payment"
-  | "complete"
-  | "quote"
-  | "crm-note"
-  | null;
+const STORAGE_KEY = "vama:state:v1";
 
-type QuotePayload =
-  | { kind: "preview"; booking: Booking }
-  | { kind: "saved"; bookingId: string };
+type ModalKind = "lost" | "payment" | "complete" | "crm-note" | null;
 
 type ModalState = {
   kind: ModalKind;
   bookingId?: string | null;
-  quote?: QuotePayload;
   crmKey?: { mobile: string; name: string };
+};
+
+type PersistedState = {
+  bookings: Booking[];
+  guestNotes: Record<string, string>;
 };
 
 type AppContextValue = {
@@ -47,10 +43,12 @@ type AppContextValue = {
   logout: () => void;
   // bookings
   bookings: Booking[];
+  hydrated: boolean;
   revenueEntries: RevenueEntry[];
   guestNotes: Record<string, string>;
   setGuestNote: (mobile: string, note: string) => void;
   createBooking: (b: Booking) => void;
+  updateBooking: (bookingId: string, patch: Partial<Booking>) => void;
   markLost: (bookingId: string, reason: string, notes: string) => void;
   recordPayment: (
     bookingId: string,
@@ -63,10 +61,7 @@ type AppContextValue = {
     extras: Extra[],
     extraNights: number
   ) => void;
-  allocateRoom: (bookingId: string, roomId: string) => void;
-  // room chart selection
-  selectedBookingForAlloc: string | null;
-  setSelectedBookingForAlloc: (id: string | null) => void;
+  setAllocatedRooms: (bookingId: string, rooms: string[]) => void;
   // notification
   notif: { msg: string; kind: NotifKind } | null;
   showNotif: (msg: string, kind?: NotifKind) => void;
@@ -85,17 +80,62 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const [bookings, setBookings] = useState<Booking[]>(SEED_BOOKINGS);
   const [guestNotes, setGuestNotes] = useState<Record<string, string>>({});
+  const [hydrated, setHydrated] = useState(false);
 
-  const [selectedBookingForAlloc, setSelectedBookingForAlloc] = useState<
-    string | null
-  >(null);
-
-  const [notif, setNotif] = useState<{ msg: string; kind: NotifKind } | null>(
-    null
-  );
+  const [notif, setNotif] = useState<{ msg: string; kind: NotifKind } | null>(null);
   const [modal, setModal] = useState<ModalState>({ kind: null });
 
-  // notification auto-dismiss
+  // Hydrate from localStorage on mount
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<PersistedState>;
+        if (Array.isArray(parsed.bookings) && parsed.bookings.length > 0) {
+          setBookings(parsed.bookings as Booking[]);
+        }
+        if (parsed.guestNotes && typeof parsed.guestNotes === "object") {
+          setGuestNotes(parsed.guestNotes);
+        }
+      }
+    } catch {
+      // corrupt state, ignore and stay on seed
+    }
+    setHydrated(true);
+  }, []);
+
+  // Persist on change
+  useEffect(() => {
+    if (!hydrated || typeof window === "undefined") return;
+    try {
+      const payload: PersistedState = { bookings, guestNotes };
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    } catch {
+      // quota / serialization, swallow
+    }
+  }, [hydrated, bookings, guestNotes]);
+
+  // Sync from other tabs
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = (e: StorageEvent) => {
+      if (e.key !== STORAGE_KEY || !e.newValue) return;
+      try {
+        const parsed = JSON.parse(e.newValue) as Partial<PersistedState>;
+        if (Array.isArray(parsed.bookings)) setBookings(parsed.bookings as Booking[]);
+        if (parsed.guestNotes && typeof parsed.guestNotes === "object") {
+          setGuestNotes(parsed.guestNotes);
+        }
+      } catch {
+        // ignore
+      }
+    };
+    window.addEventListener("storage", handler);
+    return () => window.removeEventListener("storage", handler);
+  }, []);
+
+  // Notification auto-dismiss
   useEffect(() => {
     if (!notif) return;
     const t = setTimeout(() => setNotif(null), 3000);
@@ -127,12 +167,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setBookings((prev) => [b, ...prev]);
   }, []);
 
+  const updateBooking = useCallback((bookingId: string, patch: Partial<Booking>) => {
+    setBookings((prev) =>
+      prev.map((b) => (b.id === bookingId ? { ...b, ...patch } : b))
+    );
+  }, []);
+
   const markLost = useCallback(
     (bookingId: string, reason: string, notes: string) => {
       setBookings((prev) =>
         prev.map((b) =>
           b.id === bookingId
-            ? { ...b, status: "Lost", lostReason: reason, lostNotes: notes }
+            ? {
+                ...b,
+                status: "Lost",
+                lostReason: reason,
+                lostNotes: notes,
+                allocatedRooms: [],
+              }
             : b
         )
       );
@@ -146,7 +198,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         prev.map((b) => {
           if (b.id !== bookingId) return b;
           const newAdvance = b.advance + amount;
-          const newBalance = Math.max(0, b.total - newAdvance);
+          const newBalance = Math.max(0, b.grandTotal - newAdvance);
           const payments = [
             ...b.payments,
             {
@@ -163,7 +215,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
             advance: newAdvance,
             balance: newBalance,
             payments,
-            status: b.status === "Draft" ? "Confirmed" : b.status,
+            status:
+              b.status === "Enquiry" || b.status === "Tentative"
+                ? "Confirmed"
+                : b.status,
           };
         })
       );
@@ -176,7 +231,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setBookings((prev) =>
         prev.map((b) => {
           if (b.id !== bookingId) return b;
-          let total = b.total;
+          let grandTotal = b.grandTotal;
           let balance = b.balance;
           let nights = b.nights;
           let checkout = b.checkout;
@@ -184,13 +239,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
           extras.forEach((e) => {
             if (e.name && e.amount > 0) {
               newExtras.push(e);
-              total += e.amount;
+              grandTotal += e.amount;
               balance = Math.max(0, balance + e.amount);
             }
           });
-          if (extraNights > 0) {
-            const perNight = b.roomTotal / b.nights;
-            total += perNight * extraNights;
+          if (extraNights > 0 && b.nights > 0) {
+            const perNight = b.totalRoomCharges / b.nights;
+            grandTotal += perNight * extraNights;
             balance = Math.max(0, balance + perNight * extraNights);
             nights += extraNights;
             checkout = addDays(checkout, extraNights);
@@ -198,7 +253,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           return {
             ...b,
             extras: newExtras,
-            total,
+            grandTotal,
             balance,
             nights,
             checkout,
@@ -210,31 +265,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     []
   );
 
-  const allocateRoom = useCallback(
-    (bookingId: string, roomId: string) => {
-      setBookings((prev) =>
-        prev.map((b) => {
-          if (b.id !== bookingId) return b;
-          return {
-            ...b,
-            allocatedRoom: roomId,
-            payments: [
-              ...b.payments,
-              {
-                date: todayStr(),
-                time: nowTime(),
-                type: "Room Allocated: " + roomId,
-                amount: 0,
-                mode: "—",
-                by: currentUser,
-              },
-            ],
-          };
-        })
-      );
-    },
-    [currentUser]
-  );
+  const setAllocatedRooms = useCallback((bookingId: string, rooms: string[]) => {
+    setBookings((prev) =>
+      prev.map((b) => (b.id === bookingId ? { ...b, allocatedRooms: rooms } : b))
+    );
+  }, []);
 
   const revenueEntries = useMemo<RevenueEntry[]>(() => {
     const entries: RevenueEntry[] = [];
@@ -244,12 +279,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
       b.extras.forEach((e) => {
         entries.push({
-          date: b.checkout || todayStr(),
+          date: e.date || b.checkout || todayStr(),
           time: "—",
           type: "Extra: " + e.name,
           amount: e.amount,
           mode: "Cash",
-          by: b.rex || currentUser,
+          by: e.by || b.rex || currentUser,
           bookingId: b.id,
           guest: b.guest,
         });
@@ -267,16 +302,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       login,
       logout,
       bookings,
+      hydrated,
       revenueEntries,
       guestNotes,
       setGuestNote,
       createBooking,
+      updateBooking,
       markLost,
       recordPayment,
       completeBooking,
-      allocateRoom,
-      selectedBookingForAlloc,
-      setSelectedBookingForAlloc,
+      setAllocatedRooms,
       notif,
       showNotif,
       modal,
@@ -290,15 +325,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       login,
       logout,
       bookings,
+      hydrated,
       revenueEntries,
       guestNotes,
       setGuestNote,
       createBooking,
+      updateBooking,
       markLost,
       recordPayment,
       completeBooking,
-      allocateRoom,
-      selectedBookingForAlloc,
+      setAllocatedRooms,
       notif,
       showNotif,
       modal,

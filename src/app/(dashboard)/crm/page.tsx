@@ -29,7 +29,7 @@ export default function CrmPage() {
           name: b.guest,
           mobile: b.mobile,
           stays: map[key].stays + 1,
-          spent: map[key].spent + b.total,
+          spent: map[key].spent + b.grandTotal,
           last: b.checkin > map[key].last ? b.checkin : map[key].last,
         };
       });

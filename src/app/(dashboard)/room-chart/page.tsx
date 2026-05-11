@@ -9,13 +9,7 @@ import type { Booking } from "@/types";
 
 export default function RoomChartPage() {
   const router = useRouter();
-  const {
-    bookings,
-    selectedBookingForAlloc,
-    setSelectedBookingForAlloc,
-    allocateRoom,
-    showNotif,
-  } = useApp();
+  const { bookings } = useApp();
 
   const [offset, setOffset] = useState(0);
   const [today, setToday] = useState("");
@@ -40,42 +34,39 @@ export default function RoomChartPage() {
   const bookingMap = useMemo(() => {
     const map: Record<string, Booking> = {};
     bookings
-      .filter((b) => b.allocatedRoom && (b.status === "Confirmed" || b.status === "Completed"))
+      .filter(
+        (b) =>
+          b.allocatedRooms.length > 0 &&
+          (b.status === "Tentative" ||
+            b.status === "Confirmed" ||
+            b.status === "Completed")
+      )
       .forEach((b) => {
         const cur = new Date(b.checkin);
         const end = new Date(b.checkout);
         while (cur < end) {
           const ds = cur.toISOString().split("T")[0];
-          map[b.allocatedRoom + "|" + ds] = b;
+          b.allocatedRooms.forEach((roomId) => {
+            map[roomId + "|" + ds] = b;
+          });
           cur.setDate(cur.getDate() + 1);
         }
       });
     return map;
   }, [bookings]);
 
-  const unalloc = bookings.filter((b) => b.status === "Confirmed" && !b.allocatedRoom);
-
-  const onSelectAlloc = (id: string) => {
-    const next = selectedBookingForAlloc === id ? null : id;
-    setSelectedBookingForAlloc(next);
-    if (next) showNotif("Now click an available cell in the chart to assign a room", "success");
-  };
-
-  const onAllocate = (roomId: string) => {
-    if (!selectedBookingForAlloc) return;
-    const b = bookings.find((x) => x.id === selectedBookingForAlloc);
-    if (!b) return;
-    allocateRoom(b.id, roomId);
-    setSelectedBookingForAlloc(null);
-    showNotif(`Room ${roomId} allocated to ${b.guest} ✓`, "success");
-  };
+  const unalloc = bookings.filter(
+    (b) =>
+      (b.status === "Confirmed" || b.status === "Tentative") &&
+      b.allocatedRooms.length === 0
+  );
 
   return (
     <div className="view">
       <div className="pg-hd">
         <div>
           <h2>Room Chart</h2>
-          <p>14-day availability view — click a confirmed booking to allocate a room</p>
+          <p>14-day availability view</p>
         </div>
         <div className="pg-hd-actions">
           <button className="btn btn-ghost btn-sm" onClick={() => setOffset((o) => o - 7)}>◀ Previous</button>
@@ -89,19 +80,16 @@ export default function RoomChartPage() {
             <div style={{ fontSize: 13, fontWeight: 600, color: "var(--amb)" }}>
               📌 {unalloc.length} booking{unalloc.length > 1 ? "s" : ""} awaiting room allocation
             </div>
-            <div style={{ fontSize: 12, color: "var(--t2)", marginTop: 4 }}>
-              Click a booking card, then click an available cell in the chart below to allocate.
-            </div>
             <div className="unalloc-banner-cards">
               {unalloc.map((b) => (
                 <div
                   key={b.id}
-                  className={`unalloc-card${selectedBookingForAlloc === b.id ? " selected" : ""}`}
-                  onClick={() => onSelectAlloc(b.id)}
+                  className="unalloc-card"
+                  onClick={() => router.push(`/bookings/${b.id}`)}
                 >
                   <div className="unalloc-card-name">{b.guest}</div>
                   <div className="unalloc-card-meta">
-                    {b.checkin} · {b.rooms.map((r) => r.name).join(", ")}
+                    {b.checkin} · {b.pricingRows.map((r) => r.roomName).filter(Boolean).join(", ")}
                   </div>
                 </div>
               ))}
@@ -117,6 +105,10 @@ export default function RoomChartPage() {
             className="rc-legend"
             style={{ marginLeft: "auto", padding: 0, border: "none", background: "transparent", gap: 12 }}
           >
+            <div className="rc-legend-item">
+              <div className="rc-legend-dot" style={{ background: "var(--blu-bg)", border: "1px solid var(--blu)" }}></div>
+              Tentative
+            </div>
             <div className="rc-legend-item">
               <div className="rc-legend-dot" style={{ background: "var(--amb-bg)", border: "1px solid var(--amb)" }}></div>
               Confirmed
@@ -163,8 +155,9 @@ export default function RoomChartPage() {
                     const isToday = d === today;
                     const booking = bookingMap[room.id + "|" + d];
                     if (booking) {
-                      const cls =
-                        "rc-cell-booked" + (booking.status === "Completed" ? " status-completed" : "");
+                      let cls = "rc-cell-booked";
+                      if (booking.status === "Completed") cls += " status-completed";
+                      else if (booking.status === "Tentative") cls += " status-tentative";
                       return (
                         <td key={d} className={isToday ? "rc-today" : ""} style={{ padding: 4 }}>
                           <div
@@ -177,18 +170,7 @@ export default function RoomChartPage() {
                         </td>
                       );
                     }
-                    return (
-                      <td
-                        key={d}
-                        className={isToday ? "rc-today" : ""}
-                        onClick={selectedBookingForAlloc ? () => onAllocate(room.id) : undefined}
-                        style={
-                          selectedBookingForAlloc
-                            ? { cursor: "pointer", background: "var(--grn-lt)" }
-                            : undefined
-                        }
-                      ></td>
-                    );
+                    return <td key={d} className={isToday ? "rc-today" : ""}></td>;
                   })}
                 </tr>
               ))}

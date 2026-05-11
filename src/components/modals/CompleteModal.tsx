@@ -2,12 +2,13 @@
 
 import { useState } from "react";
 import { useApp } from "@/lib/store";
+import { todayStr } from "@/lib/utils";
 import type { Extra } from "@/types";
 
 type ExtraRow = { id: number; name: string; amount: string };
 
 export function CompleteModal() {
-  const { modal, closeModal, completeBooking, showNotif, bookings } = useApp();
+  const { modal, closeModal, completeBooking, showNotif, bookings, currentUser } = useApp();
   const [rows, setRows] = useState<ExtraRow[]>([]);
   const [extraNights, setExtraNights] = useState("0");
   const [counter, setCounter] = useState(0);
@@ -28,7 +29,12 @@ export function CompleteModal() {
 
   const onConfirm = () => {
     const extras: Extra[] = rows
-      .map((r) => ({ name: r.name.trim(), amount: parseInt(r.amount) || 0 }))
+      .map((r) => ({
+        name: r.name.trim(),
+        amount: parseInt(r.amount) || 0,
+        date: todayStr(),
+        by: currentUser,
+      }))
       .filter((e) => e.name && e.amount > 0);
     const en = parseInt(extraNights) || 0;
     completeBooking(modal.bookingId!, extras, en);

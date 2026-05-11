@@ -75,12 +75,16 @@ export default function DashboardPage() {
         let tentative = 0;
         bookings.forEach((b) => {
           if (b.checkin <= d && d < b.checkout) {
-            const qty = b.rooms
-              .filter((r) => cat.cats.includes(r.id))
-              .reduce((s, r) => s + r.qty, 0);
+            const qtyByCat = new Map<string, number>();
+            b.pricingRows.forEach((r) => {
+              if (!cat.cats.includes(r.roomId)) return;
+              const prev = qtyByCat.get(r.roomId) || 0;
+              qtyByCat.set(r.roomId, Math.max(prev, r.numRooms));
+            });
+            const qty = Array.from(qtyByCat.values()).reduce((s, n) => s + n, 0);
             if (qty <= 0) return;
             if (b.status === "Confirmed" || b.status === "Completed") booked += qty;
-            else if (b.status === "Draft") tentative += qty;
+            else if (b.status === "Tentative") tentative += qty;
           }
         });
         const available = Math.max(0, cat.total - booked - tentative);

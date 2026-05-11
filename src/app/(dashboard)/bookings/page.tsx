@@ -8,7 +8,15 @@ import { fmt } from "@/lib/utils";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { BookingStatus } from "@/types";
 
-const FILTERS: ("All" | BookingStatus)[] = ["All", "Draft", "Confirmed", "Completed", "Lost"];
+const FILTERS: ("All" | BookingStatus)[] = [
+  "All",
+  "Enquiry",
+  "Tentative",
+  "Confirmed",
+  "Completed",
+  "Lost",
+  "Cancelled",
+];
 
 export default function BookingsPage() {
   const { bookings } = useApp();
@@ -97,12 +105,13 @@ export default function BookingsPage() {
               <th>Balance</th>
               <th>Status</th>
               <th>REX</th>
+              <th style={{ textAlign: "right" }}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {data.length === 0 ? (
               <tr>
-                <td colSpan={10}>
+                <td colSpan={11}>
                   <div className="empty-state">
                     <div className="empty-icon">📭</div>
                     <h3>No bookings found</h3>
@@ -128,9 +137,18 @@ export default function BookingsPage() {
                   <td>{b.checkin}</td>
                   <td>{b.nights}</td>
                   <td style={{ fontSize: 12 }}>
-                    {b.rooms.map((r) => r.name + (r.qty > 1 ? " ×" + r.qty : "")).join(", ")}
+                    {(() => {
+                      const m = new Map<string, number>();
+                      b.pricingRows.forEach((r) => {
+                        const prev = m.get(r.roomName) || 0;
+                        m.set(r.roomName, Math.max(prev, r.numRooms));
+                      });
+                      return Array.from(m.entries())
+                        .map(([name, qty]) => name + (qty > 1 ? " ×" + qty : ""))
+                        .join(", ") || "—";
+                    })()}
                   </td>
-                  <td style={{ fontWeight: 600 }}>{fmt(b.total)}</td>
+                  <td style={{ fontWeight: 600 }}>{fmt(b.grandTotal)}</td>
                   <td
                     style={{
                       fontWeight: 500,
@@ -143,6 +161,28 @@ export default function BookingsPage() {
                     <StatusBadge status={b.status} />
                   </td>
                   <td style={{ fontSize: 11, color: "var(--t3)" }}>{b.rex}</td>
+                  <td
+                    style={{ textAlign: "right", whiteSpace: "nowrap" }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Link
+                      href={`/bookings/${b.id}`}
+                      className="btn btn-ghost btn-xs"
+                      style={{ marginRight: 6 }}
+                    >
+                      View
+                    </Link>
+                    {b.status !== "Completed" &&
+                      b.status !== "Lost" &&
+                      b.status !== "Cancelled" && (
+                        <Link
+                          href={`/bookings/${b.id}/edit`}
+                          className="btn btn-ghost btn-xs"
+                        >
+                          Edit
+                        </Link>
+                      )}
+                  </td>
                 </tr>
               ))
             )}

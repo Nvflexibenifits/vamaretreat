@@ -182,6 +182,7 @@ button { cursor: pointer; }
 .bd-lost { background: var(--red-bg); color: var(--red); }
 .bd-active { background: var(--blu-bg); color: var(--blu); }
 .bd-pending { background: var(--amb-bg); color: var(--amb); }
+.bd-cancelled { background: #5a1818; color: #fff; }
 
 /* STATS */
 .stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
@@ -350,6 +351,7 @@ input[type=range] { width: 100%; accent-color: var(--acc); height: 4px; cursor: 
 .rc-cell-booked { background: var(--amb-bg); border-radius: 2px; height: 22px; display: flex; align-items: center; padding: 0 5px; font-size: 9px; font-weight: 600; color: var(--amb); overflow: hidden; white-space: nowrap; cursor: pointer; transition: opacity .1s; }
 .rc-cell-booked:hover { opacity: .8; }
 .rc-cell-booked.status-completed { background: var(--grn-bg); color: var(--grn); }
+.rc-cell-booked.status-tentative { background: var(--blu-bg); color: var(--blu); }
 .rc-table tr:last-child td { border-bottom: none; }
 
 /* ROOM STATUS DASHBOARD CELL */

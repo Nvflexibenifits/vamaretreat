@@ -11,25 +11,45 @@ export default function BookingDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const id = params?.id;
-  const { bookings, openModal } = useApp();
+  const { bookings, openModal, hydrated } = useApp();
   const b = bookings.find((x) => x.id === id);
 
   useEffect(() => {
-    if (id && !b) {
-      // booking not found — go back
-      router.replace("/bookings");
-    }
-  }, [b, id, router]);
+    if (!hydrated) return;
+    if (id && !b) router.replace("/bookings");
+  }, [b, id, router, hydrated]);
 
   if (!b) return null;
 
-  const canConfirm = b.status === "Draft";
-  const canLost = b.status === "Draft" || b.status === "Confirmed";
+  const canConfirm = b.status === "Enquiry" || b.status === "Tentative";
+  const canLost =
+    b.status === "Enquiry" || b.status === "Tentative" || b.status === "Confirmed";
   const canPay = b.status === "Confirmed" && b.balance > 0;
   const canComplete = b.status === "Confirmed";
+  const canEdit =
+    b.status === "Enquiry" || b.status === "Tentative" || b.status === "Confirmed";
 
   const totalCollected =
     b.payments.reduce((s, p) => s + p.amount, 0) + b.extras.reduce((s, e) => s + e.amount, 0);
+
+  const totalKids = b.kidsAbove10 + b.kids6to10 + b.kids2to6;
+  const totalRoomBaseCharges = b.pricingRows.reduce((s, r) => s + r.roomCharges, 0);
+  const totalDiscount = b.pricingRows.reduce((s, r) => s + r.discountAmt, 0);
+  const totalNet = b.pricingRows.reduce((s, r) => s + r.netCharges, 0);
+  const totalRoomGst = b.pricingRows.reduce((s, r) => s + r.gstAmt, 0);
+  const totalMealPet = b.mealTotal + b.mealGst + b.petTotal + b.petGst;
+  const totalGstAll = totalRoomGst + b.mealGst + b.petGst;
+
+  const roomsSummary = (() => {
+    const m = new Map<string, number>();
+    b.pricingRows.forEach((r) => {
+      const prev = m.get(r.roomName) || 0;
+      m.set(r.roomName, Math.max(prev, r.numRooms));
+    });
+    return Array.from(m.entries())
+      .map(([name, qty]) => name + (qty > 1 ? ` ×${qty}` : ""))
+      .join(", ");
+  })();
 
   return (
     <div className="view">
@@ -46,9 +66,9 @@ export default function BookingDetailPage() {
       <div>
         <div className="status-bar">
           <span><StatusBadge status={b.status} /></span>
-          {b.allocatedRoom && (
+          {b.allocatedRooms.length > 0 && (
             <span className="badge" style={{ background: "var(--blu-bg)", color: "var(--blu)" }}>
-              🏡 Room {b.allocatedRoom}
+              🏡 {b.allocatedRooms.join(", ")}
             </span>
           )}
           {b.status === "Lost" && b.lostReason && (
@@ -87,12 +107,19 @@ export default function BookingDetailPage() {
                 ✕ Mark Lost
               </button>
             )}
-            <button
+            {canEdit && (
+              <Link href={`/bookings/${b.id}/edit`} className="btn btn-ghost btn-sm">
+                ✎ Edit
+              </Link>
+            )}
+            <a
               className="btn btn-ghost btn-sm"
-              onClick={() => openModal({ kind: "quote", quote: { kind: "saved", bookingId: b.id } })}
+              href={`/bookings/${b.id}/confirmation`}
+              target="_blank"
+              rel="noreferrer"
             >
-              📄 Quote
-            </button>
+              📄 View Pricing Sheet
+            </a>
           </div>
         </div>
 
@@ -110,8 +137,16 @@ export default function BookingDetailPage() {
                 <div className="detail-row"><span className="detail-key">Check-in</span><span className="detail-val">{b.checkin}</span></div>
                 <div className="detail-row"><span className="detail-key">Check-out</span><span className="detail-val">{b.checkout}</span></div>
                 <div className="detail-row"><span className="detail-key">Nights</span><span className="detail-val">{b.nights}</span></div>
-                <div className="detail-row"><span className="detail-key">Guests</span><span className="detail-val">{b.adults} Adults{b.kids > 0 ? `, ${b.kids} Kids` : ""}</span></div>
-                <div className="detail-row"><span className="detail-key">Rooms</span><span className="detail-val">{b.rooms.map((r) => r.name + (r.qty > 1 ? " ×" + r.qty : "")).join(", ")}</span></div>
+                <div className="detail-row">
+                  <span className="detail-key">Guests</span>
+                  <span className="detail-val">
+                    {b.adults} Adults
+                    {totalKids > 0 ? `, ${totalKids} Kids` : ""}
+                    {b.seniors > 0 ? `, ${b.seniors} Seniors` : ""}
+                    {b.pets > 0 ? `, ${b.pets} Pets` : ""}
+                  </span>
+                </div>
+                <div className="detail-row"><span className="detail-key">Rooms</span><span className="detail-val">{roomsSummary || "—"}</span></div>
                 <div className="detail-row"><span className="detail-key">Meal Package</span><span className="detail-val">{b.mealOn ? "Included" : "Not included"}</span></div>
                 <div className="detail-row"><span className="detail-key">Notes</span><span className="detail-val" style={{ color: "var(--t2)" }}>{b.notes || "—"}</span></div>
                 <div className="detail-row"><span className="detail-key">Booking by</span><span className="detail-val">{b.rex}</span></div>
@@ -121,21 +156,24 @@ export default function BookingDetailPage() {
             <div className="detail-panel">
               <div className="detail-panel-hd"><h3>Price Breakdown</h3></div>
               <div className="detail-panel-body">
-                <div className="detail-row"><span className="detail-key">Room Charges</span><span className="detail-val">{fmt(b.roomTotal)}</span></div>
-                {b.discAmt > 0 && (
-                  <div className="detail-row"><span className="detail-key">Discount ({b.discPct}%)</span><span className="detail-val" style={{ color: "var(--amb)" }}>− {fmt(b.discAmt)}</span></div>
+                <div className="detail-row"><span className="detail-key">Room Charges</span><span className="detail-val">{fmt(totalRoomBaseCharges)}</span></div>
+                {totalDiscount > 0 && (
+                  <div className="detail-row"><span className="detail-key">Discount</span><span className="detail-val" style={{ color: "var(--amb)" }}>− {fmt(totalDiscount)}</span></div>
                 )}
-                <div className="detail-row"><span className="detail-key">Net Room Charges</span><span className="detail-val">{fmt(b.netRoom)}</span></div>
+                <div className="detail-row"><span className="detail-key">Net Room Charges</span><span className="detail-val">{fmt(totalNet)}</span></div>
                 {b.mealTotal > 0 && (
                   <div className="detail-row"><span className="detail-key">Meal Package</span><span className="detail-val">{fmt(b.mealTotal)}</span></div>
                 )}
-                <div className="detail-row"><span className="detail-key">GST</span><span className="detail-val">{fmt(b.gstRoom + (b.mealGst || 0))}</span></div>
+                {b.petTotal > 0 && (
+                  <div className="detail-row"><span className="detail-key">Pet Package</span><span className="detail-val">{fmt(b.petTotal)}</span></div>
+                )}
+                <div className="detail-row"><span className="detail-key">GST</span><span className="detail-val">{fmt(totalGstAll)}</span></div>
                 {b.extras.length > 0 && (
                   <div className="detail-row"><span className="detail-key">Extras</span><span className="detail-val">{fmt(b.extras.reduce((s, e) => s + e.amount, 0))}</span></div>
                 )}
                 <div className="detail-row" style={{ background: "var(--surf2)" }}>
                   <span className="detail-key" style={{ fontWeight: 700, color: "var(--t1)" }}>Total Payable</span>
-                  <span className="detail-val" style={{ fontFamily: "var(--font-outfit), Outfit, sans-serif", fontSize: 16, fontWeight: 800 }}>{fmt(b.total)}</span>
+                  <span className="detail-val" style={{ fontFamily: "var(--font-outfit), Outfit, sans-serif", fontSize: 16, fontWeight: 800 }}>{fmt(b.grandTotal)}</span>
                 </div>
                 <div className="detail-row"><span className="detail-key">Advance Paid</span><span className="detail-val" style={{ color: "var(--grn)" }}>{fmt(b.advance)}</span></div>
                 <div
@@ -169,17 +207,17 @@ export default function BookingDetailPage() {
               {b.extras.map((e, i) => (
                 <div key={`e-${i}`} className="trail-item">
                   <div className="t-dot t-amb"></div>
-                  <div className="t-time">{b.checkout}</div>
+                  <div className="t-time">{e.date || b.checkout}</div>
                   <div className="t-lbl"><strong>Extra: {e.name}</strong></div>
                   <div className="t-amt">{fmt(e.amount)}</div>
-                  <div className="t-by">{b.rex}</div>
+                  <div className="t-by">{e.by || b.rex}</div>
                 </div>
               ))}
-              {b.allocatedRoom && (
+              {b.allocatedRooms.length > 0 && (
                 <div className="trail-item">
                   <div className="t-dot t-blu"></div>
                   <div className="t-time">—</div>
-                  <div className="t-lbl"><strong>Room Allocated</strong> — {b.allocatedRoom}</div>
+                  <div className="t-lbl"><strong>Room Allocated</strong> — {b.allocatedRooms.join(", ")}</div>
                   <div className="t-by">Rahul</div>
                 </div>
               )}
@@ -197,8 +235,14 @@ export default function BookingDetailPage() {
               </div>
               <div className="trail-total" style={{ borderTop: "1px solid rgba(255,255,255,.04)" }}>
                 <div className="trail-total-lbl">Total Booking Value</div>
-                <div className="trail-total-val">{fmt(b.total)}</div>
+                <div className="trail-total-val">{fmt(b.grandTotal)}</div>
               </div>
+              {totalMealPet > 0 && (
+                <div className="trail-total" style={{ borderTop: "1px solid rgba(255,255,255,.04)" }}>
+                  <div className="trail-total-lbl">Meal &amp; Pet Total</div>
+                  <div className="trail-total-val">{fmt(totalMealPet)}</div>
+                </div>
+              )}
             </div>
           </div>
         </div>
