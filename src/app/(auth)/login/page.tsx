@@ -1,32 +1,30 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/lib/store";
-import type { Role } from "@/types";
-
-const ROLES: { role: Role; name: string; desc: string; user: string }[] = [
-  { role: "Sales REX", name: "Sales REX", desc: "Karthik — Front-line sales", user: "Karthik" },
-  { role: "Sales REX", name: "Sales REX", desc: "Anagha — Front-line sales", user: "Anagha" },
-  { role: "Room Allocator", name: "Room Allocator", desc: "Rahul — Room assignments", user: "Rahul" },
-  { role: "Manager", name: "Manager", desc: "Priya — Operations manager", user: "Priya" },
-  { role: "Admin", name: "Admin / Owner", desc: "Full access", user: "Owner" },
-];
 
 const PASSWORD = "test@123";
 
 export default function LoginPage() {
   const router = useRouter();
-  const { isAuthed, login } = useApp();
+  const { isAuthed, login, users } = useApp();
   const [selected, setSelected] = useState<number | null>(null);
   const [password, setPassword] = useState("");
   const [showPwd, setShowPwd] = useState(false);
   const [error, setError] = useState("");
   const [forgotMsg, setForgotMsg] = useState(false);
 
+  const cards = useMemo(() => users.filter((u) => u.active), [users]);
+
   useEffect(() => {
     if (isAuthed) router.replace("/");
   }, [isAuthed, router]);
+
+  // If the user list shrinks (e.g. admin deleted the selected user), reset.
+  useEffect(() => {
+    if (selected !== null && selected >= cards.length) setSelected(null);
+  }, [selected, cards.length]);
 
   const onSelect = (i: number) => {
     setSelected(i);
@@ -41,8 +39,8 @@ export default function LoginPage() {
       setError("Incorrect password. Please try again.");
       return;
     }
-    const r = ROLES[selected];
-    login(r.role, r.user);
+    const u = cards[selected];
+    login(u.role, u.name);
     router.replace("/");
   };
 
@@ -58,15 +56,15 @@ export default function LoginPage() {
         </div>
         <div className="login-section-label">Select your role to continue</div>
         <div className="role-grid">
-          {ROLES.map((r, i) => (
+          {cards.map((u, i) => (
             <button
-              key={i}
+              key={u.id}
               type="button"
               className={`role-btn${selected === i ? " selected" : ""}`}
               onClick={() => onSelect(i)}
             >
-              <div className="role-btn-name">{r.name}</div>
-              <div className="role-btn-desc">{r.desc}</div>
+              <div className="role-btn-name">{u.role}</div>
+              <div className="role-btn-desc">{u.name}</div>
             </button>
           ))}
         </div>
@@ -117,7 +115,7 @@ export default function LoginPage() {
                 }}
                 aria-label={showPwd ? "Hide password" : "Show password"}
               >
-                {showPwd ? "🙈" : "👁"}
+                {showPwd ? "Hide" : "Show"}
               </button>
             </div>
             {error && (
@@ -167,7 +165,7 @@ export default function LoginPage() {
             cursor: selected === null || !password ? "not-allowed" : "pointer",
           }}
         >
-          Enter Back Office →
+          Enter Back Office
         </button>
         <div className="login-hint">Demo mode — all data is in-memory</div>
       </div>

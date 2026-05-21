@@ -1,15 +1,29 @@
-import type { Booking, PricingRow, RoomInventoryItem, RoomMaster } from "@/types";
+import type {
+  Booking,
+  CreditNoteSettings,
+  DiscountCaps,
+  PackageRates,
+  PricingRow,
+  RoomInventoryItem,
+  RoomMaster,
+  SpecialDay,
+  User,
+  Venue,
+  VenueBlock,
+} from "@/types";
 
 // ─────────── ROOM TYPE MASTER (pricing source of truth) ───────────
+// Single tariff per room. Weekday/weekend discount % is auto-applied on each
+// pricing row based on the row's day type. Sales rep can override per row.
 export const ROOMS: RoomMaster[] = [
-  { id: "TENT", name: "Tent", wd: 3800, wknd: 4500, gst: 5 },
-  { id: "CPL", name: "Couple Room", wd: 6500, wknd: 7500, gst: 5 },
-  { id: "FM", name: "Family Room", wd: 8000, wknd: 9000, gst: 18 },
-  { id: "1BHK", name: "1BHK Villa", wd: 8800, wknd: 9800, gst: 18 },
-  { id: "1BHK-GV", name: "1BHK Garden View", wd: 10500, wknd: 11500, gst: 18 },
-  { id: "2BHK", name: "2BHK Villa", wd: 12000, wknd: 13000, gst: 18 },
-  { id: "2BHK-GV", name: "2BHK Garden View", wd: 13200, wknd: 14200, gst: 18 },
-  { id: "PV", name: "1BHK Pool Villa", wd: 20000, wknd: 25800, gst: 18 },
+  { id: "TENT", name: "Tent", price: 4500, weekdayDiscount: 16, weekendDiscount: 0, gst: 5 },
+  { id: "CPL", name: "Couple Room", price: 7500, weekdayDiscount: 13, weekendDiscount: 0, gst: 5 },
+  { id: "FM", name: "Family Room", price: 9000, weekdayDiscount: 11, weekendDiscount: 0, gst: 18 },
+  { id: "1BHK", name: "1BHK Villa", price: 9800, weekdayDiscount: 10, weekendDiscount: 0, gst: 18 },
+  { id: "1BHK-GV", name: "1BHK Garden View", price: 11500, weekdayDiscount: 9, weekendDiscount: 0, gst: 18 },
+  { id: "2BHK", name: "2BHK Villa", price: 13000, weekdayDiscount: 8, weekendDiscount: 0, gst: 18 },
+  { id: "2BHK-GV", name: "2BHK Garden View", price: 14200, weekdayDiscount: 7, weekendDiscount: 0, gst: 18 },
+  { id: "PV", name: "1BHK Pool Villa", price: 25800, weekdayDiscount: 22, weekendDiscount: 0, gst: 18 },
 ];
 
 // ─────────── PHYSICAL ROOMS (51 total per doc §1) ───────────
@@ -19,11 +33,12 @@ function inventoryFor(prefix: string, type: string, cat: string, count: number):
     label: `${prefix}${i + 1}`,
     type,
     cat,
+    active: true,
   }));
 }
 
-export const ROOM_INVENTORY: RoomInventoryItem[] = [
-  { id: "PV1", label: "PV1", type: "Pool Villa", cat: "PV" },
+export const SEED_ROOM_INVENTORY: RoomInventoryItem[] = [
+  { id: "PV1", label: "PV1", type: "Pool Villa", cat: "PV", active: true },
   ...inventoryFor("V", "1BHK Villa", "1BHK", 12),
   ...inventoryFor("GV", "1BHK Garden View", "1BHK-GV", 8),
   ...inventoryFor("2B", "2BHK Villa", "2BHK", 5),
@@ -32,6 +47,9 @@ export const ROOM_INVENTORY: RoomInventoryItem[] = [
   ...inventoryFor("CPL", "Couple Room", "CPL", 10),
   ...inventoryFor("T", "Tent", "TENT", 6),
 ];
+
+// Backwards-compatible alias so existing imports keep working
+export const ROOM_INVENTORY = SEED_ROOM_INVENTORY;
 
 // ─────────── HELPERS used by seed builder ───────────
 function splitNights(checkin: string, checkout: string): { weekday: number; weekend: number } {
@@ -56,9 +74,12 @@ function mkPricingRow(
   discountPct: number
 ): PricingRow {
   const room = ROOMS.find((r) => r.id === roomId)!;
-  const tariff = rowType === "fri-sat" ? room.wknd : room.wd;
+  const tariff = room.price;
+  const dayDiscount =
+    rowType === "fri-sat" ? room.weekendDiscount : room.weekdayDiscount;
+  const effectiveDisc = Math.max(discountPct, dayDiscount);
   const roomCharges = tariff * nights * numRooms;
-  const discountAmt = roomCharges * (discountPct / 100);
+  const discountAmt = roomCharges * (effectiveDisc / 100);
   const netCharges = roomCharges - discountAmt;
   const gstAmt = netCharges * (room.gst / 100);
   const totalAmt = netCharges + gstAmt;
@@ -70,7 +91,7 @@ function mkPricingRow(
     nights,
     numRooms,
     roomCharges,
-    discountPct,
+    discountPct: effectiveDisc,
     discountAmt,
     netCharges,
     gstRate: room.gst,
@@ -386,22 +407,87 @@ const SEED_SPECS: SeedSpec[] = [
 
 export const SEED_BOOKINGS: Booking[] = SEED_SPECS.map(buildBooking);
 
-// ─────────── Other masters ───────────
-export const USERS = [
-  { name: "Karthik", role: "Sales REX", email: "karthik@vamaretreats.com", color: "#172f24" },
-  { name: "Anagha", role: "Sales REX", email: "anagha@vamaretreats.com", color: "#5b21b6" },
-  { name: "Priya", role: "Manager", email: "priya@vamaretreats.com", color: "#c9873a" },
-  { name: "Rahul", role: "Room Allocator", email: "rahul@vamaretreats.com", color: "#1a4fd6" },
+// ─────────── Users ───────────
+export const SEED_USERS: User[] = [
+  {
+    id: "u-karthik",
+    name: "Karthik",
+    role: "Sales REX",
+    email: "karthik@vamaretreats.com",
+    color: "#172f24",
+    active: true,
+  },
+  {
+    id: "u-anagha",
+    name: "Anagha",
+    role: "Sales REX",
+    email: "anagha@vamaretreats.com",
+    color: "#5b21b6",
+    active: true,
+  },
+  {
+    id: "u-priya",
+    name: "Priya",
+    role: "Manager",
+    email: "priya@vamaretreats.com",
+    color: "#c9873a",
+    active: true,
+  },
+  {
+    id: "u-rahul",
+    name: "Rahul",
+    role: "Room Allocator",
+    email: "rahul@vamaretreats.com",
+    color: "#1a4fd6",
+    active: true,
+  },
+  {
+    id: "u-owner",
+    name: "Owner",
+    role: "Admin",
+    email: "owner@vamaretreats.com",
+    color: "#0f2318",
+    active: true,
+  },
 ];
 
-export const FORM_FIELDS = [
-  { name: "Guest Name", required: true },
-  { name: "Mobile Number", required: true },
-  { name: "Check-in / Check-out Dates", required: true },
-  { name: "Guest Count by Age Group", required: true },
-  { name: "Room Selection", required: true },
-  { name: "Enquiry Source", required: true },
-  { name: "Meal & Activity Package", required: false },
-  { name: "Discount", required: false },
-  { name: "Special Request / Notes", required: false },
+// Backwards-compatible alias for any consumer that still imports USERS
+export const USERS = SEED_USERS;
+
+// ─────────── Discount caps + package rates ───────────
+export const SEED_DISCOUNT_CAPS: DiscountCaps = {
+  salesRex: 20,
+  manager: 25,
+  admin: null,
+};
+
+export const SEED_PACKAGE_RATES: PackageRates = {
+  mealPerAdultPerNight: 2100,
+  petPerPetPerNight: 1200,
+};
+
+// ─────────── Special Days (2026 seed) ───────────
+// Variable-date entries (Diwali, Dussehra, Ugaadi, Good Friday) are approximate;
+// Admin can edit via /master-setup.
+export const SEED_SPECIAL_DAYS: SpecialDay[] = [
+  { id: "sd-newyear", date: "2026-01-01", name: "New Year" },
+  { id: "sd-republic", date: "2026-01-26", name: "Republic Day" },
+  { id: "sd-goodfriday", date: "2026-04-03", name: "Good Friday" },
+  { id: "sd-ugaadi", date: "2026-04-09", name: "Ugaadi" },
+  { id: "sd-indday", date: "2026-08-15", name: "Independence Day" },
+  { id: "sd-dussehra", date: "2026-10-19", name: "Dussehra" },
+  { id: "sd-diwali", date: "2026-11-08", name: "Diwali" },
+  { id: "sd-christmas", date: "2026-12-25", name: "Christmas" },
 ];
+
+// ─────────── Credit Note settings ───────────
+export const SEED_CREDIT_NOTE_SETTINGS: CreditNoteSettings = {
+  prefix: "CRV",
+  nextNumber: 1,
+};
+
+// ─────────── Venues (B2B Phase 2 — name-only catalog for now) ───────────
+export const SEED_VENUES: Venue[] = [];
+
+// ─────────── Venue Blocks (manual reservations on the room chart) ───────────
+export const SEED_VENUE_BLOCKS: VenueBlock[] = [];

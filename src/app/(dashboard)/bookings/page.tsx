@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { fmt } from "@/lib/utils";
+import { fmt, fmtIN, todayStr } from "@/lib/utils";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { BookingStatus } from "@/types";
 
@@ -25,6 +25,21 @@ export default function BookingsPage() {
   const [search, setSearch] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [today, setToday] = useState("");
+
+  useEffect(() => {
+    setToday(todayStr());
+  }, []);
+
+  const todayCheckins = useMemo(
+    () =>
+      bookings.filter(
+        (b) =>
+          b.checkin === today &&
+          (b.status === "Confirmed" || b.status === "Tentative")
+      ),
+    [bookings, today]
+  );
 
   const data = bookings.filter((b) => {
     if (statusFilter !== "All" && b.status !== statusFilter) return false;
@@ -49,8 +64,48 @@ export default function BookingsPage() {
           <p>Full enquiry register — all statuses</p>
         </div>
         <div className="pg-hd-actions">
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => {
+              setStatusFilter("All");
+              setSearch("");
+              setFrom(today);
+              setTo(today);
+            }}
+            title="Filter to today's check-ins"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "8px 14px",
+            }}
+          >
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: "var(--t3)",
+                textTransform: "uppercase",
+                letterSpacing: ".4px",
+              }}
+            >
+              Today's Check-ins
+            </span>
+            <span
+              style={{
+                fontFamily: "var(--font-outfit), Outfit, sans-serif",
+                fontSize: 16,
+                fontWeight: 800,
+                color:
+                  todayCheckins.length > 0 ? "var(--acc)" : "var(--t2)",
+              }}
+            >
+              {todayCheckins.length}
+            </span>
+          </button>
           <Link href="/bookings/new" className="btn btn-primary">
-            ＋ New Booking
+            New Booking
           </Link>
         </div>
       </div>
@@ -99,6 +154,7 @@ export default function BookingsPage() {
               <th>Guest</th>
               <th>Source</th>
               <th>Check-in</th>
+              <th>Check-out</th>
               <th>Nights</th>
               <th>Rooms</th>
               <th>Total</th>
@@ -111,9 +167,8 @@ export default function BookingsPage() {
           <tbody>
             {data.length === 0 ? (
               <tr>
-                <td colSpan={11}>
+                <td colSpan={12}>
                   <div className="empty-state">
-                    <div className="empty-icon">📭</div>
                     <h3>No bookings found</h3>
                     <p>Try adjusting your filters</p>
                   </div>
@@ -134,7 +189,8 @@ export default function BookingsPage() {
                   <td>
                     <span style={{ fontSize: 11, color: "var(--t3)" }}>{b.source || "—"}</span>
                   </td>
-                  <td>{b.checkin}</td>
+                  <td>{fmtIN(b.checkin)}</td>
+                  <td>{fmtIN(b.checkout)}</td>
                   <td>{b.nights}</td>
                   <td style={{ fontSize: 12 }}>
                     {(() => {
@@ -155,7 +211,7 @@ export default function BookingsPage() {
                       color: b.balance > 0 ? "var(--amb)" : "var(--grn)",
                     }}
                   >
-                    {b.balance > 0 ? fmt(b.balance) : "Paid ✓"}
+                    {b.balance > 0 ? fmt(b.balance) : "Paid"}
                   </td>
                   <td>
                     <StatusBadge status={b.status} />

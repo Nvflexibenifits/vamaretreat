@@ -41,7 +41,7 @@ export function CompleteModal() {
     closeModal();
     setRows([]);
     setExtraNights("0");
-    if (b) showNotif(`${b.guest} — Booking Completed ✓`, "success");
+    if (b) showNotif(`${b.guest} — Booking Completed`, "success");
   };
 
   return (
@@ -88,7 +88,7 @@ export function CompleteModal() {
                 style={{ marginBottom: 1 }}
                 onClick={() => removeRow(r.id)}
               >
-                ✕
+                Remove
               </button>
             </div>
           ))}
@@ -98,7 +98,7 @@ export function CompleteModal() {
           style={{ marginBottom: 16, width: "100%", justifyContent: "center" }}
           onClick={addRow}
         >
-          ＋ Add Extra Charge
+          Add Extra Charge
         </button>
         <div className="field">
           <label>Stay Extension (additional nights)</label>
@@ -113,7 +113,7 @@ export function CompleteModal() {
         </div>
         <div className="modal-actions">
           <button className="btn btn-ghost" onClick={closeModal}>Cancel</button>
-          <button className="btn btn-success" onClick={onConfirm}>✓ Mark as Completed</button>
+          <button className="btn btn-success" onClick={onConfirm}>Mark as Completed</button>
         </div>
       </div>
     </div>

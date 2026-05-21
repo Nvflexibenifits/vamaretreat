@@ -48,7 +48,7 @@ export function Sidebar() {
           href="/"
           className={`nav-it${isSimpleActive(pathname, "/") ? " active" : ""}`}
         >
-          <span className="nav-icon">⌂</span> Home
+          Home
         </Link>
 
         <button
@@ -57,9 +57,8 @@ export function Sidebar() {
           onClick={() => setBookingsOpen((v) => !v)}
           style={{ background: "transparent", border: "none", width: "100%", textAlign: "left" }}
         >
-          <span className="nav-icon">📋</span>
           Bookings
-          <span className={`nav-arrow${bookingsOpen ? " open" : ""}`}>▸</span>
+          <span className={`nav-arrow${bookingsOpen ? " open" : ""}`}>{bookingsOpen ? "-" : "+"}</span>
         </button>
 
         {bookingsOpen && (
@@ -93,29 +92,31 @@ export function Sidebar() {
           href="/room-chart"
           className={`nav-it${isSimpleActive(pathname, "/room-chart") ? " active" : ""}`}
         >
-          <span className="nav-icon">🏡</span> Room Chart
+          Room Chart
         </Link>
 
         <Link
           href="/revenue"
           className={`nav-it${isSimpleActive(pathname, "/revenue") ? " active" : ""}`}
         >
-          <span className="nav-icon">₹</span> Revenue
+          Revenue
         </Link>
 
         <span className="nav-it soon">
-          <span className="nav-icon">📊</span> Reports
+          Reports
           <span className="nav-soon">Coming Soon</span>
         </span>
 
-        <span className="nav-it soon">
-          <span className="nav-icon">⚙</span> Master Setup
-          <span className="nav-soon">Coming Soon</span>
-        </span>
+        <Link
+          href="/master-setup"
+          className={`nav-it${isSimpleActive(pathname, "/master-setup") ? " active" : ""}`}
+        >
+          Master Setup
+        </Link>
       </nav>
       <div className="sb-ft">
         <button type="button" className="sb-logout-btn" onClick={onLogout}>
-          ⏏ Logout
+          Logout
         </button>
       </div>
     </div>

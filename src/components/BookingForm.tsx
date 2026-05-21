@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { ROOMS } from "@/lib/data";
 import {
   calcPricingRow,
   fmt,
@@ -84,7 +83,18 @@ export type BookingFormProps = {
 
 export function BookingForm({ mode, initial }: BookingFormProps) {
   const router = useRouter();
-  const { currentRole, currentUser, bookings, createBooking, updateBooking, showNotif } = useApp();
+  const {
+    currentRole,
+    currentUser,
+    bookings,
+    createBooking,
+    updateBooking,
+    showNotif,
+    rooms,
+    roomInventory,
+    discountCaps,
+    packageRates,
+  } = useApp();
 
   const isEdit = mode === "edit" && !!initial;
 
@@ -197,15 +207,21 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     ]);
 
   const onRoomChange = (uid: string, roomId: string) => {
-    const room = ROOMS.find((r) => r.id === roomId);
+    const room = rooms.find((r) => r.id === roomId);
     setRows((prev) =>
       prev.map((r) => {
         if (r.uid !== uid) return r;
         let tariff = r.tariff;
+        let discountPct = r.discountPct;
         if (room) {
-          tariff = String(r.rowType === "fri-sat" ? room.wknd : room.wd);
+          tariff = String(room.price);
+          const dayDisc =
+            r.rowType === "fri-sat"
+              ? room.weekendDiscount
+              : room.weekdayDiscount;
+          discountPct = String(dayDisc);
         }
-        return { ...r, roomId, tariff };
+        return { ...r, roomId, tariff, discountPct };
       })
     );
   };
@@ -213,7 +229,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   const onDiscChange = (uid: string, val: string) => {
     const row = rows.find((r) => r.uid === uid);
     if (!row) return;
-    const cap = maxDiscountForRowAndRole(row.rowType, currentRole);
+    const cap = maxDiscountForRowAndRole(row.rowType, currentRole, discountCaps);
     const v = parseFloat(val);
     if (!isNaN(v) && v > cap) setRow(uid, { discountPct: String(cap) });
     else setRow(uid, { discountPct: val });
@@ -231,7 +247,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
           parseInt(r.numRooms) || 0,
           Math.min(
             parseFloat(r.discountPct) || 0,
-            maxDiscountForRowAndRole(r.rowType, currentRole)
+            maxDiscountForRowAndRole(r.rowType, currentRole, discountCaps)
           )
         )
       ),
@@ -244,11 +260,11 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   const petsN = parseInt(pets) || 0;
   const advN = isEdit ? initialAdvance : parseInt(advance) || 0;
 
-  const mealCharges = mealOn ? 2100 * totalNights * adultsN : 0;
+  const mealCharges = mealOn ? packageRates.mealPerAdultPerNight * totalNights * adultsN : 0;
   const mealGstAmt = mealCharges * 0.18;
   const totalMealAmt = mealCharges + mealGstAmt;
 
-  const petCharges = petsN > 0 ? 1200 * totalNights * petsN : 0;
+  const petCharges = petsN > 0 ? packageRates.petPerPetPerNight * totalNights * petsN : 0;
   const petGstAmt = petCharges * 0.18;
   const totalPetAmt = petCharges + petGstAmt;
 
@@ -396,7 +412,8 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
         computedRows.filter((r) => r.roomId),
         checkin,
         checkout,
-        bookings
+        bookings,
+        roomInventory
       );
       if (!result.ok) {
         showNotif(`No ${result.missingCategoryName} available for selected dates`, "error");
@@ -422,6 +439,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
         checkin,
         checkout,
         bookings,
+        roomInventory,
         initial.id
       );
       if (!result.ok) {
@@ -460,11 +478,11 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
         </div>
         {isEdit ? (
           <Link href={`/bookings/${initial!.id}`} className="btn btn-ghost btn-sm">
-            ← Back to Booking
+            Back to Booking
           </Link>
         ) : (
           <Link href="/bookings" className="btn btn-ghost btn-sm">
-            ← All Bookings
+            All Bookings
           </Link>
         )}
       </div>
@@ -652,7 +670,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                 ) : (
                   rows.map((row, i) => {
                     const calc = computedRows[i];
-                    const cap = maxDiscountForRowAndRole(row.rowType, currentRole);
+                    const cap = maxDiscountForRowAndRole(row.rowType, currentRole, discountCaps);
                     const overCap = (parseFloat(row.discountPct) || 0) > cap;
                     return (
                       <tr key={row.uid} style={{ cursor: "default" }}>
@@ -682,7 +700,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                             }}
                           >
                             <option value="">— Select —</option>
-                            {ROOMS.map((r) => (
+                            {rooms.map((r) => (
                               <option key={r.id} value={r.id}>
                                 {r.name}
                               </option>
@@ -771,7 +789,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                             onClick={() => removeRow(row.uid)}
                             title="Remove row"
                           >
-                            ✕
+                            Remove
                           </button>
                         </td>
                       </tr>
@@ -799,7 +817,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
             style={{ marginTop: 12 }}
             onClick={addCustomRow}
           >
-            ＋ Add Row
+            Add Row
           </button>
         </div>
       </div>
@@ -843,7 +861,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                     <td>
                       <strong>Meal &amp; Activity Package</strong>
                     </td>
-                    <td style={{ textAlign: "right" }}>{fmt(2100)}</td>
+                    <td style={{ textAlign: "right" }}>{fmt(packageRates.mealPerAdultPerNight)}</td>
                     <td style={{ textAlign: "right" }}>{totalNights}</td>
                     <td style={{ textAlign: "right" }}>{adultsN}</td>
                     <td style={{ textAlign: "right" }}>{fmt(mealCharges)}</td>
@@ -857,7 +875,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                     <td>
                       <strong>Pet Package</strong>
                     </td>
-                    <td style={{ textAlign: "right" }}>{fmt(1200)}</td>
+                    <td style={{ textAlign: "right" }}>{fmt(packageRates.petPerPetPerNight)}</td>
                     <td style={{ textAlign: "right" }}>{totalNights}</td>
                     <td style={{ textAlign: "right" }}>{petsN}</td>
                     <td style={{ textAlign: "right" }}>{fmt(petCharges)}</td>
@@ -978,7 +996,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                     fontSize: 16,
                   }}
                 >
-                  {balance > 0 ? fmt(balance) : "₹0 ✓"}
+                  {balance > 0 ? fmt(balance) : "Paid"}
                 </span>
               </div>
             </div>
@@ -1045,7 +1063,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
               disabled={confirmDisabled}
               title={confirmDisabled ? "Enter advance amount to confirm" : ""}
             >
-              ✓ Confirm Booking
+              Confirm Booking
             </button>
           </>
         )}

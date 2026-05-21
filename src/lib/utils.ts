@@ -1,7 +1,25 @@
-import type { Booking, BookingStatus, PricingRow, Role } from "@/types";
+import type {
+  Booking,
+  BookingStatus,
+  DiscountCaps,
+  PricingRow,
+  Role,
+  RoomInventoryItem,
+} from "@/types";
 import { ROOM_INVENTORY, ROOMS } from "@/lib/data";
 
 export const fmt = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
+
+// Indian numeric date format: DD/MM/YYYY. Accepts ISO YYYY-MM-DD strings.
+export function fmtIN(dateStr: string | undefined | null): string {
+  if (!dateStr) return "—";
+  const d = new Date(dateStr.length === 10 ? dateStr + "T00:00:00" : dateStr);
+  if (isNaN(d.getTime())) return dateStr;
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
+}
 
 export function isWeekend(dateStr: string): boolean {
   const day = new Date(dateStr).getDay();
@@ -38,27 +56,24 @@ export function statusBadgeClass(s: BookingStatus): string {
   return m[s];
 }
 
-export function statusBadgeDot(s: BookingStatus): string {
-  const dots: Record<BookingStatus, string> = {
-    Enquiry: "○",
-    Tentative: "◐",
-    Confirmed: "●",
-    Completed: "✓",
-    Lost: "✕",
-    Cancelled: "⊘",
-  };
-  return dots[s];
+export function statusBadgeDot(_s: BookingStatus): string {
+  return "";
 }
 
-export function maxDiscountForRole(role: Role): number {
-  if (role === "Admin") return 100;
-  if (role === "Manager") return 25;
-  return 20; // Sales REX caps at 20% (weekday); per-row Fri-Sat cap further restricts to 15%
+export function maxDiscountForRole(role: Role, caps: DiscountCaps): number {
+  if (role === "Admin") return caps.admin ?? 100;
+  if (role === "Manager") return caps.manager;
+  return caps.salesRex;
 }
 
-export function maxDiscountForRowAndRole(rowType: PricingRow["rowType"], role: Role): number {
+export function maxDiscountForRowAndRole(
+  rowType: PricingRow["rowType"],
+  role: Role,
+  caps: DiscountCaps
+): number {
+  // Fri-Sat rows always hard-cap at 15% regardless of role (business rule).
   const rowCap = rowType === "fri-sat" ? 15 : 20;
-  return Math.min(rowCap, maxDiscountForRole(role));
+  return Math.min(rowCap, maxDiscountForRole(role, caps));
 }
 
 export function todayStr(): string {
@@ -95,12 +110,11 @@ export function sevenDaysFrom(dateStr: string): string[] {
 }
 
 export function formatLongDate(d: Date = new Date()): string {
-  return d.toLocaleDateString("en-IN", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
+  const weekday = d.toLocaleDateString("en-IN", { weekday: "long" });
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  return `${weekday}, ${dd}/${mm}/${yyyy}`;
 }
 
 // ─────── PRICING / ROW HELPERS ───────
@@ -165,6 +179,7 @@ export function findAvailableRoomIds(
   checkin: string,
   checkout: string,
   bookings: Booking[],
+  inventory: RoomInventoryItem[] = ROOM_INVENTORY,
   ignoreBookingId?: string
 ): string[] {
   const occupied = new Set<string>();
@@ -173,7 +188,9 @@ export function findAvailableRoomIds(
     .filter((b) => b.status === "Tentative" || b.status === "Confirmed" || b.status === "Completed")
     .filter((b) => rangesOverlap(b.checkin, b.checkout, checkin, checkout))
     .forEach((b) => b.allocatedRooms.forEach((r) => occupied.add(r)));
-  return ROOM_INVENTORY.filter((r) => r.cat === category && !occupied.has(r.id)).map((r) => r.id);
+  return inventory
+    .filter((r) => r.cat === category && r.active && !occupied.has(r.id))
+    .map((r) => r.id);
 }
 
 export type AssignmentResult =
@@ -185,6 +202,7 @@ export function tryAssignRooms(
   checkin: string,
   checkout: string,
   bookings: Booking[],
+  inventory: RoomInventoryItem[] = ROOM_INVENTORY,
   ignoreBookingId?: string
 ): AssignmentResult {
   // Per category, take max numRooms across rows (a guest holds those rooms for the full stay)
@@ -198,7 +216,7 @@ export function tryAssignRooms(
   const assigned: string[] = [];
   for (const [cat, count] of need.entries()) {
     if (count <= 0) continue;
-    const free = findAvailableRoomIds(cat, checkin, checkout, bookings, ignoreBookingId);
+    const free = findAvailableRoomIds(cat, checkin, checkout, bookings, inventory, ignoreBookingId);
     if (free.length < count) {
       const room = ROOMS.find((r) => r.id === cat);
       return { ok: false, missingCategoryName: room?.name ?? cat };

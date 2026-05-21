@@ -13,7 +13,7 @@ const TITLES: Record<string, string> = {
   "/room-chart": "Room Chart",
   "/revenue": "Revenue",
   "/crm": "Guest CRM",
-  "/settings": "Settings",
+  "/master-setup": "Master Setup",
 };
 
 function getTitle(pathname: string): string {
@@ -40,7 +40,7 @@ export function Topbar() {
         <div className="topbar-date">{dateStr}</div>
         {showNewBtn && (
           <Link href="/bookings/new" className="btn btn-accent btn-sm">
-            ＋ New Booking
+            New Booking
           </Link>
         )}
       </div>

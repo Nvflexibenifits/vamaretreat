@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { fmt } from "@/lib/utils";
+import { fmt, fmtIN } from "@/lib/utils";
 
 type GuestRow = {
   name: string;
@@ -81,7 +81,6 @@ export default function CrmPage() {
               <tr>
                 <td colSpan={8}>
                   <div className="empty-state">
-                    <div className="empty-icon">👥</div>
                     <h3>No guests found</h3>
                   </div>
                 </td>
@@ -94,7 +93,7 @@ export default function CrmPage() {
                   <td>{g.mobile}</td>
                   <td style={{ textAlign: "center" }}>{g.stays}</td>
                   <td style={{ fontWeight: 600 }}>{fmt(g.spent)}</td>
-                  <td style={{ fontSize: 12, color: "var(--t3)" }}>{g.last}</td>
+                  <td style={{ fontSize: 12, color: "var(--t3)" }}>{fmtIN(g.last)}</td>
                   <td style={{ fontSize: 12, color: "var(--t2)", maxWidth: 160 }}>
                     {guestNotes[g.mobile] || "—"}
                   </td>

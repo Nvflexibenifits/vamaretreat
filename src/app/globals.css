@@ -488,8 +488,8 @@ input[type=range] { width: 100%; accent-color: var(--acc); height: 4px; cursor: 
   from { transform: translateY(16px); opacity: 0; }
   to { transform: none; opacity: 1; }
 }
-.notif.success::before { content: '✓ '; font-weight: 700; color: var(--acc2); }
-.notif.error::before { content: '⚠ '; color: #f87171; }
+.notif.success { border-left: 3px solid var(--acc2); padding-left: 13px; }
+.notif.error { border-left: 3px solid #f87171; padding-left: 13px; }
 
 /* PHASE2 LOCK */
 .phase2-lock { opacity: .55; position: relative; }

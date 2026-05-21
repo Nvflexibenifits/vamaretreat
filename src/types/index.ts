@@ -11,8 +11,9 @@ export type BookingStatus =
 export type RoomMaster = {
   id: string;
   name: string;
-  wd: number;
-  wknd: number;
+  price: number;
+  weekdayDiscount: number;
+  weekendDiscount: number;
   gst: number;
 };
 
@@ -21,6 +22,8 @@ export type RoomInventoryItem = {
   label: string;
   type: string;
   cat: string;
+  active: boolean;
+  blockedReason?: string;
 };
 
 export type Payment = {
@@ -94,6 +97,25 @@ export type CreditNote = {
   transactions: CreditNoteTransaction[];
 };
 
+export type RoomNightUpgrade = {
+  fromCategory: string;
+  fromCategoryName: string;
+  toCategory: string;
+  toCategoryName: string;
+  upgradeDate: string;
+  kind: "complimentary" | "paid";
+  extraAmount: number;
+  reason?: string;
+  by: string;
+};
+
+export type RoomNightOverride = {
+  date: string;
+  fromRoomId: string;
+  toRoomId: string;
+  upgrade?: RoomNightUpgrade;
+};
+
 export type Booking = {
   id: string;
   guest: string;
@@ -141,6 +163,8 @@ export type Booking = {
   lostReason?: string;
   lostNotes?: string;
   cancellationDetails?: CancellationDetails;
+
+  nightOverrides?: RoomNightOverride[];
 };
 
 export type RevenueEntry = Payment & {
@@ -149,3 +173,61 @@ export type RevenueEntry = Payment & {
 };
 
 export type NotifKind = "success" | "error";
+
+export type SpecialDay = {
+  id: string;
+  date: string; // YYYY-MM-DD
+  name: string;
+};
+
+export type CreditNoteSettings = {
+  prefix: string;
+  nextNumber: number;
+};
+
+export type DiscountCaps = {
+  salesRex: number; // weekday cap; Fri-Sat row still hard-caps at 15
+  manager: number;
+  admin: number | null; // null = Unlimited
+};
+
+export type PackageRates = {
+  mealPerAdultPerNight: number;
+  petPerPetPerNight: number;
+};
+
+export type User = {
+  id: string;
+  name: string;
+  role: Role;
+  email: string;
+  color: string;
+  active: boolean;
+};
+
+export type VenueType =
+  | "Conference Room"
+  | "Seminar Room"
+  | "Garden Venue"
+  | "Event Place";
+
+export type Venue = {
+  id: string;
+  name: string;
+  type: VenueType;
+  capacity?: number;
+  notes?: string;
+  active: boolean;
+};
+
+export type VenueBlock = {
+  id: string;
+  venueId: string;
+  checkin: string;
+  checkout: string;
+  name: string;
+  pax: number;
+  amount: number;
+  createdBy: string;
+  createdAt: string;
+};

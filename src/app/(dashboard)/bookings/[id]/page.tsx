@@ -4,14 +4,14 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { useApp } from "@/lib/store";
-import { fmt } from "@/lib/utils";
+import { fmt, fmtIN } from "@/lib/utils";
 import { StatusBadge } from "@/components/StatusBadge";
 
 export default function BookingDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const id = params?.id;
-  const { bookings, openModal, hydrated } = useApp();
+  const { bookings, roomInventory, openModal, hydrated } = useApp();
   const b = bookings.find((x) => x.id === id);
 
   useEffect(() => {
@@ -57,10 +57,10 @@ export default function BookingDetailPage() {
         <div>
           <h2>{b.guest}</h2>
           <p>
-            {b.id} · {b.checkin} → {b.checkout} · {b.nights} night{b.nights !== 1 ? "s" : ""}
+            {b.id} · {fmtIN(b.checkin)} to {fmtIN(b.checkout)} · {b.nights} night{b.nights !== 1 ? "s" : ""}
           </p>
         </div>
-        <Link href="/bookings" className="btn btn-ghost btn-sm">← All Bookings</Link>
+        <Link href="/bookings" className="btn btn-ghost btn-sm">Back to All Bookings</Link>
       </div>
 
       <div>
@@ -68,7 +68,7 @@ export default function BookingDetailPage() {
           <span><StatusBadge status={b.status} /></span>
           {b.allocatedRooms.length > 0 && (
             <span className="badge" style={{ background: "var(--blu-bg)", color: "var(--blu)" }}>
-              🏡 {b.allocatedRooms.join(", ")}
+              Room: {b.allocatedRooms.join(", ")}
             </span>
           )}
           {b.status === "Lost" && b.lostReason && (
@@ -80,7 +80,7 @@ export default function BookingDetailPage() {
                 className="btn btn-accent btn-sm"
                 onClick={() => openModal({ kind: "payment", bookingId: b.id })}
               >
-                ✓ Confirm + Record Payment
+                Confirm + Record Payment
               </button>
             )}
             {canPay && (
@@ -88,7 +88,7 @@ export default function BookingDetailPage() {
                 className="btn btn-success btn-sm"
                 onClick={() => openModal({ kind: "payment", bookingId: b.id })}
               >
-                ₹ Record Payment
+                Record Payment
               </button>
             )}
             {canComplete && (
@@ -104,12 +104,12 @@ export default function BookingDetailPage() {
                 className="btn btn-danger btn-sm"
                 onClick={() => openModal({ kind: "lost", bookingId: b.id })}
               >
-                ✕ Mark Lost
+                Mark Lost
               </button>
             )}
             {canEdit && (
               <Link href={`/bookings/${b.id}/edit`} className="btn btn-ghost btn-sm">
-                ✎ Edit
+                Edit
               </Link>
             )}
             <a
@@ -118,7 +118,7 @@ export default function BookingDetailPage() {
               target="_blank"
               rel="noreferrer"
             >
-              📄 View Pricing Sheet
+              View Pricing Sheet
             </a>
           </div>
         </div>
@@ -134,8 +134,8 @@ export default function BookingDetailPage() {
                   <div className="detail-row"><span className="detail-key">Email</span><span className="detail-val">{b.email}</span></div>
                 )}
                 <div className="detail-row"><span className="detail-key">Source</span><span className="detail-val">{b.source || "—"}</span></div>
-                <div className="detail-row"><span className="detail-key">Check-in</span><span className="detail-val">{b.checkin}</span></div>
-                <div className="detail-row"><span className="detail-key">Check-out</span><span className="detail-val">{b.checkout}</span></div>
+                <div className="detail-row"><span className="detail-key">Check-in</span><span className="detail-val">{fmtIN(b.checkin)}</span></div>
+                <div className="detail-row"><span className="detail-key">Check-out</span><span className="detail-val">{fmtIN(b.checkout)}</span></div>
                 <div className="detail-row"><span className="detail-key">Nights</span><span className="detail-val">{b.nights}</span></div>
                 <div className="detail-row">
                   <span className="detail-key">Guests</span>
@@ -153,6 +153,147 @@ export default function BookingDetailPage() {
               </div>
             </div>
 
+            {b.nightOverrides && b.nightOverrides.length > 0 && (
+              <div className="detail-panel">
+                <div className="detail-panel-hd">
+                  <h3>Room Reassignments</h3>
+                </div>
+                <div className="detail-panel-body">
+                  {[...b.nightOverrides]
+                    .sort((a, b2) => (a.date < b2.date ? -1 : 1))
+                    .map((o) => {
+                      const fromInv = roomInventory.find(
+                        (r) => r.id === o.fromRoomId
+                      );
+                      const toInv = roomInventory.find(
+                        (r) => r.id === o.toRoomId
+                      );
+                      return (
+                        <div
+                          key={`${o.date}-${o.fromRoomId}`}
+                          style={{
+                            padding: "10px 0",
+                            borderBottom: "1px solid var(--bd)",
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              marginBottom: 6,
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontFamily:
+                                  "var(--font-outfit), Outfit, sans-serif",
+                                fontSize: 13,
+                                fontWeight: 700,
+                                color: "var(--t1)",
+                              }}
+                            >
+                              {fmtIN(o.date)}
+                            </span>
+                            {o.upgrade ? (
+                              o.upgrade.kind === "complimentary" ? (
+                                <span
+                                  className="badge"
+                                  style={{
+                                    background: "var(--grn-bg)",
+                                    color: "var(--grn)",
+                                  }}
+                                >
+                                  Complimentary Upgrade
+                                </span>
+                              ) : (
+                                <span
+                                  className="badge"
+                                  style={{
+                                    background: "var(--amb-bg)",
+                                    color: "var(--amb)",
+                                  }}
+                                >
+                                  Paid Upgrade
+                                </span>
+                              )
+                            ) : (
+                              <span
+                                className="badge"
+                                style={{
+                                  background: "var(--surf3)",
+                                  color: "var(--t2)",
+                                }}
+                              >
+                                Room Swap (Same Category)
+                              </span>
+                            )}
+                          </div>
+                          <div className="detail-row">
+                            <span className="detail-key">Originally Booked</span>
+                            <span className="detail-val">
+                              {fromInv?.label || o.fromRoomId}
+                              {o.upgrade
+                                ? ` (${o.upgrade.fromCategoryName})`
+                                : fromInv
+                                ? ` (${fromInv.type})`
+                                : ""}
+                            </span>
+                          </div>
+                          <div className="detail-row">
+                            <span className="detail-key">Reassigned To</span>
+                            <span
+                              className="detail-val"
+                              style={{ fontWeight: 600 }}
+                            >
+                              {toInv?.label || o.toRoomId}
+                              {o.upgrade
+                                ? ` (${o.upgrade.toCategoryName})`
+                                : toInv
+                                ? ` (${toInv.type})`
+                                : ""}
+                            </span>
+                          </div>
+                          {o.upgrade && o.upgrade.kind === "complimentary" && (
+                            <div className="detail-row">
+                              <span className="detail-key">Reason</span>
+                              <span
+                                className="detail-val"
+                                style={{ color: "var(--t2)" }}
+                              >
+                                {o.upgrade.reason || "—"}
+                              </span>
+                            </div>
+                          )}
+                          {o.upgrade && o.upgrade.kind === "paid" && (
+                            <div className="detail-row">
+                              <span className="detail-key">Upgrade Charge</span>
+                              <span
+                                className="detail-val"
+                                style={{
+                                  fontWeight: 700,
+                                  color: "var(--amb)",
+                                }}
+                              >
+                                {fmt(o.upgrade.extraAmount)}
+                              </span>
+                            </div>
+                          )}
+                          {o.upgrade && (
+                            <div className="detail-row">
+                              <span className="detail-key">Updated</span>
+                              <span className="detail-val">
+                                {fmtIN(o.upgrade.upgradeDate)} by {o.upgrade.by}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
+
             <div className="detail-panel">
               <div className="detail-panel-hd"><h3>Price Breakdown</h3></div>
               <div className="detail-panel-body">
@@ -168,9 +309,42 @@ export default function BookingDetailPage() {
                   <div className="detail-row"><span className="detail-key">Pet Package</span><span className="detail-val">{fmt(b.petTotal)}</span></div>
                 )}
                 <div className="detail-row"><span className="detail-key">GST</span><span className="detail-val">{fmt(totalGstAll)}</span></div>
-                {b.extras.length > 0 && (
-                  <div className="detail-row"><span className="detail-key">Extras</span><span className="detail-val">{fmt(b.extras.reduce((s, e) => s + e.amount, 0))}</span></div>
-                )}
+                {(() => {
+                  const upgradeTotal = (b.nightOverrides || [])
+                    .filter(
+                      (o) => o.upgrade && o.upgrade.kind === "paid"
+                    )
+                    .reduce(
+                      (s, o) => s + (o.upgrade?.extraAmount || 0),
+                      0
+                    );
+                  if (upgradeTotal <= 0) return null;
+                  return (
+                    <div className="detail-row">
+                      <span className="detail-key">Room Upgrade Charges</span>
+                      <span
+                        className="detail-val"
+                        style={{ fontWeight: 600, color: "var(--amb)" }}
+                      >
+                        {fmt(upgradeTotal)}
+                      </span>
+                    </div>
+                  );
+                })()}
+                {(() => {
+                  const nonUpgradeExtras = b.extras.filter(
+                    (e) => !e.name.startsWith("Room Upgrade")
+                  );
+                  if (nonUpgradeExtras.length === 0) return null;
+                  return (
+                    <div className="detail-row">
+                      <span className="detail-key">Extras</span>
+                      <span className="detail-val">
+                        {fmt(nonUpgradeExtras.reduce((s, e) => s + e.amount, 0))}
+                      </span>
+                    </div>
+                  );
+                })()}
                 <div className="detail-row" style={{ background: "var(--surf2)" }}>
                   <span className="detail-key" style={{ fontWeight: 700, color: "var(--t1)" }}>Total Payable</span>
                   <span className="detail-val" style={{ fontFamily: "var(--font-outfit), Outfit, sans-serif", fontSize: 16, fontWeight: 800 }}>{fmt(b.grandTotal)}</span>
@@ -182,7 +356,7 @@ export default function BookingDetailPage() {
                 >
                   <span className="detail-key" style={{ fontWeight: 600 }}>{b.balance > 0 ? "Balance Due" : "Fully Paid"}</span>
                   <span className="detail-val" style={{ fontWeight: 700, color: b.balance > 0 ? "var(--amb)" : "var(--grn)" }}>
-                    {b.balance > 0 ? fmt(b.balance) : "₹0 ✓"}
+                    {b.balance > 0 ? fmt(b.balance) : "Paid"}
                   </span>
                 </div>
               </div>
@@ -198,7 +372,7 @@ export default function BookingDetailPage() {
               {b.payments.map((p, i) => (
                 <div key={i} className="trail-item">
                   <div className="t-dot t-grn"></div>
-                  <div className="t-time">{p.date}</div>
+                  <div className="t-time">{fmtIN(p.date)}</div>
                   <div className="t-lbl"><strong>{p.type}</strong> — {p.mode}</div>
                   {p.amount > 0 && <div className="t-amt">{fmt(p.amount)}</div>}
                   <div className="t-by">{p.by}</div>
@@ -207,12 +381,32 @@ export default function BookingDetailPage() {
               {b.extras.map((e, i) => (
                 <div key={`e-${i}`} className="trail-item">
                   <div className="t-dot t-amb"></div>
-                  <div className="t-time">{e.date || b.checkout}</div>
+                  <div className="t-time">{fmtIN(e.date || b.checkout)}</div>
                   <div className="t-lbl"><strong>Extra: {e.name}</strong></div>
                   <div className="t-amt">{fmt(e.amount)}</div>
                   <div className="t-by">{e.by || b.rex}</div>
                 </div>
               ))}
+              {(b.nightOverrides || [])
+                .filter((o) => o.upgrade && o.upgrade.kind === "complimentary")
+                .sort((a, b2) => (a.date < b2.date ? -1 : 1))
+                .map((o) => (
+                  <div
+                    key={`up-${o.date}-${o.fromRoomId}`}
+                    className="trail-item"
+                  >
+                    <div className="t-dot t-grn"></div>
+                    <div className="t-time">{fmtIN(o.upgrade!.upgradeDate)}</div>
+                    <div className="t-lbl">
+                      <strong>
+                        Room Upgrade ({fmtIN(o.date)}, Complimentary):{" "}
+                        {o.upgrade!.fromCategoryName} → {o.upgrade!.toCategoryName}
+                      </strong>
+                      {o.upgrade!.reason ? ` — ${o.upgrade!.reason}` : ""}
+                    </div>
+                    <div className="t-by">{o.upgrade!.by}</div>
+                  </div>
+                ))}
               {b.allocatedRooms.length > 0 && (
                 <div className="trail-item">
                   <div className="t-dot t-blu"></div>

@@ -47,7 +47,7 @@ export default function EditBookingPage() {
             </p>
           </div>
           <Link href={`/bookings/${b.id}`} className="btn btn-ghost btn-sm">
-            ← Back to Booking
+            Back to Booking
           </Link>
         </div>
       </div>

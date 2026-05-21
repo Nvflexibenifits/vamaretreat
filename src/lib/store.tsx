@@ -11,12 +11,33 @@ import {
 } from "react";
 import type {
   Booking,
+  CreditNoteSettings,
+  DiscountCaps,
   Extra,
   NotifKind,
+  PackageRates,
   RevenueEntry,
   Role,
+  RoomInventoryItem,
+  RoomMaster,
+  RoomNightUpgrade,
+  SpecialDay,
+  User,
+  Venue,
+  VenueBlock,
 } from "@/types";
-import { SEED_BOOKINGS } from "@/lib/data";
+import {
+  ROOMS as SEED_ROOMS,
+  SEED_BOOKINGS,
+  SEED_CREDIT_NOTE_SETTINGS,
+  SEED_DISCOUNT_CAPS,
+  SEED_PACKAGE_RATES,
+  SEED_ROOM_INVENTORY,
+  SEED_SPECIAL_DAYS,
+  SEED_USERS,
+  SEED_VENUES,
+  SEED_VENUE_BLOCKS,
+} from "@/lib/data";
 import { addDays, nowTime, todayStr } from "@/lib/utils";
 
 const STORAGE_KEY = "vama:state:v1";
@@ -32,6 +53,15 @@ type ModalState = {
 type PersistedState = {
   bookings: Booking[];
   guestNotes: Record<string, string>;
+  rooms?: RoomMaster[];
+  roomInventory?: RoomInventoryItem[];
+  discountCaps?: DiscountCaps;
+  packageRates?: PackageRates;
+  specialDays?: SpecialDay[];
+  creditNoteSettings?: CreditNoteSettings;
+  users?: User[];
+  venues?: Venue[];
+  venueBlocks?: VenueBlock[];
 };
 
 type AppContextValue = {
@@ -62,6 +92,47 @@ type AppContextValue = {
     extraNights: number
   ) => void;
   setAllocatedRooms: (bookingId: string, rooms: string[]) => void;
+  applyNightOverride: (
+    bookingId: string,
+    opts: {
+      date: string;
+      fromRoomId: string;
+      toRoomId: string;
+      upgrade?: RoomNightUpgrade;
+    }
+  ) => void;
+  clearNightOverride: (
+    bookingId: string,
+    date: string,
+    fromRoomId: string
+  ) => void;
+  // master setup
+  rooms: RoomMaster[];
+  roomInventory: RoomInventoryItem[];
+  discountCaps: DiscountCaps;
+  packageRates: PackageRates;
+  specialDays: SpecialDay[];
+  creditNoteSettings: CreditNoteSettings;
+  users: User[];
+  venues: Venue[];
+  venueBlocks: VenueBlock[];
+  updateRooms: (rooms: RoomMaster[]) => void;
+  addRoomInventoryItem: (item: RoomInventoryItem) => void;
+  updateRoomInventoryItem: (id: string, patch: Partial<RoomInventoryItem>) => void;
+  updateDiscountCaps: (caps: DiscountCaps) => void;
+  updatePackageRates: (rates: PackageRates) => void;
+  addSpecialDay: (sd: SpecialDay) => void;
+  removeSpecialDay: (id: string) => void;
+  updateCreditNoteSettings: (s: CreditNoteSettings) => void;
+  addUser: (u: User) => void;
+  updateUser: (id: string, patch: Partial<User>) => void;
+  removeUser: (id: string) => void;
+  addVenue: (v: Venue) => void;
+  updateVenue: (id: string, patch: Partial<Venue>) => void;
+  removeVenue: (id: string) => void;
+  addVenueBlock: (vb: VenueBlock) => void;
+  updateVenueBlock: (id: string, patch: Partial<VenueBlock>) => void;
+  removeVenueBlock: (id: string) => void;
   // notification
   notif: { msg: string; kind: NotifKind } | null;
   showNotif: (msg: string, kind?: NotifKind) => void;
@@ -80,6 +151,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const [bookings, setBookings] = useState<Booking[]>(SEED_BOOKINGS);
   const [guestNotes, setGuestNotes] = useState<Record<string, string>>({});
+  const [rooms, setRooms] = useState<RoomMaster[]>(SEED_ROOMS);
+  const [roomInventory, setRoomInventory] = useState<RoomInventoryItem[]>(SEED_ROOM_INVENTORY);
+  const [discountCaps, setDiscountCapsState] =
+    useState<DiscountCaps>(SEED_DISCOUNT_CAPS);
+  const [packageRates, setPackageRatesState] =
+    useState<PackageRates>(SEED_PACKAGE_RATES);
+  const [specialDays, setSpecialDays] = useState<SpecialDay[]>(SEED_SPECIAL_DAYS);
+  const [creditNoteSettings, setCreditNoteSettings] =
+    useState<CreditNoteSettings>(SEED_CREDIT_NOTE_SETTINGS);
+  const [users, setUsers] = useState<User[]>(SEED_USERS);
+  const [venues, setVenues] = useState<Venue[]>(SEED_VENUES);
+  const [venueBlocks, setVenueBlocks] = useState<VenueBlock[]>(SEED_VENUE_BLOCKS);
   const [hydrated, setHydrated] = useState(false);
 
   const [notif, setNotif] = useState<{ msg: string; kind: NotifKind } | null>(null);
@@ -98,6 +181,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (parsed.guestNotes && typeof parsed.guestNotes === "object") {
           setGuestNotes(parsed.guestNotes);
         }
+        if (Array.isArray(parsed.rooms) && parsed.rooms.length > 0) {
+          setRooms(parsed.rooms);
+        }
+        if (Array.isArray(parsed.roomInventory) && parsed.roomInventory.length > 0) {
+          setRoomInventory(parsed.roomInventory);
+        }
+        if (parsed.discountCaps) setDiscountCapsState(parsed.discountCaps);
+        if (parsed.packageRates) setPackageRatesState(parsed.packageRates);
+        if (Array.isArray(parsed.specialDays)) setSpecialDays(parsed.specialDays);
+        if (parsed.creditNoteSettings) setCreditNoteSettings(parsed.creditNoteSettings);
+        if (Array.isArray(parsed.users) && parsed.users.length > 0) {
+          setUsers(parsed.users);
+        }
+        if (Array.isArray(parsed.venues)) setVenues(parsed.venues);
+        if (Array.isArray(parsed.venueBlocks)) setVenueBlocks(parsed.venueBlocks);
       }
     } catch {
       // corrupt state, ignore and stay on seed
@@ -109,12 +207,37 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!hydrated || typeof window === "undefined") return;
     try {
-      const payload: PersistedState = { bookings, guestNotes };
+      const payload: PersistedState = {
+        bookings,
+        guestNotes,
+        rooms,
+        roomInventory,
+        discountCaps,
+        packageRates,
+        specialDays,
+        creditNoteSettings,
+        users,
+        venues,
+        venueBlocks,
+      };
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
     } catch {
       // quota / serialization, swallow
     }
-  }, [hydrated, bookings, guestNotes]);
+  }, [
+    hydrated,
+    bookings,
+    guestNotes,
+    rooms,
+    roomInventory,
+    discountCaps,
+    packageRates,
+    specialDays,
+    creditNoteSettings,
+    users,
+    venues,
+    venueBlocks,
+  ]);
 
   // Sync from other tabs
   useEffect(() => {
@@ -127,6 +250,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (parsed.guestNotes && typeof parsed.guestNotes === "object") {
           setGuestNotes(parsed.guestNotes);
         }
+        if (Array.isArray(parsed.rooms) && parsed.rooms.length > 0) {
+          setRooms(parsed.rooms);
+        }
+        if (Array.isArray(parsed.roomInventory) && parsed.roomInventory.length > 0) {
+          setRoomInventory(parsed.roomInventory);
+        }
+        if (parsed.discountCaps) setDiscountCapsState(parsed.discountCaps);
+        if (parsed.packageRates) setPackageRatesState(parsed.packageRates);
+        if (Array.isArray(parsed.specialDays)) setSpecialDays(parsed.specialDays);
+        if (parsed.creditNoteSettings) setCreditNoteSettings(parsed.creditNoteSettings);
+        if (Array.isArray(parsed.users) && parsed.users.length > 0) {
+          setUsers(parsed.users);
+        }
+        if (Array.isArray(parsed.venues)) setVenues(parsed.venues);
+        if (Array.isArray(parsed.venueBlocks)) setVenueBlocks(parsed.venueBlocks);
       } catch {
         // ignore
       }
@@ -171,6 +309,72 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setBookings((prev) =>
       prev.map((b) => (b.id === bookingId ? { ...b, ...patch } : b))
     );
+  }, []);
+
+  // ─── Master setup setters ───
+  const updateRooms = useCallback((next: RoomMaster[]) => setRooms(next), []);
+  const addRoomInventoryItem = useCallback((item: RoomInventoryItem) => {
+    setRoomInventory((prev) => [...prev, item]);
+  }, []);
+  const updateRoomInventoryItem = useCallback(
+    (id: string, patch: Partial<RoomInventoryItem>) => {
+      setRoomInventory((prev) =>
+        prev.map((r) => (r.id === id ? { ...r, ...patch } : r))
+      );
+    },
+    []
+  );
+  const updateDiscountCaps = useCallback(
+    (caps: DiscountCaps) => setDiscountCapsState(caps),
+    []
+  );
+  const updatePackageRates = useCallback(
+    (rates: PackageRates) => setPackageRatesState(rates),
+    []
+  );
+  const addSpecialDay = useCallback((sd: SpecialDay) => {
+    setSpecialDays((prev) => [...prev, sd].sort((a, b) => (a.date < b.date ? -1 : 1)));
+  }, []);
+  const removeSpecialDay = useCallback((id: string) => {
+    setSpecialDays((prev) => prev.filter((sd) => sd.id !== id));
+  }, []);
+  const updateCreditNoteSettings = useCallback(
+    (s: CreditNoteSettings) => setCreditNoteSettings(s),
+    []
+  );
+  const addUser = useCallback((u: User) => {
+    setUsers((prev) => [...prev, u]);
+  }, []);
+  const updateUser = useCallback((id: string, patch: Partial<User>) => {
+    setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, ...patch } : u)));
+  }, []);
+  const removeUser = useCallback((id: string) => {
+    setUsers((prev) => prev.filter((u) => u.id !== id));
+  }, []);
+
+  const addVenue = useCallback((v: Venue) => {
+    setVenues((prev) => [...prev, v]);
+  }, []);
+  const updateVenue = useCallback((id: string, patch: Partial<Venue>) => {
+    setVenues((prev) => prev.map((v) => (v.id === id ? { ...v, ...patch } : v)));
+  }, []);
+  const removeVenue = useCallback((id: string) => {
+    setVenues((prev) => prev.filter((v) => v.id !== id));
+  }, []);
+
+  const addVenueBlock = useCallback((vb: VenueBlock) => {
+    setVenueBlocks((prev) => [...prev, vb]);
+  }, []);
+  const updateVenueBlock = useCallback(
+    (id: string, patch: Partial<VenueBlock>) => {
+      setVenueBlocks((prev) =>
+        prev.map((vb) => (vb.id === id ? { ...vb, ...patch } : vb))
+      );
+    },
+    []
+  );
+  const removeVenueBlock = useCallback((id: string) => {
+    setVenueBlocks((prev) => prev.filter((vb) => vb.id !== id));
   }, []);
 
   const markLost = useCallback(
@@ -271,6 +475,111 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
+  const applyNightOverride = useCallback(
+    (
+      bookingId: string,
+      opts: {
+        date: string;
+        fromRoomId: string;
+        toRoomId: string;
+        upgrade?: RoomNightUpgrade;
+      }
+    ) => {
+      setBookings((prev) =>
+        prev.map((b) => {
+          if (b.id !== bookingId) return b;
+          // Replace any existing override for the same (date, fromRoomId)
+          const existing = (b.nightOverrides || []).filter(
+            (o) => !(o.date === opts.date && o.fromRoomId === opts.fromRoomId)
+          );
+          const nextOverrides = [
+            ...existing,
+            {
+              date: opts.date,
+              fromRoomId: opts.fromRoomId,
+              toRoomId: opts.toRoomId,
+              upgrade: opts.upgrade,
+            },
+          ];
+          const newExtras = [...b.extras];
+          let grandTotal = b.grandTotal;
+          let balance = b.balance;
+          if (
+            opts.upgrade &&
+            opts.upgrade.kind === "paid" &&
+            opts.upgrade.extraAmount > 0
+          ) {
+            newExtras.push({
+              name: `Room Upgrade (${opts.date}): ${opts.upgrade.fromCategoryName} → ${opts.upgrade.toCategoryName}`,
+              amount: opts.upgrade.extraAmount,
+              date: opts.upgrade.upgradeDate,
+              by: opts.upgrade.by,
+            });
+            grandTotal += opts.upgrade.extraAmount;
+            balance += opts.upgrade.extraAmount;
+          }
+          return {
+            ...b,
+            nightOverrides: nextOverrides,
+            extras: newExtras,
+            grandTotal,
+            balance,
+          };
+        })
+      );
+    },
+    []
+  );
+
+  const clearNightOverride = useCallback(
+    (bookingId: string, date: string, fromRoomId: string) => {
+      setBookings((prev) =>
+        prev.map((b) => {
+          if (b.id !== bookingId) return b;
+          const removed = (b.nightOverrides || []).find(
+            (o) => o.date === date && o.fromRoomId === fromRoomId
+          );
+          if (!removed) return b;
+          const nextOverrides = (b.nightOverrides || []).filter(
+            (o) => !(o.date === date && o.fromRoomId === fromRoomId)
+          );
+          // If the removed override had a paid upgrade, reverse it: remove the
+          // matching Extra entry and decrement totals.
+          let newExtras = b.extras;
+          let grandTotal = b.grandTotal;
+          let balance = b.balance;
+          if (
+            removed.upgrade &&
+            removed.upgrade.kind === "paid" &&
+            removed.upgrade.extraAmount > 0
+          ) {
+            const upgName = `Room Upgrade (${removed.date}): ${removed.upgrade.fromCategoryName} → ${removed.upgrade.toCategoryName}`;
+            const idx = newExtras.findIndex(
+              (e) =>
+                e.name === upgName && e.amount === removed.upgrade!.extraAmount
+            );
+            if (idx >= 0) {
+              newExtras = [
+                ...newExtras.slice(0, idx),
+                ...newExtras.slice(idx + 1),
+              ];
+              grandTotal -= removed.upgrade.extraAmount;
+              balance = Math.max(0, balance - removed.upgrade.extraAmount);
+            }
+          }
+          return {
+            ...b,
+            nightOverrides: nextOverrides,
+            extras: newExtras,
+            grandTotal,
+            balance,
+          };
+        })
+      );
+    },
+    []
+  );
+
   const revenueEntries = useMemo<RevenueEntry[]>(() => {
     const entries: RevenueEntry[] = [];
     bookings.forEach((b) => {
@@ -312,6 +621,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
       recordPayment,
       completeBooking,
       setAllocatedRooms,
+      applyNightOverride,
+      clearNightOverride,
+      rooms,
+      roomInventory,
+      discountCaps,
+      packageRates,
+      specialDays,
+      creditNoteSettings,
+      users,
+      venues,
+      venueBlocks,
+      updateRooms,
+      addRoomInventoryItem,
+      updateRoomInventoryItem,
+      updateDiscountCaps,
+      updatePackageRates,
+      addSpecialDay,
+      removeSpecialDay,
+      updateCreditNoteSettings,
+      addUser,
+      updateUser,
+      removeUser,
+      addVenue,
+      updateVenue,
+      removeVenue,
+      addVenueBlock,
+      updateVenueBlock,
+      removeVenueBlock,
       notif,
       showNotif,
       modal,
@@ -335,6 +672,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
       recordPayment,
       completeBooking,
       setAllocatedRooms,
+      applyNightOverride,
+      clearNightOverride,
+      rooms,
+      roomInventory,
+      discountCaps,
+      packageRates,
+      specialDays,
+      creditNoteSettings,
+      users,
+      venues,
+      venueBlocks,
+      updateRooms,
+      addRoomInventoryItem,
+      updateRoomInventoryItem,
+      updateDiscountCaps,
+      updatePackageRates,
+      addSpecialDay,
+      removeSpecialDay,
+      updateCreditNoteSettings,
+      addUser,
+      updateUser,
+      removeUser,
+      addVenue,
+      updateVenue,
+      removeVenue,
+      addVenueBlock,
+      updateVenueBlock,
+      removeVenueBlock,
       notif,
       showNotif,
       modal,

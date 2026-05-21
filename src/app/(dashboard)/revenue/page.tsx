@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useApp } from "@/lib/store";
-import { fmt } from "@/lib/utils";
+import { fmt, fmtIN } from "@/lib/utils";
 
 export default function RevenuePage() {
   const router = useRouter();
@@ -79,7 +79,7 @@ export default function RevenuePage() {
           <tbody>
             {entries.map((e, i) => (
               <tr key={i} onClick={() => router.push(`/bookings/${e.bookingId}`)}>
-                <td>{e.date}</td>
+                <td>{fmtIN(e.date)}</td>
                 <td>
                   <span style={{ fontSize: 10, fontFamily: "var(--font-outfit), Outfit, sans-serif", color: "var(--t3)", fontWeight: 700 }}>
                     {e.bookingId}

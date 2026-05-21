@@ -6,24 +6,23 @@ import { useApp } from "@/lib/store";
 import { fmt, sevenDaysFrom, todayStr, weekRange } from "@/lib/utils";
 
 type RevFilter = "today" | "week" | "month";
-type RoomFilter = "today" | "week";
-
-const ROOM_CATEGORIES: { name: string; cats: string[]; total: number }[] = [
-  { name: "Pool Villa", cats: ["PV"], total: 1 },
-  { name: "2BHK Villa", cats: ["2BHK", "2BHK-GV"], total: 5 },
-  { name: "1BHK Villa", cats: ["1BHK", "1BHK-GV"], total: 12 },
-  { name: "Family Room", cats: ["FM"], total: 4 },
-  { name: "Couple Room", cats: ["CPL"], total: 10 },
-  { name: "Tent", cats: ["TENT"], total: 6 },
-];
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { bookings, revenueEntries, currentUser } = useApp();
+  const { bookings, revenueEntries, currentUser, rooms, roomInventory } = useApp();
+
+  // Categories + totals are derived live from the master so a Blocked room drops the total.
+  const roomCategories = useMemo(() => {
+    return rooms.map((r) => {
+      const total = roomInventory.filter(
+        (inv) => inv.cat === r.id && inv.active
+      ).length;
+      return { name: r.name, cats: [r.id], total };
+    });
+  }, [rooms, roomInventory]);
 
   const [today, setToday] = useState("");
   const [revFilter, setRevFilter] = useState<RevFilter>("week");
-  const [roomFilter, setRoomFilter] = useState<RoomFilter>("today");
 
   useEffect(() => {
     setToday(todayStr());
@@ -60,16 +59,14 @@ export default function DashboardPage() {
     [bookings]
   );
 
-  // ───── Room Status ─────
+  // ───── Room Status (next 7 days) ─────
   const roomDates = useMemo(() => {
     if (!today) return [];
-    if (roomFilter === "today") return sevenDaysFrom(today);
-    const { start } = weekRange(today);
-    return sevenDaysFrom(start);
-  }, [today, roomFilter]);
+    return sevenDaysFrom(today);
+  }, [today]);
 
   const roomStatus = useMemo(() => {
-    return ROOM_CATEGORIES.map((cat) => {
+    return roomCategories.map((cat) => {
       const cells = roomDates.map((d) => {
         let booked = 0;
         let tentative = 0;
@@ -92,13 +89,13 @@ export default function DashboardPage() {
       });
       return { ...cat, cells };
     });
-  }, [bookings, roomDates]);
+  }, [bookings, roomDates, roomCategories]);
 
   return (
     <div className="view">
       <div className="pg-hd">
         <div>
-          <h2>Hello, {currentUser} 👋</h2>
+          <h2>Hello, {currentUser}</h2>
           <p>Quick overview of revenue, payments and room availability</p>
         </div>
       </div>
@@ -158,7 +155,6 @@ export default function DashboardPage() {
               <tr>
                 <td colSpan={3}>
                   <div className="empty-state">
-                    <div className="empty-icon">✓</div>
                     <h3>All bookings paid up</h3>
                     <p>No pending balances right now</p>
                   </div>
@@ -197,23 +193,6 @@ export default function DashboardPage() {
       <div className="tbl-wrap">
         <div className="tbl-hd">
           <h3>Room Status</h3>
-          <div className="tbl-hd-r">
-            <div className="filter-bar" style={{ marginBottom: 0 }}>
-              {([
-                { id: "today", label: "Today" },
-                { id: "week", label: "This Week" },
-              ] as { id: RoomFilter; label: string }[]).map((f) => (
-                <button
-                  key={f.id}
-                  type="button"
-                  className={`filter-btn${roomFilter === f.id ? " on" : ""}`}
-                  onClick={() => setRoomFilter(f.id)}
-                >
-                  {f.label}
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
         <table>
           <thead>
@@ -222,7 +201,7 @@ export default function DashboardPage() {
               {roomDates.map((d) => {
                 const dt = new Date(d);
                 const wk = dt.toLocaleDateString("en-IN", { weekday: "short" });
-                const dm = dt.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+                const dm = `${String(dt.getDate()).padStart(2, "0")}/${String(dt.getMonth() + 1).padStart(2, "0")}`;
                 return (
                   <th key={d} style={{ textAlign: "center" }}>
                     <div>{wk}</div>

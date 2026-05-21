@@ -147,7 +147,7 @@ export default function ConfirmationPage() {
             fontFamily: "DM Sans, sans-serif",
           }}
         >
-          🖨 Print / Download PDF
+          Print / Download PDF
         </button>
         <button
           type="button"
