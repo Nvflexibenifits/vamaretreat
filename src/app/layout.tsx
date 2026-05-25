@@ -25,8 +25,12 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={`${outfit.variable} ${dmSans.variable}`}>
-      <body>
+    <html
+      lang="en"
+      className={`${outfit.variable} ${dmSans.variable}`}
+      suppressHydrationWarning
+    >
+      <body suppressHydrationWarning>
         <AppProvider>
           {children}
           <Notif />

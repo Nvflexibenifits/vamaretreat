@@ -144,6 +144,18 @@ type AppContextValue = {
 
 const AppContext = createContext<AppContextValue | null>(null);
 
+// Defensive: persisted bookings from older schemas may be missing fields like
+// allocatedRooms or extras. Normalize so all downstream code can rely on them.
+function normalizeBooking(b: Partial<Booking>): Booking {
+  return {
+    ...(b as Booking),
+    allocatedRooms: Array.isArray(b.allocatedRooms) ? b.allocatedRooms : [],
+    payments: Array.isArray(b.payments) ? b.payments : [],
+    extras: Array.isArray(b.extras) ? b.extras : [],
+    pricingRows: Array.isArray(b.pricingRows) ? b.pricingRows : [],
+  };
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
   const [isAuthed, setIsAuthed] = useState(false);
   const [currentRole, setCurrentRole] = useState<Role>("Sales REX");
@@ -176,7 +188,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (raw) {
         const parsed = JSON.parse(raw) as Partial<PersistedState>;
         if (Array.isArray(parsed.bookings) && parsed.bookings.length > 0) {
-          setBookings(parsed.bookings as Booking[]);
+          setBookings((parsed.bookings as Partial<Booking>[]).map(normalizeBooking));
         }
         if (parsed.guestNotes && typeof parsed.guestNotes === "object") {
           setGuestNotes(parsed.guestNotes);
@@ -246,7 +258,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (e.key !== STORAGE_KEY || !e.newValue) return;
       try {
         const parsed = JSON.parse(e.newValue) as Partial<PersistedState>;
-        if (Array.isArray(parsed.bookings)) setBookings(parsed.bookings as Booking[]);
+        if (Array.isArray(parsed.bookings))
+          setBookings(
+            (parsed.bookings as Partial<Booking>[]).map(normalizeBooking)
+          );
         if (parsed.guestNotes && typeof parsed.guestNotes === "object") {
           setGuestNotes(parsed.guestNotes);
         }
