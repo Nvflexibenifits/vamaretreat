@@ -105,7 +105,9 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   const [name, setName] = useState(initial?.guest ?? "");
   const [mobile, setMobile] = useState(initial?.mobile ?? "");
   const [email, setEmail] = useState(initial?.email ?? "");
-  const [source, setSource] = useState(initial?.source ?? "WhatsApp");
+  const [source, setSource] = useState<"Direct" | "OTA">(
+    initial?.source === "OTA" ? "OTA" : "Direct"
+  );
   const [notes, setNotes] = useState(initial?.notes ?? "");
 
   const [adults, setAdults] = useState(String(initial?.adults ?? 2));
@@ -537,6 +539,13 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="email@example.com"
               />
+            </div>
+            <div className="field">
+              <label>Booking Source</label>
+              <select value={source} onChange={(e) => setSource(e.target.value as "Direct" | "OTA")}>
+                <option value="Direct">Direct</option>
+                <option value="OTA">OTA</option>
+              </select>
             </div>
           </div>
           <div className="field" style={{ marginTop: 11 }}>
