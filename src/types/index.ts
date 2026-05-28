@@ -60,6 +60,8 @@ export type Payment = {
 export type Extra = {
   name: string;
   amount: number;
+  gst?: number;
+  totalPaid?: number;
   date: string;
   by: string;
 };
@@ -253,6 +255,26 @@ export type Venue = {
   active: boolean;
 };
 
+export type BulkRoomBlockRow = {
+  catId: string;
+  catName: string;
+  roomIds: string[];
+};
+
+export type BulkRoomBlock = {
+  id: string;
+  label: string;
+  guestName: string;
+  checkin: string;
+  checkout: string;
+  pax: number;
+  amount: number;
+  status: "Tentative" | "Confirmed";
+  rows: BulkRoomBlockRow[];
+  createdBy: string;
+  createdAt: string;
+};
+
 export type VenueBlock = {
   id: string;
   venueId: string;
@@ -261,6 +283,7 @@ export type VenueBlock = {
   name: string;
   pax: number;
   amount: number;
+  status?: "Tentative" | "Confirmed";
   createdBy: string;
   createdAt: string;
 };

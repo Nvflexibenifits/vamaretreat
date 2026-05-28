@@ -11,6 +11,7 @@ import {
 } from "react";
 import type {
   Booking,
+  BulkRoomBlock,
   CancellationPolicy,
   CreditNoteSettings,
   DiscountCaps,
@@ -41,6 +42,7 @@ import {
   SEED_USERS,
   SEED_VENUES,
   SEED_VENUE_BLOCKS,
+  SEED_BULK_ROOM_BLOCKS,
 } from "@/lib/data";
 import { addDays, nowTime, todayStr } from "@/lib/utils";
 
@@ -69,6 +71,7 @@ type PersistedState = {
   users?: User[];
   venues?: Venue[];
   venueBlocks?: VenueBlock[];
+  bulkRoomBlocks?: BulkRoomBlock[];
 };
 
 type AppContextValue = {
@@ -86,6 +89,7 @@ type AppContextValue = {
   setGuestNote: (mobile: string, note: string) => void;
   createBooking: (b: Booking) => void;
   updateBooking: (bookingId: string, patch: Partial<Booking>) => void;
+  addExtras: (bookingId: string, extras: Extra[]) => void;
   markLost: (bookingId: string, reason: string, notes: string) => void;
   recordPayment: (
     bookingId: string,
@@ -144,6 +148,10 @@ type AppContextValue = {
   addVenueBlock: (vb: VenueBlock) => void;
   updateVenueBlock: (id: string, patch: Partial<VenueBlock>) => void;
   removeVenueBlock: (id: string) => void;
+  bulkRoomBlocks: BulkRoomBlock[];
+  addBulkRoomBlock: (b: BulkRoomBlock) => void;
+  updateBulkRoomBlock: (id: string, patch: Partial<BulkRoomBlock>) => void;
+  removeBulkRoomBlock: (id: string) => void;
   // notification
   notif: { msg: string; kind: NotifKind } | null;
   showNotif: (msg: string, kind?: NotifKind) => void;
@@ -196,6 +204,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [users, setUsers] = useState<User[]>(SEED_USERS);
   const [venues, setVenues] = useState<Venue[]>(SEED_VENUES);
   const [venueBlocks, setVenueBlocks] = useState<VenueBlock[]>(SEED_VENUE_BLOCKS);
+  const [bulkRoomBlocks, setBulkRoomBlocks] = useState<BulkRoomBlock[]>(SEED_BULK_ROOM_BLOCKS);
   const [hydrated, setHydrated] = useState(false);
 
   const [notif, setNotif] = useState<{ msg: string; kind: NotifKind } | null>(null);
@@ -234,6 +243,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
         if (Array.isArray(parsed.venues)) setVenues(parsed.venues);
         if (Array.isArray(parsed.venueBlocks)) setVenueBlocks(parsed.venueBlocks);
+        if (Array.isArray(parsed.bulkRoomBlocks)) setBulkRoomBlocks(parsed.bulkRoomBlocks);
       } else {
         // No v2 data — check for v1 and migrate user data only.
         const legacyRaw = window.localStorage.getItem(LEGACY_KEY);
@@ -279,6 +289,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         users,
         venues,
         venueBlocks,
+        bulkRoomBlocks,
       };
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
     } catch {
@@ -299,6 +310,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     users,
     venues,
     venueBlocks,
+    bulkRoomBlocks,
   ]);
 
   // Sync from other tabs
@@ -332,6 +344,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
         if (Array.isArray(parsed.venues)) setVenues(parsed.venues);
         if (Array.isArray(parsed.venueBlocks)) setVenueBlocks(parsed.venueBlocks);
+        if (Array.isArray(parsed.bulkRoomBlocks)) setBulkRoomBlocks(parsed.bulkRoomBlocks);
       } catch {
         // ignore
       }
@@ -375,6 +388,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateBooking = useCallback((bookingId: string, patch: Partial<Booking>) => {
     setBookings((prev) =>
       prev.map((b) => (b.id === bookingId ? { ...b, ...patch } : b))
+    );
+  }, []);
+
+  const addExtras = useCallback((bookingId: string, newExtras: Extra[]) => {
+    setBookings((prev) =>
+      prev.map((b) => {
+        if (b.id !== bookingId) return b;
+        const charge = newExtras.reduce((s, e) => s + (e.amount || 0) + (e.gst || 0), 0);
+        const paid = newExtras.reduce((s, e) => s + (e.totalPaid ?? ((e.amount || 0) + (e.gst || 0))), 0);
+        const grandTotal = b.grandTotal + charge;
+        const advance = b.advance + paid;
+        const balance = Math.max(0, grandTotal - advance);
+        return { ...b, extras: [...b.extras, ...newExtras], grandTotal, advance, balance };
+      })
     );
   }, []);
 
@@ -450,6 +477,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
   const removeVenueBlock = useCallback((id: string) => {
     setVenueBlocks((prev) => prev.filter((vb) => vb.id !== id));
+  }, []);
+
+  const addBulkRoomBlock = useCallback((b: BulkRoomBlock) => {
+    setBulkRoomBlocks((prev) => [...prev, b]);
+  }, []);
+  const updateBulkRoomBlock = useCallback((id: string, patch: Partial<BulkRoomBlock>) => {
+    setBulkRoomBlocks((prev) => prev.map((b) => (b.id === id ? { ...b, ...patch } : b)));
+  }, []);
+  const removeBulkRoomBlock = useCallback((id: string) => {
+    setBulkRoomBlocks((prev) => prev.filter((b) => b.id !== id));
   }, []);
 
   const markLost = useCallback(
@@ -692,6 +729,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setGuestNote,
       createBooking,
       updateBooking,
+      addExtras,
       markLost,
       recordPayment,
       completeBooking,
@@ -728,6 +766,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addVenueBlock,
       updateVenueBlock,
       removeVenueBlock,
+      bulkRoomBlocks,
+      addBulkRoomBlock,
+      updateBulkRoomBlock,
+      removeBulkRoomBlock,
       notif,
       showNotif,
       modal,
@@ -747,6 +789,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setGuestNote,
       createBooking,
       updateBooking,
+      addExtras,
       markLost,
       recordPayment,
       completeBooking,
@@ -783,6 +826,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addVenueBlock,
       updateVenueBlock,
       removeVenueBlock,
+      bulkRoomBlocks,
+      addBulkRoomBlock,
+      updateBulkRoomBlock,
+      removeBulkRoomBlock,
       notif,
       showNotif,
       modal,

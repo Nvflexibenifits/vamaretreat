@@ -1,6 +1,7 @@
 import type {
   Booking,
   BookingStatus,
+  BulkRoomBlock,
   DiscountCaps,
   GstSettings,
   PricingRow,
@@ -188,7 +189,9 @@ export function findAvailableRoomIds(
   checkout: string,
   bookings: Booking[],
   inventory: RoomInventoryItem[] = ROOM_INVENTORY,
-  ignoreBookingId?: string
+  ignoreBookingId?: string,
+  bulkBlocks: BulkRoomBlock[] = [],
+  ignoreBlockId?: string
 ): string[] {
   const occupied = new Set<string>();
   bookings
@@ -196,6 +199,10 @@ export function findAvailableRoomIds(
     .filter((b) => b.status === "Tentative" || b.status === "Confirmed" || b.status === "Completed")
     .filter((b) => rangesOverlap(b.checkin, b.checkout, checkin, checkout))
     .forEach((b) => b.allocatedRooms.forEach((r) => occupied.add(r)));
+  bulkBlocks
+    .filter((blk) => blk.id !== ignoreBlockId)
+    .filter((blk) => rangesOverlap(blk.checkin, blk.checkout, checkin, checkout))
+    .forEach((blk) => blk.rows.forEach((row) => row.roomIds.forEach((r) => occupied.add(r))));
   return inventory
     .filter((r) => r.cat === category && r.active && !occupied.has(r.id))
     .map((r) => r.id);
@@ -211,9 +218,9 @@ export function tryAssignRooms(
   checkout: string,
   bookings: Booking[],
   inventory: RoomInventoryItem[] = ROOM_INVENTORY,
-  ignoreBookingId?: string
+  ignoreBookingId?: string,
+  bulkBlocks: BulkRoomBlock[] = []
 ): AssignmentResult {
-  // Per category, take max numRooms across rows (a guest holds those rooms for the full stay)
   const need = new Map<string, number>();
   pricingRows
     .filter((r) => r.roomId)
@@ -224,7 +231,7 @@ export function tryAssignRooms(
   const assigned: string[] = [];
   for (const [cat, count] of need.entries()) {
     if (count <= 0) continue;
-    const free = findAvailableRoomIds(cat, checkin, checkout, bookings, inventory, ignoreBookingId);
+    const free = findAvailableRoomIds(cat, checkin, checkout, bookings, inventory, ignoreBookingId, bulkBlocks);
     if (free.length < count) {
       const room = ROOMS.find((r) => r.id === cat);
       return { ok: false, missingCategoryName: room?.name ?? cat };

@@ -3,9 +3,11 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "@/lib/store";
-import { fmt, fmtIN, todayStr } from "@/lib/utils";
+import { findAvailableRoomIds, fmt, fmtIN, todayStr } from "@/lib/utils";
 import type {
   Booking,
+  BulkRoomBlock,
+  BulkRoomBlockRow,
   RoomNightUpgrade,
   Venue,
   VenueBlock,
@@ -23,11 +25,18 @@ const VENUE_TYPE_ORDER: VenueType[] = [
 
 type HoverState =
   | { kind: "booking"; booking: Booking; rect: DOMRect }
-  | { kind: "venue"; block: VenueBlock; venue: Venue; rect: DOMRect };
+  | { kind: "venue"; block: VenueBlock; venue: Venue; rect: DOMRect }
+  | { kind: "bulk"; block: BulkRoomBlock; rect: DOMRect };
 
 type BlockModalState =
   | { open: false }
   | { open: true; editingId?: string };
+
+type CellValue =
+  | { kind: "booking"; booking: Booking; fromRoomId: string; isOverridden: boolean }
+  | { kind: "bulk"; block: BulkRoomBlock };
+
+type BulkCatRow = { catId: string; count: number };
 
 function uid() {
   return Math.random().toString(36).slice(2, 9);
@@ -78,6 +87,10 @@ export default function RoomChartPage() {
     addVenueBlock,
     updateVenueBlock,
     removeVenueBlock,
+    bulkRoomBlocks,
+    addBulkRoomBlock,
+    updateBulkRoomBlock,
+    removeBulkRoomBlock,
     applyNightOverride,
     clearNightOverride,
     currentUser,
@@ -89,6 +102,9 @@ export default function RoomChartPage() {
   const [hover, setHover] = useState<HoverState | null>(null);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Choice modal (Venue vs Bulk Rooms)
+  const [choiceModal, setChoiceModal] = useState(false);
+
   // Venue block modal state
   const [blockModal, setBlockModal] = useState<BlockModalState>({ open: false });
   const [fVenueId, setFVenueId] = useState("");
@@ -97,6 +113,20 @@ export default function RoomChartPage() {
   const [fName, setFName] = useState("");
   const [fPax, setFPax] = useState("");
   const [fAmount, setFAmount] = useState("");
+
+  // Bulk rooms block modal state
+  const [bulkModal, setBulkModal] = useState<BlockModalState>({ open: false });
+  const [bGuestName, setBGuestName] = useState("");
+  const [bLabel, setBLabel] = useState("");
+  const [bCheckin, setBCheckin] = useState("");
+  const [bCheckout, setBCheckout] = useState("");
+  const [bPax, setBPax] = useState("");
+  const [bAmount, setBAmount] = useState("");
+  const [bStatus, setBStatus] = useState<"Tentative" | "Confirmed">("Tentative");
+  const [bCatRows, setBCatRows] = useState<BulkCatRow[]>([{ catId: "", count: 1 }]);
+
+  // Bulk block detail/delete modal
+  const [bulkDetail, setBulkDetail] = useState<BulkRoomBlock | null>(null);
 
   // Drag-and-drop state
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -180,14 +210,7 @@ export default function RoomChartPage() {
   // Per-night cell map: tracks the booking, original slot, and any active
   // override for each (effective room, date) cell.
   const cellMap = useMemo(() => {
-    const map: Record<
-      string,
-      {
-        booking: Booking;
-        fromRoomId: string;
-        isOverridden: boolean;
-      }
-    > = {};
+    const map: Record<string, CellValue> = {};
     bookings
       .filter(
         (b) =>
@@ -207,6 +230,7 @@ export default function RoomChartPage() {
             );
             const effectiveRoomId = override ? override.toRoomId : origRoomId;
             map[`${effectiveRoomId}|${ds}`] = {
+              kind: "booking",
               booking: b,
               fromRoomId: origRoomId,
               isOverridden: !!override,
@@ -215,8 +239,21 @@ export default function RoomChartPage() {
           cur.setDate(cur.getDate() + 1);
         }
       });
+    bulkRoomBlocks.forEach((blk) => {
+      const cur = new Date(blk.checkin);
+      const end = new Date(blk.checkout);
+      while (cur < end) {
+        const ds = cur.toISOString().split("T")[0];
+        blk.rows.forEach((row) =>
+          row.roomIds.forEach((roomId) => {
+            map[`${roomId}|${ds}`] = { kind: "bulk", block: blk };
+          })
+        );
+        cur.setDate(cur.getDate() + 1);
+      }
+    });
     return map;
-  }, [bookings]);
+  }, [bookings, bulkRoomBlocks]);
 
   const venueBlockMap = useMemo(() => {
     const map: Record<string, VenueBlock> = {};
@@ -331,61 +368,26 @@ export default function RoomChartPage() {
     );
   };
 
-  const saveBlock = () => {
-    if (!fVenueId) {
-      showNotif("Pick a venue", "error");
-      return;
-    }
-    if (!fCheckin || !fCheckout) {
-      showNotif("Pick check-in and check-out dates", "error");
-      return;
-    }
-    if (fCheckout <= fCheckin) {
-      showNotif("Check-out must be after check-in", "error");
-      return;
-    }
-    if (!fName.trim()) {
-      showNotif("Enter a name", "error");
-      return;
-    }
-    const editingId =
-      blockModal.open && blockModal.editingId ? blockModal.editingId : undefined;
+  const saveBlock = (status: "Tentative" | "Confirmed") => {
+    if (!fVenueId) { showNotif("Pick a venue", "error"); return; }
+    if (!fCheckin || !fCheckout) { showNotif("Pick check-in and check-out dates", "error"); return; }
+    if (fCheckout <= fCheckin) { showNotif("Check-out must be after check-in", "error"); return; }
+    if (!fName.trim()) { showNotif("Enter a name", "error"); return; }
+    const editingId = blockModal.open && blockModal.editingId ? blockModal.editingId : undefined;
     const conflict = overlapsExisting(fVenueId, fCheckin, fCheckout, editingId);
     if (conflict) {
       const vname = venueById[conflict.venueId]?.name || "Venue";
-      showNotif(
-        `${vname} already booked (${fmtIN(conflict.checkin)} to ${fmtIN(
-          conflict.checkout
-        )})`,
-        "error"
-      );
+      showNotif(`${vname} already booked (${fmtIN(conflict.checkin)} to ${fmtIN(conflict.checkout)})`, "error");
       return;
     }
     const pax = parseInt(fPax) || 0;
     const amount = parseInt(fAmount) || 0;
     if (editingId) {
-      updateVenueBlock(editingId, {
-        venueId: fVenueId,
-        checkin: fCheckin,
-        checkout: fCheckout,
-        name: fName.trim(),
-        pax,
-        amount,
-      });
+      updateVenueBlock(editingId, { venueId: fVenueId, checkin: fCheckin, checkout: fCheckout, name: fName.trim(), pax, amount, status });
       showNotif("Venue block updated", "success");
     } else {
-      addVenueBlock({
-        id: uid(),
-        venueId: fVenueId,
-        checkin: fCheckin,
-        checkout: fCheckout,
-        name: fName.trim(),
-        pax,
-        amount,
-        createdBy: currentUser,
-        createdAt: todayStr(),
-      });
-      showNotif("Venue blocked", "success");
+      addVenueBlock({ id: uid(), venueId: fVenueId, checkin: fCheckin, checkout: fCheckout, name: fName.trim(), pax, amount, status, createdBy: currentUser, createdAt: todayStr() });
+      showNotif(status === "Tentative" ? "Venue tentatively booked" : "Venue confirmed", "success");
     }
     closeBlockModal();
   };
@@ -395,6 +397,102 @@ export default function RoomChartPage() {
     removeVenueBlock(blockModal.editingId);
     showNotif("Venue block removed", "success");
     closeBlockModal();
+  };
+
+  // ─── Bulk room block handlers ───
+  const resetBulkForm = () => {
+    setBGuestName("");
+    setBLabel("");
+    setBCheckin(todayStr());
+    setBCheckout(addDays(todayStr(), 1));
+    setBPax("");
+    setBAmount("");
+    setBStatus("Tentative");
+    setBCatRows([{ catId: "", count: 1 }]);
+  };
+
+  const openBulkCreate = () => {
+    resetBulkForm();
+    setChoiceModal(false);
+    setHover(null);
+    setBulkModal({ open: true });
+  };
+
+  const openBulkEdit = (blk: BulkRoomBlock) => {
+    setBGuestName(blk.guestName);
+    setBLabel(blk.label);
+    setBCheckin(blk.checkin);
+    setBCheckout(blk.checkout);
+    setBPax(String(blk.pax || ""));
+    setBAmount(String(blk.amount || ""));
+    setBStatus(blk.status);
+    setBCatRows(blk.rows.map((r) => ({ catId: r.catId, count: r.roomIds.length })));
+    setBulkDetail(null);
+    setBulkModal({ open: true, editingId: blk.id });
+  };
+
+  const closeBulkModal = () => {
+    setBulkModal({ open: false });
+  };
+
+  const bulkAvailability = useMemo(() => {
+    if (!bCheckin || !bCheckout || bCheckout <= bCheckin) return {} as Record<string, number>;
+    const editingId = bulkModal.open && (bulkModal as { editingId?: string }).editingId;
+    const result: Record<string, number> = {};
+    rooms.forEach((r) => {
+      result[r.id] = findAvailableRoomIds(
+        r.id, bCheckin, bCheckout, bookings, roomInventory,
+        undefined, bulkRoomBlocks, editingId || undefined
+      ).length;
+    });
+    return result;
+  }, [bCheckin, bCheckout, bookings, roomInventory, bulkRoomBlocks, rooms, bulkModal]);
+
+  const saveBulkBlock = (status: "Tentative" | "Confirmed") => {
+    if (!bGuestName.trim()) { showNotif("Enter guest name", "error"); return; }
+    if (!bLabel.trim()) { showNotif("Enter a label", "error"); return; }
+    if (!bCheckin || !bCheckout || bCheckout <= bCheckin) { showNotif("Pick valid dates", "error"); return; }
+    const editingId = bulkModal.open && (bulkModal as { editingId?: string }).editingId;
+    const rows: BulkRoomBlockRow[] = [];
+    for (const row of bCatRows) {
+      if (!row.catId || row.count <= 0) continue;
+      const available = findAvailableRoomIds(
+        row.catId, bCheckin, bCheckout, bookings, roomInventory,
+        undefined, bulkRoomBlocks, editingId || undefined
+      );
+      if (available.length < row.count) {
+        const catName = rooms.find((r) => r.id === row.catId)?.name ?? row.catId;
+        showNotif(`Only ${available.length} ${catName} available for selected dates`, "error");
+        return;
+      }
+      rows.push({
+        catId: row.catId,
+        catName: rooms.find((r) => r.id === row.catId)?.name ?? row.catId,
+        roomIds: available.slice(0, row.count),
+      });
+    }
+    if (rows.length === 0) { showNotif("Add at least one room category", "error"); return; }
+    const block: BulkRoomBlock = {
+      id: editingId || ("brb-" + uid()),
+      label: bLabel.trim(),
+      guestName: bGuestName.trim(),
+      checkin: bCheckin,
+      checkout: bCheckout,
+      pax: parseInt(bPax) || 0,
+      amount: parseFloat(bAmount) || 0,
+      status,
+      rows,
+      createdBy: currentUser,
+      createdAt: new Date().toISOString(),
+    };
+    if (editingId) {
+      updateBulkRoomBlock(editingId, block);
+      showNotif("Block updated", "success");
+    } else {
+      addBulkRoomBlock(block);
+      showNotif(status === "Tentative" ? "Rooms tentatively booked" : "Rooms confirmed", "success");
+    }
+    closeBulkModal();
   };
 
   // ─── Drag & drop handlers (per-night room override) ───
@@ -624,8 +722,8 @@ export default function RoomChartPage() {
               </option>
             ))}
           </select>
-          <button className="btn btn-primary btn-sm" onClick={openCreate}>
-            Block Venue
+          <button className="btn btn-primary btn-sm" onClick={() => setChoiceModal(true)}>
+            Block
           </button>
         </div>
       </div>
@@ -755,7 +853,7 @@ export default function RoomChartPage() {
                               style={{ padding: 4 }}
                             >
                               <div
-                                className="rc-cell-booked"
+                                className={`rc-cell-booked${block.status === "Tentative" ? " status-tentative" : ""}`}
                                 onClick={() => openEdit(block)}
                                 onMouseEnter={(e) =>
                                   showHover({
@@ -830,7 +928,8 @@ export default function RoomChartPage() {
                   {dates.map((d) => {
                     const isToday = d === today;
                     const cell = cellMap[room.id + "|" + d];
-                    const booking = cell?.booking;
+                    const booking = cell?.kind === "booking" ? cell.booking : undefined;
+                    const bulkCell = cell?.kind === "bulk" ? cell : undefined;
                     const isDropHover =
                       dropTarget?.roomId === room.id && dropTarget?.date === d;
                     if (!room.active) {
@@ -846,7 +945,24 @@ export default function RoomChartPage() {
                         ></td>
                       );
                     }
-                    if (booking && cell) {
+                    if (bulkCell) {
+                      const blk = bulkCell.block;
+                      const cls = "rc-cell-booked" + (blk.status === "Tentative" ? " status-tentative" : "");
+                      return (
+                        <td key={d} className={isToday ? "rc-today" : ""} style={{ padding: 4 }}>
+                          <div
+                            className={cls}
+                            style={{ cursor: "pointer" }}
+                            onClick={() => { setBulkDetail(blk); setHover(null); }}
+                            onMouseEnter={(e) => showHover({ kind: "bulk", block: blk, rect: e.currentTarget.getBoundingClientRect() })}
+                            onMouseLeave={hideHover}
+                          >
+                            {(blk.label || blk.guestName).split(" ")[0]}
+                          </div>
+                        </td>
+                      );
+                    }
+                    if (booking && cell && cell.kind === "booking") {
                       let cls = "rc-cell-booked";
                       if (booking.pets > 0) cls += " status-pet";
                       else if (booking.status === "Completed") cls += " status-completed";
@@ -921,13 +1037,13 @@ export default function RoomChartPage() {
                               opacity: drag?.bookingId === booking.id ? 0.5 : 1,
                               cursor: draggable ? "grab" : "pointer",
                               // Subtle ring for nights with overrides so they're visually distinct
-                              boxShadow: cell.isOverridden
+                              boxShadow: cell.kind === "booking" && cell.isOverridden
                                 ? "inset 0 0 0 1px #7c3aed"
                                 : undefined,
                             }}
                             title={
                               draggable
-                                ? cell.isOverridden
+                                ? cell.kind === "booking" && cell.isOverridden
                                   ? "Drag to move · Click to open · Night reassigned"
                                   : "Drag to move · Click to open"
                                 : undefined
@@ -982,11 +1098,224 @@ export default function RoomChartPage() {
         <BookingHoverCard booking={hover.booking} rect={hover.rect} />
       )}
       {hover?.kind === "venue" && (
-        <VenueHoverCard
-          block={hover.block}
-          venue={hover.venue}
-          rect={hover.rect}
-        />
+        <VenueHoverCard block={hover.block} venue={hover.venue} rect={hover.rect} />
+      )}
+      {hover?.kind === "bulk" && (
+        <BulkHoverCard block={hover.block} rect={hover.rect} />
+      )}
+
+      {/* Choice modal */}
+      {choiceModal && (
+        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setChoiceModal(false); }}>
+          <div className="modal modal-sm">
+            <h3>Block</h3>
+            <p className="modal-desc">What would you like to block?</p>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+              {[
+                { title: "Venue", desc: "Block a venue space for an event", onClick: () => { setChoiceModal(false); openCreate(); } },
+                { title: "Bulk Rooms", desc: "Block multiple rooms for a group", onClick: openBulkCreate },
+              ].map((opt) => (
+                <button
+                  key={opt.title}
+                  type="button"
+                  onClick={opt.onClick}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "flex-start",
+                    gap: 6,
+                    padding: "16px 14px",
+                    background: "var(--surf2)",
+                    border: "1px solid var(--bd)",
+                    borderRadius: "var(--r2)",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    transition: "border-color .15s",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = "var(--acc)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = "var(--bd)")}
+                >
+                  <span style={{ fontSize: 14, fontWeight: 600, color: "var(--t1)" }}>{opt.title}</span>
+                  <span style={{ fontSize: 12, color: "var(--t3)", lineHeight: 1.4 }}>{opt.desc}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk rooms block modal */}
+      {bulkModal.open && (
+        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) closeBulkModal(); }}>
+          <div className="modal" style={{ maxWidth: 560, width: "100%" }}>
+            <h3>{(bulkModal as { editingId?: string }).editingId ? "Edit Room Block" : "Block Rooms"}</h3>
+            <p className="modal-desc">Block specific rooms for a group or event. Blocked rooms will not be available for new bookings.</p>
+            <div className="fg" style={{ marginTop: 12 }}>
+              <div className="field">
+                <label>Guest / Group Name *</label>
+                <input type="text" value={bGuestName} onChange={(e) => setBGuestName(e.target.value)} placeholder="e.g. Sharma Family" />
+              </div>
+              <div className="field">
+                <label>Label *</label>
+                <input type="text" value={bLabel} onChange={(e) => setBLabel(e.target.value)} placeholder="e.g. Corporate Retreat" />
+              </div>
+              <div className="field">
+                <label>Check-in *</label>
+                <input type="date" value={bCheckin} onChange={(e) => setBCheckin(e.target.value)} />
+              </div>
+              <div className="field">
+                <label>Check-out *</label>
+                <input type="date" value={bCheckout} onChange={(e) => setBCheckout(e.target.value)} />
+              </div>
+              <div className="field">
+                <label>Pax</label>
+                <input type="number" value={bPax} min={0} onChange={(e) => setBPax(e.target.value)} />
+              </div>
+              <div className="field">
+                <label>Amount (₹)</label>
+                <input type="number" value={bAmount} min={0} onChange={(e) => setBAmount(e.target.value)} />
+              </div>
+            </div>
+
+            {/* Category rows */}
+            <div style={{ marginTop: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", marginBottom: 8, gap: 10 }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: "var(--t1)" }}>Rooms to block</span>
+                <button
+                  className="btn btn-ghost btn-xs"
+                  style={{ marginLeft: "auto" }}
+                  onClick={() => setBCatRows((prev) => [...prev, { catId: "", count: 1 }])}
+                >
+                  + Add Row
+                </button>
+              </div>
+              <table className="pricing-tbl">
+                <thead>
+                  <tr>
+                    <th>Room Category</th>
+                    <th style={{ width: 110, textAlign: "center" }}>Available</th>
+                    <th style={{ width: 110, textAlign: "center" }}>Rooms Needed</th>
+                    <th style={{ width: 50 }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bCatRows.map((row, idx) => {
+                    const avail = row.catId ? (bulkAvailability[row.catId] ?? 0) : null;
+                    return (
+                      <tr key={idx}>
+                        <td>
+                          <select
+                            value={row.catId}
+                            onChange={(e) =>
+                              setBCatRows((prev) =>
+                                prev.map((r, i) => i === idx ? { ...r, catId: e.target.value } : r)
+                              )
+                            }
+                          >
+                            <option value="">— Category —</option>
+                            {rooms.map((r) => (
+                              <option key={r.id} value={r.id}>{r.name}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td style={{ textAlign: "center", fontSize: 13 }}>
+                          {avail === null ? "—" : (
+                            <span style={{ color: avail === 0 ? "var(--red)" : avail <= 2 ? "var(--amb)" : "var(--grn)", fontWeight: 600 }}>
+                              {avail}
+                            </span>
+                          )}
+                        </td>
+                        <td>
+                          <input
+                            type="number"
+                            value={row.count}
+                            min={1}
+                            max={avail ?? 99}
+                            style={{ textAlign: "center" }}
+                            onChange={(e) =>
+                              setBCatRows((prev) =>
+                                prev.map((r, i) => i === idx ? { ...r, count: parseInt(e.target.value) || 1 } : r)
+                              )
+                            }
+                          />
+                        </td>
+                        <td style={{ textAlign: "center" }}>
+                          {bCatRows.length > 1 && (
+                            <button
+                              className="btn btn-ghost btn-xs"
+                              style={{ color: "var(--red)" }}
+                              onClick={() => setBCatRows((prev) => prev.filter((_, i) => i !== idx))}
+                            >
+                              ×
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="modal-actions" style={{ marginTop: 16 }}>
+              <button className="btn btn-ghost" onClick={closeBulkModal}>Cancel</button>
+              <button className="btn btn-ghost" onClick={() => saveBulkBlock("Tentative")}>Tentatively Book</button>
+              <button className="btn btn-primary" onClick={() => saveBulkBlock("Confirmed")}>Confirm Book</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk block detail modal */}
+      {bulkDetail && (
+        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setBulkDetail(null); }}>
+          <div className="modal modal-sm">
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+              <div style={{ flex: 1 }}>
+                <h3 style={{ marginBottom: 2 }}>{bulkDetail.label}</h3>
+                <div style={{ fontSize: 13, color: "var(--t3)" }}>{bulkDetail.guestName}</div>
+              </div>
+              <span
+                className="badge"
+                style={{ background: bulkDetail.status === "Tentative" ? "var(--blu-bg)" : "var(--amb-bg)", color: bulkDetail.status === "Tentative" ? "var(--blu)" : "var(--amb)" }}
+              >
+                {bulkDetail.status}
+              </span>
+            </div>
+            <div style={{ marginTop: 12, fontSize: 13, color: "var(--t2)" }}>
+              <div>{fmtIN(bulkDetail.checkin)} → {fmtIN(bulkDetail.checkout)}</div>
+              {bulkDetail.pax > 0 && <div style={{ marginTop: 4 }}>{bulkDetail.pax} pax</div>}
+              {bulkDetail.amount > 0 && <div style={{ marginTop: 4 }}>{fmt(bulkDetail.amount)}</div>}
+            </div>
+            <div style={{ marginTop: 10 }}>
+              {bulkDetail.rows.map((row) => (
+                <div key={row.catId} style={{ fontSize: 12, color: "var(--t3)", marginTop: 4 }}>
+                  {row.catName}: {row.roomIds.join(", ")} ({row.roomIds.length} room{row.roomIds.length !== 1 ? "s" : ""})
+                </div>
+              ))}
+            </div>
+            <div className="modal-actions" style={{ marginTop: 16 }}>
+              <button
+                className="btn btn-ghost"
+                style={{ color: "var(--red)" }}
+                onClick={() => { removeBulkRoomBlock(bulkDetail.id); showNotif("Block removed", "success"); setBulkDetail(null); }}
+              >
+                Delete
+              </button>
+              {bulkDetail.status === "Tentative" && (
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => { updateBulkRoomBlock(bulkDetail.id, { status: "Confirmed" }); showNotif("Block confirmed", "success"); setBulkDetail(null); }}
+                >
+                  Confirm
+                </button>
+              )}
+              <button className="btn btn-primary" onClick={() => openBulkEdit(bulkDetail)}>
+                Edit
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {blockModal.open && (
@@ -997,7 +1326,7 @@ export default function RoomChartPage() {
           }}
         >
           <div className="modal modal-sm">
-            <h3>{blockModal.editingId ? "Edit Venue Block" : "Block Venue"}</h3>
+            <h3>{blockModal.editingId ? "Edit Venue Booking" : "Book Venue"}</h3>
             <p className="modal-desc">
               Reserve a venue for an event. The block will appear on the Room
               Chart for the selected dates.
@@ -1075,26 +1404,17 @@ export default function RoomChartPage() {
             </div>
             <div
               className="modal-actions"
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                marginTop: 16,
-              }}
+              style={{ display: "flex", justifyContent: "space-between", marginTop: 16 }}
             >
               <div>
                 {blockModal.editingId && (
-                  <button className="btn btn-danger" onClick={deleteBlock}>
-                    Delete
-                  </button>
+                  <button className="btn btn-danger" onClick={deleteBlock}>Delete</button>
                 )}
               </div>
               <div style={{ display: "flex", gap: 8 }}>
-                <button className="btn btn-ghost" onClick={closeBlockModal}>
-                  Cancel
-                </button>
-                <button className="btn btn-primary" onClick={saveBlock}>
-                  {blockModal.editingId ? "Save Changes" : "Block Venue"}
-                </button>
+                <button className="btn btn-ghost" onClick={closeBlockModal}>Cancel</button>
+                <button className="btn btn-ghost" onClick={() => saveBlock("Tentative")}>Tentatively Book</button>
+                <button className="btn btn-primary" onClick={() => saveBlock("Confirmed")}>Confirm Book</button>
               </div>
             </div>
           </div>
@@ -1432,6 +1752,40 @@ function VenueHoverCard({
       >
         Click to edit or delete
       </div>
+    </div>
+  );
+}
+
+function BulkHoverCard({ block, rect }: { block: BulkRoomBlock; rect: DOMRect }) {
+  const cardW = 260;
+  const { top, left, placeAbove } = positionForCard(rect, cardW);
+  const nights = nightsBetween(block.checkin, block.checkout);
+  const totalRooms = block.rows.reduce((s, r) => s + r.roomIds.length, 0);
+  return (
+    <div
+      style={{
+        position: "fixed", top, left,
+        transform: placeAbove ? "translate(-50%, -100%)" : "translate(-50%, 0)",
+        width: cardW,
+        background: "var(--surf)", border: "1px solid var(--bd)",
+        borderRadius: "var(--r2)", boxShadow: "0 6px 22px rgba(0,0,0,.14)",
+        padding: "12px 14px", fontSize: 12, color: "var(--t1)", zIndex: 60, pointerEvents: "none",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+        <div style={{ fontWeight: 700, fontSize: 13 }}>{block.label}</div>
+        <span className="badge" style={{ background: block.status === "Tentative" ? "var(--blu-bg)" : "var(--amb-bg)", color: block.status === "Tentative" ? "var(--blu)" : "var(--amb)", fontSize: 10 }}>
+          {block.status}
+        </span>
+      </div>
+      <div style={{ fontSize: 11, color: "var(--t3)", marginBottom: 6 }}>{block.guestName}</div>
+      <div style={{ fontSize: 11, color: "var(--t3)", marginBottom: 6 }}>
+        {fmtIN(block.checkin)} to {fmtIN(block.checkout)} · {nights} {nights === 1 ? "night" : "nights"}
+      </div>
+      <div style={{ fontSize: 11, color: "var(--t3)", marginBottom: 6 }}>
+        {totalRooms} room{totalRooms !== 1 ? "s" : ""} · {block.rows.map((r) => `${r.roomIds.length} ${r.catName}`).join(", ")}
+      </div>
+      <div style={{ marginTop: 8, fontSize: 10, color: "var(--t3)", textAlign: "right" }}>Click to view / edit / delete</div>
     </div>
   );
 }

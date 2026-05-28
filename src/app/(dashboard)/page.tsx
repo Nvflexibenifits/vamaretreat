@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { fmt, sevenDaysFrom, todayStr, weekRange } from "@/lib/utils";
+import { fmt, fmtIN, sevenDaysFrom, todayStr, weekRange } from "@/lib/utils";
 
 type RevFilter = "today" | "week" | "month";
 
@@ -11,7 +11,6 @@ export default function DashboardPage() {
   const router = useRouter();
   const { bookings, revenueEntries, currentUser, rooms, roomInventory } = useApp();
 
-  // Categories + totals are derived live from the master so a Blocked room drops the total.
   const roomCategories = useMemo(() => {
     return rooms.map((r) => {
       const total = roomInventory.filter(
@@ -22,7 +21,8 @@ export default function DashboardPage() {
   }, [rooms, roomInventory]);
 
   const [today, setToday] = useState("");
-  const [revFilter, setRevFilter] = useState<RevFilter>("week");
+  const [revFilter, setRevFilter] = useState<RevFilter>("month");
+  const [pendingOpen, setPendingOpen] = useState(false);
 
   useEffect(() => {
     setToday(todayStr());
@@ -55,8 +55,16 @@ export default function DashboardPage() {
 
   // ───── Payment Pending ─────
   const pendingBookings = useMemo(
-    () => bookings.filter((b) => b.balance > 0).sort((a, b) => b.balance - a.balance),
+    () =>
+      bookings
+        .filter((b) => b.balance > 0 && b.status !== "Cancelled" && b.status !== "Lost")
+        .sort((a, b) => a.checkin.localeCompare(b.checkin)),
     [bookings]
+  );
+
+  const totalPending = useMemo(
+    () => pendingBookings.reduce((s, b) => s + b.balance, 0),
+    [pendingBookings]
   );
 
   // ───── Room Status (next 7 days) ─────
@@ -100,106 +108,141 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* ───────── Revenue ───────── */}
-      <div className="card" style={{ marginBottom: 18 }}>
-        <div style={{ display: "flex", alignItems: "center", marginBottom: 16 }}>
-          <h3 style={{ fontSize: 15, fontWeight: 700, color: "var(--t1)" }}>Revenue</h3>
-          <div className="filter-bar" style={{ marginLeft: "auto", marginBottom: 0 }}>
-            {([
-              { id: "today", label: "Today" },
-              { id: "week", label: "This Week" },
-              { id: "month", label: "This Month" },
-            ] as { id: RevFilter; label: string }[]).map((f) => (
-              <button
-                key={f.id}
-                type="button"
-                className={`filter-btn${revFilter === f.id ? " on" : ""}`}
-                onClick={() => setRevFilter(f.id)}
-              >
-                {f.label}
-              </button>
-            ))}
+      {/* ───────── Top summary cards ───────── */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+
+        {/* Revenue card */}
+        <div className="card">
+          <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--t1)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>
+              Revenue
+            </span>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+              {(["today", "week", "month"] as RevFilter[]).map((f) => (
+                <button
+                  key={f}
+                  type="button"
+                  className={`filter-btn${revFilter === f ? " on" : ""}`}
+                  style={{ fontSize: 11, padding: "3px 8px" }}
+                  onClick={() => setRevFilter(f)}
+                >
+                  {f === "today" ? "Today" : f === "week" ? "Week" : "Month"}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="stat-val" style={{ fontSize: 34 }}>{fmt(revData.total)}</div>
+          <div className="stat-sub" style={{ marginTop: 6 }}>
+            {revData.label} · {revData.count} payment{revData.count !== 1 ? "s" : ""}
           </div>
         </div>
-        <div>
-          <div
-            className="stat-val"
-            style={{ fontSize: 38 }}
-          >
-            {fmt(revData.total)}
+
+        {/* Payment Pending summary card */}
+        <div className="card">
+          <div style={{ marginBottom: 14 }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--t1)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>
+              Payment Pending
+            </span>
           </div>
-          <div className="stat-sub" style={{ marginTop: 8 }}>
-            {revData.label} · {revData.count} payment event{revData.count !== 1 ? "s" : ""}
+          <div className="stat-val" style={{ fontSize: 34, color: "var(--amb)" }}>
+            {fmt(totalPending)}
+          </div>
+          <div className="stat-sub" style={{ marginTop: 6 }}>
+            {pendingBookings.length} booking{pendingBookings.length !== 1 ? "s" : ""} with outstanding balance
           </div>
         </div>
+
       </div>
 
-      {/* ───────── Payment Pending ───────── */}
-      <div className="tbl-wrap" style={{ marginBottom: 18 }}>
-        <div className="tbl-hd">
-          <h3>Payment Pending</h3>
-          <span className="tbl-hd-r" style={{ fontSize: 12, color: "var(--t3)" }}>
-            {pendingBookings.length} booking{pendingBookings.length !== 1 ? "s" : ""}
-          </span>
+      {/* ───────── Payment Pending list (collapsible) ───────── */}
+      <div className="tbl-wrap" style={{ marginBottom: 16 }}>
+        <div
+          className="tbl-hd"
+          style={{ cursor: "pointer", userSelect: "none" }}
+          onClick={() => setPendingOpen((v) => !v)}
+        >
+          <h3>Payment Pending List</h3>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginLeft: "auto" }}>
+            {pendingBookings.length > 0 && (
+              <span
+                className="badge"
+                style={{ background: "var(--amb-bg)", color: "var(--amb)", fontWeight: 700 }}
+              >
+                {pendingBookings.length}
+              </span>
+            )}
+            <span
+              style={{
+                fontSize: 18,
+                color: "var(--t3)",
+                lineHeight: 1,
+                transform: pendingOpen ? "rotate(180deg)" : "none",
+                transition: "transform .2s",
+                display: "inline-block",
+              }}
+            >
+              &#8964;
+            </span>
+          </div>
         </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Booking ID</th>
-              <th>Guest Name</th>
-              <th style={{ textAlign: "right" }}>Amount Pending</th>
-            </tr>
-          </thead>
-          <tbody>
-            {pendingBookings.length === 0 ? (
+
+        {pendingOpen && (
+          <table>
+            <thead>
               <tr>
-                <td colSpan={3}>
-                  <div className="empty-state">
-                    <h3>All bookings paid up</h3>
-                    <p>No pending balances right now</p>
-                  </div>
-                </td>
+                <th>Booking ID</th>
+                <th>Guest Name</th>
+                <th>Check-in</th>
+                <th>Check-out</th>
+                <th style={{ textAlign: "right" }}>Amount Pending</th>
               </tr>
-            ) : (
-              pendingBookings.map((b) => (
-                <tr key={b.id} onClick={() => router.push(`/bookings/${b.id}`)}>
-                  <td>
-                    <span
-                      style={{
-                        fontSize: 11,
-                        fontFamily: "var(--font-outfit), Outfit, sans-serif",
-                        color: "var(--t3)",
-                        fontWeight: 700,
-                      }}
-                    >
-                      {b.id}
-                    </span>
-                  </td>
-                  <td>
-                    <div style={{ fontWeight: 500, color: "var(--t1)" }}>{b.guest}</div>
-                    <div style={{ fontSize: 11, color: "var(--t3)" }}>{b.mobile}</div>
-                  </td>
-                  <td style={{ textAlign: "right", fontWeight: 700, color: "var(--amb)" }}>
-                    {fmt(b.balance)}
+            </thead>
+            <tbody>
+              {pendingBookings.length === 0 ? (
+                <tr>
+                  <td colSpan={5}>
+                    <div className="empty-state">
+                      <h3>All bookings paid up</h3>
+                      <p>No pending balances right now</p>
+                    </div>
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ) : (
+                pendingBookings.map((b) => (
+                  <tr key={b.id} onClick={() => router.push(`/bookings/${b.id}`)}>
+                    <td>
+                      <span style={{ fontSize: 11, fontFamily: "var(--font-outfit), Outfit, sans-serif", color: "var(--t3)", fontWeight: 700 }}>
+                        {b.id}
+                      </span>
+                    </td>
+                    <td>
+                      <div style={{ fontWeight: 500, color: "var(--t1)" }}>{b.guest}</div>
+                      <div style={{ fontSize: 11, color: "var(--t3)" }}>{b.mobile}</div>
+                    </td>
+                    <td>{fmtIN(b.checkin)}</td>
+                    <td>{fmtIN(b.checkout)}</td>
+                    <td style={{ textAlign: "right", fontWeight: 700, color: "var(--amb)" }}>
+                      {fmt(b.balance)}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        )}
       </div>
 
-      {/* ───────── Room Status ───────── */}
+      {/* ───────── Weekly Room Status ───────── */}
       <div className="tbl-wrap">
         <div className="tbl-hd">
-          <h3>Room Status</h3>
+          <h3>Weekly Room Status</h3>
         </div>
         <table>
           <thead>
             <tr>
               <th>Room Category</th>
               {roomDates.map((d) => {
-                const dt = new Date(d);
+                const dt = new Date(d + "T00:00:00");
                 const wk = dt.toLocaleDateString("en-IN", { weekday: "short" });
                 const dm = `${String(dt.getDate()).padStart(2, "0")}/${String(dt.getMonth() + 1).padStart(2, "0")}`;
                 return (
@@ -220,7 +263,7 @@ export default function DashboardPage() {
                 </td>
                 {row.cells.map((c) => (
                   <td key={c.date} style={{ textAlign: "center" }}>
-                    <div className="rs-cell" title={`Booked / Tentative / Available`}>
+                    <div className="rs-cell" title="Booked / Tentative / Available">
                       <span className="rs-b">{c.booked}</span>
                       <span className="rs-sep">/</span>
                       <span className="rs-t">{c.tentative}</span>
@@ -240,13 +283,13 @@ export default function DashboardPage() {
             background: "var(--surf2)",
             fontSize: 11,
             color: "var(--t3)",
-            display: "flex",
-            gap: 18,
           }}
         >
-          <span>
-            <strong style={{ color: "var(--amb)" }}>Booked</strong> / <strong style={{ color: "var(--t3)" }}>Tentative</strong> / <strong style={{ color: "var(--grn)" }}>Available</strong>
-          </span>
+          <strong style={{ color: "var(--amb)" }}>Booked</strong>
+          {" / "}
+          <strong style={{ color: "var(--t3)" }}>Tentative</strong>
+          {" / "}
+          <strong style={{ color: "var(--grn)" }}>Available</strong>
         </div>
       </div>
     </div>

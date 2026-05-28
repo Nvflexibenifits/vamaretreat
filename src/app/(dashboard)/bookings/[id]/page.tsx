@@ -27,10 +27,12 @@ export default function BookingDetailPage() {
   const canPay = b.status === "Confirmed" && b.balance > 0;
   const canComplete = b.status === "Confirmed";
   const canEdit =
-    b.status === "Enquiry" || b.status === "Tentative" || b.status === "Confirmed";
+    b.status === "Enquiry" || b.status === "Tentative" || b.status === "Confirmed" || b.status === "Completed";
+  const editLabel = b.status === "Completed" ? "Add Expenses" : "Edit";
 
   const totalCollected =
-    b.payments.reduce((s, p) => s + p.amount, 0) + b.extras.reduce((s, e) => s + e.amount, 0);
+    b.payments.reduce((s, p) => s + p.amount, 0) +
+    b.extras.reduce((s, e) => s + (e.totalPaid ?? e.amount + (e.gst ?? 0)), 0);
 
   const totalKids = b.kidsAbove10 + b.kids6to10 + b.kids2to6;
   const totalRoomBaseCharges = b.pricingRows.reduce((s, r) => s + r.roomCharges, 0);
@@ -109,7 +111,7 @@ export default function BookingDetailPage() {
             )}
             {canEdit && (
               <Link href={`/bookings/${b.id}/edit`} className="btn btn-ghost btn-sm">
-                Edit
+                {editLabel}
               </Link>
             )}
             <a
@@ -385,8 +387,11 @@ export default function BookingDetailPage() {
                 <div key={`e-${i}`} className="trail-item">
                   <div className="t-dot t-amb"></div>
                   <div className="t-time">{fmtIN(e.date || b.checkout)}</div>
-                  <div className="t-lbl"><strong>Extra: {e.name}</strong></div>
-                  <div className="t-amt">{fmt(e.amount)}</div>
+                  <div className="t-lbl">
+                    <strong>Extra: {e.name}</strong>
+                    {e.gst ? <span style={{ fontSize: 11, color: "var(--t3)", marginLeft: 6 }}>+{fmt(e.gst)} GST</span> : null}
+                  </div>
+                  <div className="t-amt">{fmt(e.totalPaid ?? e.amount + (e.gst ?? 0))}</div>
                   <div className="t-by">{e.by || b.rex}</div>
                 </div>
               ))}

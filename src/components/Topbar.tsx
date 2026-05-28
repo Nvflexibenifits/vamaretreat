@@ -7,7 +7,7 @@ import { useApp } from "@/lib/store";
 import { formatLongDate } from "@/lib/utils";
 
 const TITLES: Record<string, string> = {
-  "/": "Dashboard",
+  "/": "Home",
   "/bookings": "All Bookings",
   "/bookings/new": "New Booking — B2C",
   "/room-chart": "Room Chart",
@@ -19,7 +19,7 @@ const TITLES: Record<string, string> = {
 function getTitle(pathname: string): string {
   if (TITLES[pathname]) return TITLES[pathname];
   if (/^\/bookings\/[^/]+$/.test(pathname)) return "Booking Detail";
-  return "Dashboard";
+  return "Home";
 }
 
 export function Topbar() {

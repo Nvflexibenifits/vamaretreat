@@ -97,6 +97,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     discountCaps,
     packageRates,
     gstSettings,
+    bulkRoomBlocks,
   } = useApp();
 
   const isEdit = mode === "edit" && !!initial;
@@ -430,7 +431,9 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
         checkin,
         checkout,
         bookings,
-        roomInventory
+        roomInventory,
+        undefined,
+        bulkRoomBlocks
       );
       if (!result.ok) {
         showNotif(`No ${result.missingCategoryName} available for selected dates`, "error");
@@ -457,7 +460,8 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
         checkout,
         bookings,
         roomInventory,
-        initial.id
+        initial.id,
+        bulkRoomBlocks
       );
       if (!result.ok) {
         showNotif(`No ${result.missingCategoryName} available for selected dates`, "error");

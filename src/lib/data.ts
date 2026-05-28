@@ -1,5 +1,6 @@
 import type {
   Booking,
+  BulkRoomBlock,
   CancellationPolicy,
   CreditNoteSettings,
   DiscountCaps,
@@ -527,3 +528,6 @@ export const SEED_VENUES: Venue[] = [];
 
 // ─────────── Venue Blocks (manual reservations on the room chart) ───────────
 export const SEED_VENUE_BLOCKS: VenueBlock[] = [];
+
+// ─────────── Bulk Room Blocks ───────────
+export const SEED_BULK_ROOM_BLOCKS: BulkRoomBlock[] = [];
