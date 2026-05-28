@@ -1,7 +1,9 @@
 import type {
   Booking,
+  CancellationPolicy,
   CreditNoteSettings,
   DiscountCaps,
+  GstSettings,
   PackageRates,
   PricingRow,
   RoomInventoryItem,
@@ -13,17 +15,18 @@ import type {
 } from "@/types";
 
 // ─────────── ROOM TYPE MASTER (pricing source of truth) ───────────
-// Single tariff per room. Weekday/weekend discount % is auto-applied on each
-// pricing row based on the row's day type. Sales rep can override per row.
+// Room Tariff FY 2025-26 w.e.f. 22.09.25. GST is computed dynamically via
+// GstSettings (threshold 7500: below=5%, above=18%) — not stored per room.
 export const ROOMS: RoomMaster[] = [
-  { id: "TENT", name: "Tent", price: 4500, weekdayDiscount: 16, weekendDiscount: 0, gst: 5 },
-  { id: "CPL", name: "Couple Room", price: 7500, weekdayDiscount: 13, weekendDiscount: 0, gst: 5 },
-  { id: "FM", name: "Family Room", price: 9000, weekdayDiscount: 11, weekendDiscount: 0, gst: 18 },
-  { id: "1BHK", name: "1BHK Villa", price: 9800, weekdayDiscount: 10, weekendDiscount: 0, gst: 18 },
-  { id: "1BHK-GV", name: "1BHK Garden View", price: 11500, weekdayDiscount: 9, weekendDiscount: 0, gst: 18 },
-  { id: "2BHK", name: "2BHK Villa", price: 13000, weekdayDiscount: 8, weekendDiscount: 0, gst: 18 },
-  { id: "2BHK-GV", name: "2BHK Garden View", price: 14200, weekdayDiscount: 7, weekendDiscount: 0, gst: 18 },
-  { id: "PV", name: "1BHK Pool Villa", price: 25800, weekdayDiscount: 22, weekendDiscount: 0, gst: 18 },
+  { id: "TENT",    name: "Tent",                                price:  3800, weekdayDiscount: 20, fridayDiscount: 15, weekendDiscount: 10 },
+  { id: "CPL",     name: "Couple Room",                         price:  6200, weekdayDiscount: 20, fridayDiscount: 15, weekendDiscount: 10 },
+  { id: "FM",      name: "Family Room",                         price:  7600, weekdayDiscount: 20, fridayDiscount: 15, weekendDiscount: 10 },
+  { id: "1BHK",    name: "1 BHK Villa",                         price:  8300, weekdayDiscount: 18, fridayDiscount: 15, weekendDiscount: 10 },
+  { id: "1BHK-GV", name: "1 BHK Garden Villa (Ideal for Pets)", price: 10000, weekdayDiscount: 16, fridayDiscount: 15, weekendDiscount: 10 },
+  { id: "2BHK",    name: "2 BHK Villa",                         price: 11500, weekdayDiscount: 16, fridayDiscount: 15, weekendDiscount: 10 },
+  { id: "2BHK-GV", name: "2 BHK Garden Villa (Ideal for Pets)", price: 12500, weekdayDiscount: 15, fridayDiscount: 15, weekendDiscount: 10 },
+  { id: "3BHK-GV", name: "3 BHK Garden Villa",                  price: 16000, weekdayDiscount: 15, fridayDiscount: 15, weekendDiscount: 10 },
+  { id: "PV",      name: "1 BHK Pool Villa",                    price: 24500, weekdayDiscount: 20, fridayDiscount: 15, weekendDiscount: 10 },
 ];
 
 // ─────────── PHYSICAL ROOMS (51 total per doc §1) ───────────
@@ -38,32 +41,35 @@ function inventoryFor(prefix: string, type: string, cat: string, count: number):
 }
 
 export const SEED_ROOM_INVENTORY: RoomInventoryItem[] = [
-  { id: "PV1", label: "PV1", type: "Pool Villa", cat: "PV", active: true },
-  ...inventoryFor("V", "1BHK Villa", "1BHK", 12),
-  ...inventoryFor("GV", "1BHK Garden View", "1BHK-GV", 8),
-  ...inventoryFor("2B", "2BHK Villa", "2BHK", 5),
-  ...inventoryFor("2GV", "2BHK Garden View", "2BHK-GV", 5),
-  ...inventoryFor("FM", "Family Room", "FM", 4),
-  ...inventoryFor("CPL", "Couple Room", "CPL", 10),
-  ...inventoryFor("T", "Tent", "TENT", 6),
+  { id: "PV1", label: "PV1", type: "1 BHK Pool Villa", cat: "PV", active: true },
+  ...inventoryFor("V",   "1 BHK Villa",                         "1BHK",    12),
+  ...inventoryFor("GV",  "1 BHK Garden Villa (Ideal for Pets)", "1BHK-GV",  8),
+  ...inventoryFor("2B",  "2 BHK Villa",                         "2BHK",     5),
+  ...inventoryFor("2GV", "2 BHK Garden Villa (Ideal for Pets)", "2BHK-GV",  5),
+  ...inventoryFor("3GV", "3 BHK Garden Villa",                  "3BHK-GV",  3),
+  ...inventoryFor("FM",  "Family Room",                         "FM",        4),
+  ...inventoryFor("CPL", "Couple Room",                         "CPL",      10),
+  ...inventoryFor("T",   "Tent",                                "TENT",      6),
 ];
 
 // Backwards-compatible alias so existing imports keep working
 export const ROOM_INVENTORY = SEED_ROOM_INVENTORY;
 
 // ─────────── HELPERS used by seed builder ───────────
-function splitNights(checkin: string, checkout: string): { weekday: number; weekend: number } {
+function splitNights(checkin: string, checkout: string): { weekday: number; friday: number; saturday: number } {
   let weekday = 0;
-  let weekend = 0;
+  let friday = 0;
+  let saturday = 0;
   const cur = new Date(checkin);
   const end = new Date(checkout);
   while (cur < end) {
     const d = cur.getDay();
-    if (d === 5 || d === 6) weekend++;
+    if (d === 5) friday++;
+    else if (d === 6) saturday++;
     else weekday++;
     cur.setDate(cur.getDate() + 1);
   }
-  return { weekday, weekend };
+  return { weekday, friday, saturday };
 }
 
 function mkPricingRow(
@@ -76,12 +82,15 @@ function mkPricingRow(
   const room = ROOMS.find((r) => r.id === roomId)!;
   const tariff = room.price;
   const dayDiscount =
-    rowType === "fri-sat" ? room.weekendDiscount : room.weekdayDiscount;
+    rowType === "sat" ? room.weekendDiscount
+    : rowType === "fri" ? room.fridayDiscount
+    : room.weekdayDiscount;
   const effectiveDisc = Math.max(discountPct, dayDiscount);
   const roomCharges = tariff * nights * numRooms;
   const discountAmt = roomCharges * (effectiveDisc / 100);
   const netCharges = roomCharges - discountAmt;
-  const gstAmt = netCharges * (room.gst / 100);
+  const gstRate = tariff > 7500 ? 18 : 5;
+  const gstAmt = netCharges * (gstRate / 100);
   const totalAmt = netCharges + gstAmt;
   return {
     rowType,
@@ -94,7 +103,7 @@ function mkPricingRow(
     discountPct: effectiveDisc,
     discountAmt,
     netCharges,
-    gstRate: room.gst,
+    gstRate,
     gstAmt,
     totalAmt,
   };
@@ -107,10 +116,11 @@ function pricingRowsFor(
   numRooms: number,
   discountPct: number
 ): PricingRow[] {
-  const { weekday, weekend } = splitNights(checkin, checkout);
+  const { weekday, friday, saturday } = splitNights(checkin, checkout);
   const rows: PricingRow[] = [];
-  if (weekday > 0) rows.push(mkPricingRow("sun-thu", roomId, weekday, numRooms, discountPct));
-  if (weekend > 0) rows.push(mkPricingRow("fri-sat", roomId, weekend, numRooms, discountPct));
+  if (weekday > 0)  rows.push(mkPricingRow("sun-thu", roomId, weekday,  numRooms, discountPct));
+  if (friday > 0)   rows.push(mkPricingRow("fri",     roomId, friday,   numRooms, discountPct));
+  if (saturday > 0) rows.push(mkPricingRow("sat",     roomId, saturday, numRooms, discountPct));
   return rows;
 }
 
@@ -464,6 +474,27 @@ export const SEED_DISCOUNT_CAPS: DiscountCaps = {
 export const SEED_PACKAGE_RATES: PackageRates = {
   mealPerAdultPerNight: 2100,
   petPerPetPerNight: 1200,
+  driverPerNight: 1500,
+  individualBreakfast: 300,
+  individualLunchHighTea: 700,
+  individualOnlyDinner: 800,
+  individualBbqEveningDinner: 1300,
+};
+
+export const SEED_GST_SETTINGS: GstSettings = {
+  threshold: 7500,
+  belowRate: 5,
+  aboveRate: 18,
+};
+
+export const SEED_CANCELLATION_POLICY: CancellationPolicy = {
+  tiers: [
+    { id: "ct-30", minDaysBeforeCheckin: 30, refundPct: 90, resolution: "refund" },
+    { id: "ct-15", minDaysBeforeCheckin: 15, refundPct: 75, resolution: "refund" },
+    { id: "ct-7",  minDaysBeforeCheckin:  7, refundPct: 50, resolution: "credit-note" },
+    { id: "ct-1",  minDaysBeforeCheckin:  1, refundPct: 25, resolution: "credit-note" },
+    { id: "ct-0",  minDaysBeforeCheckin:  0, refundPct:  0, resolution: "credit-note" },
+  ],
 };
 
 // ─────────── Special Days (2026 seed) ───────────

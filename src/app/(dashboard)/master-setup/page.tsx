@@ -5,11 +5,16 @@ import { useApp } from "@/lib/store";
 import {
   SEED_DISCOUNT_CAPS,
   SEED_PACKAGE_RATES,
+  SEED_GST_SETTINGS,
+  SEED_CANCELLATION_POLICY,
   ROOMS as SEED_ROOMS,
 } from "@/lib/data";
 import type {
+  CancellationPolicy,
+  CancellationTier,
   CreditNoteSettings,
   DiscountCaps,
+  GstSettings,
   PackageRates,
   Role,
   RoomInventoryItem,
@@ -21,21 +26,23 @@ import type {
 } from "@/types";
 
 type Tab =
-  | "rooms"
+  | "rooms-pricing"
+  | "rooms-inventory"
   | "venues"
   | "meal"
   | "discount"
   | "special"
-  | "credit"
+  | "cancellation"
   | "users";
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: "rooms", label: "Room Master" },
+  { id: "rooms-pricing", label: "Room Pricing" },
+  { id: "rooms-inventory", label: "Room Inventory" },
   { id: "venues", label: "Venue Master" },
   { id: "meal", label: "Meal Package" },
   { id: "discount", label: "Discount Rules" },
   { id: "special", label: "Special Days" },
-  { id: "credit", label: "Credit Note Settings" },
+  { id: "cancellation", label: "Cancellation Setup" },
   { id: "users", label: "Users" },
 ];
 
@@ -70,14 +77,14 @@ function uid(): string {
 }
 
 export default function MasterSetupPage() {
-  const [tab, setTab] = useState<Tab>("rooms");
+  const [tab, setTab] = useState<Tab>("rooms-pricing");
 
   return (
     <div className="view">
       <div className="pg-hd">
         <div>
           <h2>Master Setup</h2>
-          <p>Configure pricing, discounts, special days, credit notes and users</p>
+          <p>Configure pricing, discounts, special days, cancellations and users</p>
         </div>
       </div>
 
@@ -95,27 +102,17 @@ export default function MasterSetupPage() {
         </div>
 
         <div>
-          {tab === "rooms" && <RoomMasterTab />}
+          {tab === "rooms-pricing" && <RoomPricingSection />}
+          {tab === "rooms-inventory" && <RoomInventorySection />}
           {tab === "venues" && <VenueMasterTab />}
           {tab === "meal" && <MealPackageTab />}
           {tab === "discount" && <DiscountTab />}
           {tab === "special" && <SpecialDaysTab />}
-          {tab === "credit" && <CreditNoteTab />}
+          {tab === "cancellation" && <CancellationSetupTab />}
           {tab === "users" && <UsersTab />}
         </div>
       </div>
     </div>
-  );
-}
-
-// ─────────── Room Master (Pricing + Inventory) ───────────
-function RoomMasterTab() {
-  return (
-    <>
-      <RoomPricingSection />
-      <div style={{ height: 18 }} />
-      <RoomInventorySection />
-    </>
   );
 }
 
@@ -464,15 +461,41 @@ function MealPackageTab() {
     showNotif("Meal package saved", "success");
   };
 
+  const gst18 = (base: number) => Math.round(base * 0.18);
+  const total = (base: number) => base + gst18(base);
+
+  const rateRow = (
+    label: string,
+    field: keyof PackageRates,
+    perLabel: string
+  ) => {
+    const base = draft[field] as number;
+    return (
+      <tr key={field}>
+        <td style={{ fontWeight: 500 }}>{label}</td>
+        <td>
+          <input
+            type="number"
+            value={base}
+            min={0}
+            onChange={(e) =>
+              setDraft((prev) => ({ ...prev, [field]: parseInt(e.target.value) || 0 }))
+            }
+          />
+        </td>
+        <td style={{ textAlign: "right" }}>₹{gst18(base).toLocaleString("en-IN")}</td>
+        <td style={{ textAlign: "right", fontWeight: 600 }}>₹{total(base).toLocaleString("en-IN")}</td>
+        <td style={{ fontSize: 12, color: "var(--t3)" }}>{perLabel}</td>
+      </tr>
+    );
+  };
+
   return (
     <div className="settings-panel">
       <div className="sp-hd">
         <h3>Meal Package</h3>
         <div style={{ display: "flex", gap: 8 }}>
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={() => setDraft(SEED_PACKAGE_RATES)}
-          >
+          <button className="btn btn-ghost btn-sm" onClick={() => setDraft(SEED_PACKAGE_RATES)}>
             Reset to defaults
           </button>
           <button className="btn btn-primary btn-sm" onClick={save}>
@@ -481,54 +504,60 @@ function MealPackageTab() {
         </div>
       </div>
       <div className="sp-body">
-        <p style={{ fontSize: 12, color: "var(--t3)", marginBottom: 14 }}>
-          Meal &amp; Activity Package is applied per adult per night when the
-          booking form's meal toggle is on. Pet Package auto-applies per pet
-          per night when the guest brings pets.
+        <div style={{ fontFamily: "var(--font-outfit), Outfit, sans-serif", fontSize: 13, fontWeight: 700, color: "var(--t1)", marginBottom: 8 }}>
+          Meal &amp; Activity Package — FY 2026-27
+        </div>
+        <p style={{ fontSize: 12, color: "var(--t3)", marginBottom: 12 }}>
+          Applied per person / per pet per night. 18% GST included. All amounts editable.
         </p>
         <table className="pricing-tbl">
           <thead>
             <tr>
               <th>Package</th>
-              <th>Rate (₹)</th>
+              <th>Basic Price (₹)</th>
+              <th style={{ textAlign: "right" }}>18% GST</th>
+              <th style={{ textAlign: "right" }}>Total Price</th>
               <th>Per</th>
-              <th>GST</th>
             </tr>
           </thead>
           <tbody>
+            {rateRow("Per Adult / Child > 10 Yrs", "mealPerAdultPerNight", "person / night")}
+            {rateRow("Per Pet Package", "petPerPetPerNight", "pet / night")}
+            {rateRow("Per Driver / Attendant", "driverPerNight", "person / night")}
+          </tbody>
+        </table>
+
+        <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 8, lineHeight: 1.7 }}>
+          1. No charge for Kids &lt; 6 yrs.&nbsp;&nbsp;
+          2. Pet charges apply even if pet meal is not taken.&nbsp;&nbsp;
+          3. Drivers/attendants not permitted for activities &amp; pool.
+        </div>
+
+        <div style={{ fontFamily: "var(--font-outfit), Outfit, sans-serif", fontSize: 13, fontWeight: 700, color: "var(--t1)", marginTop: 24, marginBottom: 8 }}>
+          Individual Meal Charges — OTA / Visitors (per adult)
+        </div>
+        <p style={{ fontSize: 12, color: "var(--t3)", marginBottom: 12 }}>
+          For walk-in guests, OTA bookings, or visitors not on the package.
+        </p>
+        <table className="pricing-tbl">
+          <thead>
             <tr>
-              <td style={{ fontWeight: 500 }}>Meal &amp; Activity Package</td>
-              <td>
-                <input
-                  type="number"
-                  value={draft.mealPerAdultPerNight}
-                  onChange={(e) =>
-                    setDraft((prev) => ({
-                      ...prev,
-                      mealPerAdultPerNight: parseInt(e.target.value) || 0,
-                    }))
-                  }
-                />
-              </td>
-              <td>adult / night</td>
-              <td>18%</td>
+              <th>Meal</th>
+              <th>Basic Price (₹)</th>
+              <th style={{ textAlign: "right" }}>18% GST</th>
+              <th style={{ textAlign: "right" }}>Total Price</th>
+              <th></th>
             </tr>
+          </thead>
+          <tbody>
+            {rateRow("Breakfast", "individualBreakfast", "per adult")}
+            {rateRow("Lunch & High Tea", "individualLunchHighTea", "per adult")}
+            {rateRow("Only Dinner", "individualOnlyDinner", "per adult")}
+            {rateRow("BBQ + Evening Snacks & Dinner", "individualBbqEveningDinner", "per adult")}
             <tr>
-              <td style={{ fontWeight: 500 }}>Pet Package</td>
-              <td>
-                <input
-                  type="number"
-                  value={draft.petPerPetPerNight}
-                  onChange={(e) =>
-                    setDraft((prev) => ({
-                      ...prev,
-                      petPerPetPerNight: parseInt(e.target.value) || 0,
-                    }))
-                  }
-                />
+              <td style={{ fontStyle: "italic", color: "var(--t3)" }} colSpan={5}>
+                Morning Tea — No charge
               </td>
-              <td>pet / night</td>
-              <td>18%</td>
             </tr>
           </tbody>
         </table>
@@ -537,12 +566,14 @@ function MealPackageTab() {
   );
 }
 
-// ─────────── Room Pricing (section inside Room Master) ───────────
+// ─────────── Room Pricing ───────────
 function RoomPricingSection() {
-  const { rooms, updateRooms, showNotif } = useApp();
+  const { rooms, updateRooms, gstSettings, updateGstSettings, showNotif } = useApp();
   const [draftRooms, setDraftRooms] = useState<RoomMaster[]>(rooms);
+  const [draftGst, setDraftGst] = useState<GstSettings>(gstSettings);
 
   useEffect(() => setDraftRooms(rooms), [rooms]);
+  useEffect(() => setDraftGst(gstSettings), [gstSettings]);
 
   const setRoomField = (id: string, key: keyof RoomMaster, value: number) => {
     setDraftRooms((prev) =>
@@ -552,8 +583,12 @@ function RoomPricingSection() {
 
   const save = () => {
     updateRooms(draftRooms);
+    updateGstSettings(draftGst);
     showNotif("Room pricing saved", "success");
   };
+
+  const gstPreviewLow = `${draftGst.belowRate}% GST on tariffs ≤ ₹${draftGst.threshold.toLocaleString("en-IN")}`;
+  const gstPreviewHigh = `${draftGst.aboveRate}% GST on tariffs > ₹${draftGst.threshold.toLocaleString("en-IN")}`;
 
   return (
     <div className="settings-panel">
@@ -562,7 +597,7 @@ function RoomPricingSection() {
         <div style={{ display: "flex", gap: 8 }}>
           <button
             className="btn btn-ghost btn-sm"
-            onClick={() => setDraftRooms(SEED_ROOMS)}
+            onClick={() => { setDraftRooms(SEED_ROOMS); setDraftGst(SEED_GST_SETTINGS); }}
           >
             Reset to defaults
           </button>
@@ -573,17 +608,17 @@ function RoomPricingSection() {
       </div>
       <div className="sp-body">
         <p style={{ fontSize: 12, color: "var(--t3)", marginBottom: 14 }}>
-          One fixed tariff per room. Weekday and weekend discounts auto-apply
-          on the booking form based on day of stay (Fri &amp; Sat are weekend).
+          Standard rates w.e.f. 22.09.25. Three discount tiers auto-apply on the booking form:
+          Sun–Thu, Friday, and Sat &amp; Peak Days. GST is computed per the rule below — not stored per room.
         </p>
         <table className="pricing-tbl">
           <thead>
             <tr>
               <th>Room Type</th>
-              <th>Tariff (₹)</th>
-              <th>Weekday Disc %</th>
-              <th>Weekend Disc %</th>
-              <th>GST %</th>
+              <th style={{ textAlign: "right", width: 120 }}>Tariff (₹)</th>
+              <th style={{ textAlign: "right", width: 120 }}>Sun–Thu Disc %</th>
+              <th style={{ textAlign: "right", width: 120 }}>Friday Disc %</th>
+              <th style={{ textAlign: "right", width: 140 }}>Sat & Peak Disc %</th>
             </tr>
           </thead>
           <tbody>
@@ -607,11 +642,18 @@ function RoomPricingSection() {
                     min={0}
                     max={100}
                     onChange={(e) =>
-                      setRoomField(
-                        r.id,
-                        "weekdayDiscount",
-                        parseInt(e.target.value) || 0
-                      )
+                      setRoomField(r.id, "weekdayDiscount", parseInt(e.target.value) || 0)
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    type="number"
+                    value={r.fridayDiscount ?? 15}
+                    min={0}
+                    max={100}
+                    onChange={(e) =>
+                      setRoomField(r.id, "fridayDiscount", parseInt(e.target.value) || 0)
                     }
                   />
                 </td>
@@ -622,22 +664,7 @@ function RoomPricingSection() {
                     min={0}
                     max={100}
                     onChange={(e) =>
-                      setRoomField(
-                        r.id,
-                        "weekendDiscount",
-                        parseInt(e.target.value) || 0
-                      )
-                    }
-                  />
-                </td>
-                <td>
-                  <input
-                    type="number"
-                    value={r.gst}
-                    min={0}
-                    max={28}
-                    onChange={(e) =>
-                      setRoomField(r.id, "gst", parseInt(e.target.value) || 0)
+                      setRoomField(r.id, "weekendDiscount", parseInt(e.target.value) || 0)
                     }
                   />
                 </td>
@@ -645,6 +672,76 @@ function RoomPricingSection() {
             ))}
           </tbody>
         </table>
+
+        <div style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid var(--bd)" }}>
+          <div style={{ fontFamily: "var(--font-outfit), Outfit, sans-serif", fontSize: 13, fontWeight: 700, color: "var(--t1)", marginBottom: 10 }}>
+            GST Rule
+          </div>
+          <p style={{ fontSize: 12, color: "var(--t3)", marginBottom: 14 }}>
+            GST slab is determined by the room tariff per night. Applies to the net room charges
+            after discount. Both rates and the threshold are editable.
+          </p>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14, maxWidth: 520 }}>
+            <div className="field">
+              <label>Threshold (₹)</label>
+              <input
+                type="number"
+                value={draftGst.threshold}
+                min={0}
+                onChange={(e) =>
+                  setDraftGst((prev) => ({ ...prev, threshold: parseInt(e.target.value) || 0 }))
+                }
+              />
+            </div>
+            <div className="field">
+              <label>GST if tariff ≤ threshold</label>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <input
+                  type="number"
+                  value={draftGst.belowRate}
+                  min={0}
+                  max={28}
+                  onChange={(e) =>
+                    setDraftGst((prev) => ({ ...prev, belowRate: parseInt(e.target.value) || 0 }))
+                  }
+                />
+                <span style={{ fontSize: 13 }}>%</span>
+              </div>
+            </div>
+            <div className="field">
+              <label>GST if tariff &gt; threshold</label>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <input
+                  type="number"
+                  value={draftGst.aboveRate}
+                  min={0}
+                  max={28}
+                  onChange={(e) =>
+                    setDraftGst((prev) => ({ ...prev, aboveRate: parseInt(e.target.value) || 0 }))
+                  }
+                />
+                <span style={{ fontSize: 13 }}>%</span>
+              </div>
+            </div>
+          </div>
+          <div
+            style={{
+              marginTop: 12,
+              padding: "10px 14px",
+              background: "var(--surf2)",
+              border: "1px solid var(--bd)",
+              borderRadius: "var(--r2)",
+              fontSize: 12,
+              color: "var(--t2)",
+              display: "flex",
+              gap: 18,
+            }}
+          >
+            <span>{gstPreviewLow}</span>
+            <span style={{ color: "var(--t3)" }}>·</span>
+            <span>{gstPreviewHigh}</span>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -1252,8 +1349,151 @@ function formatDate(d: string): string {
   return `${weekday}, ${dd}/${mm}/${yyyy}`;
 }
 
-// ─────────── Credit Note Settings ───────────
-function CreditNoteTab() {
+// ─────────── Cancellation Setup ───────────
+function CancellationSetupTab() {
+  return (
+    <>
+      <CancellationLogicSection />
+      <div style={{ height: 18 }} />
+      <CreditNoteSection />
+    </>
+  );
+}
+
+function CancellationLogicSection() {
+  const { cancellationPolicy, updateCancellationPolicy, showNotif } = useApp();
+  const [draft, setDraft] = useState<CancellationPolicy>(cancellationPolicy);
+
+  useEffect(() => setDraft(cancellationPolicy), [cancellationPolicy]);
+
+  const updateTier = (id: string, patch: Partial<CancellationTier>) => {
+    setDraft((prev) => ({
+      tiers: prev.tiers.map((t) => (t.id === id ? { ...t, ...patch } : t)),
+    }));
+  };
+
+  const addTier = () => {
+    const newTier: CancellationTier = {
+      id: "ct-" + Math.random().toString(36).slice(2, 7),
+      minDaysBeforeCheckin: 0,
+      refundPct: 0,
+      resolution: "credit-note",
+    };
+    setDraft((prev) => ({
+      tiers: [...prev.tiers, newTier].sort(
+        (a, b) => b.minDaysBeforeCheckin - a.minDaysBeforeCheckin
+      ),
+    }));
+  };
+
+  const removeTier = (id: string) => {
+    setDraft((prev) => ({ tiers: prev.tiers.filter((t) => t.id !== id) }));
+  };
+
+  const save = () => {
+    const sorted = [...draft.tiers].sort(
+      (a, b) => b.minDaysBeforeCheckin - a.minDaysBeforeCheckin
+    );
+    updateCancellationPolicy({ tiers: sorted });
+    showNotif("Cancellation policy saved", "success");
+  };
+
+  return (
+    <div className="settings-panel">
+      <div className="sp-hd">
+        <h3>Cancellation Logic</h3>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => setDraft(SEED_CANCELLATION_POLICY)}
+          >
+            Reset to defaults
+          </button>
+          <button className="btn btn-ghost btn-sm" onClick={addTier}>
+            Add Tier
+          </button>
+          <button className="btn btn-primary btn-sm" onClick={save}>
+            Save Changes
+          </button>
+        </div>
+      </div>
+      <div className="sp-body">
+        <p style={{ fontSize: 12, color: "var(--t3)", marginBottom: 14 }}>
+          Refund percentage is applied to the advance paid. Tiers are matched top-to-bottom
+          by days remaining before check-in — the first tier where days &ge; minimum wins.
+          Resolution sets the default method when cancellation is processed.
+        </p>
+        <table className="pricing-tbl">
+          <thead>
+            <tr>
+              <th>Days Before Check-in (minimum)</th>
+              <th style={{ textAlign: "right", width: 130 }}>Refund %</th>
+              <th style={{ width: 160 }}>Default Resolution</th>
+              <th style={{ width: 80, textAlign: "right" }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {draft.tiers.map((tier) => (
+              <tr key={tier.id}>
+                <td>
+                  <input
+                    type="number"
+                    value={tier.minDaysBeforeCheckin}
+                    min={0}
+                    onChange={(e) =>
+                      updateTier(tier.id, {
+                        minDaysBeforeCheckin: parseInt(e.target.value) || 0,
+                      })
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    type="number"
+                    value={tier.refundPct}
+                    min={0}
+                    max={100}
+                    onChange={(e) =>
+                      updateTier(tier.id, { refundPct: parseInt(e.target.value) || 0 })
+                    }
+                  />
+                </td>
+                <td>
+                  <select
+                    value={tier.resolution}
+                    onChange={(e) =>
+                      updateTier(tier.id, {
+                        resolution: e.target.value as CancellationTier["resolution"],
+                      })
+                    }
+                  >
+                    <option value="refund">Cash Refund</option>
+                    <option value="credit-note">Credit Note</option>
+                  </select>
+                </td>
+                <td style={{ textAlign: "right" }}>
+                  <button
+                    className="btn btn-ghost btn-xs"
+                    style={{ color: "var(--red)" }}
+                    onClick={() => removeTier(tier.id)}
+                  >
+                    Remove
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 10 }}>
+          Example: 90% refund at 30+ days means guest gets back 90% of advance in cash.
+          At 0 days, 0% refund means no cash back but a credit note may still be issued.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CreditNoteSection() {
   const { creditNoteSettings, updateCreditNoteSettings, showNotif } = useApp();
   const [draft, setDraft] = useState<CreditNoteSettings>(creditNoteSettings);
   const [editingNumber, setEditingNumber] = useState(false);
@@ -1275,16 +1515,15 @@ function CreditNoteTab() {
   return (
     <div className="settings-panel">
       <div className="sp-hd">
-        <h3>Credit Note Settings</h3>
+        <h3>Credit Note Setup</h3>
         <button className="btn btn-primary btn-sm" onClick={save}>
           Save Changes
         </button>
       </div>
       <div className="sp-body">
         <p style={{ fontSize: 12, color: "var(--t3)", marginBottom: 14 }}>
-          Credit Notes are auto-generated when a Confirmed booking is cancelled under a
-          credit-note resolution. Numbers increment automatically; only edit on first
-          setup.
+          Credit notes are auto-generated when a confirmed booking is cancelled under a
+          credit-note resolution. Numbers increment automatically; only edit on first setup.
         </p>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, maxWidth: 520 }}>
@@ -1295,10 +1534,7 @@ function CreditNoteTab() {
               value={draft.prefix}
               maxLength={6}
               onChange={(e) =>
-                setDraft((prev) => ({
-                  ...prev,
-                  prefix: e.target.value.toUpperCase(),
-                }))
+                setDraft((prev) => ({ ...prev, prefix: e.target.value.toUpperCase() }))
               }
             />
             <div className="field-hint">Up to 6 characters, e.g. CRV.</div>
@@ -1311,10 +1547,7 @@ function CreditNoteTab() {
               readOnly={!editingNumber}
               min={1}
               onChange={(e) =>
-                setDraft((prev) => ({
-                  ...prev,
-                  nextNumber: parseInt(e.target.value) || 1,
-                }))
+                setDraft((prev) => ({ ...prev, nextNumber: parseInt(e.target.value) || 1 }))
               }
               style={!editingNumber ? { background: "var(--surf3)" } : undefined}
             />

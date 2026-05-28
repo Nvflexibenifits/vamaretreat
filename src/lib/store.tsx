@@ -11,9 +11,11 @@ import {
 } from "react";
 import type {
   Booking,
+  CancellationPolicy,
   CreditNoteSettings,
   DiscountCaps,
   Extra,
+  GstSettings,
   NotifKind,
   PackageRates,
   RevenueEntry,
@@ -29,8 +31,10 @@ import type {
 import {
   ROOMS as SEED_ROOMS,
   SEED_BOOKINGS,
+  SEED_CANCELLATION_POLICY,
   SEED_CREDIT_NOTE_SETTINGS,
   SEED_DISCOUNT_CAPS,
+  SEED_GST_SETTINGS,
   SEED_PACKAGE_RATES,
   SEED_ROOM_INVENTORY,
   SEED_SPECIAL_DAYS,
@@ -40,7 +44,8 @@ import {
 } from "@/lib/data";
 import { addDays, nowTime, todayStr } from "@/lib/utils";
 
-const STORAGE_KEY = "vama:state:v1";
+const STORAGE_KEY = "vama:state:v2";
+const LEGACY_KEY = "vama:state:v1";
 
 type ModalKind = "lost" | "payment" | "complete" | "crm-note" | null;
 
@@ -59,6 +64,8 @@ type PersistedState = {
   packageRates?: PackageRates;
   specialDays?: SpecialDay[];
   creditNoteSettings?: CreditNoteSettings;
+  gstSettings?: GstSettings;
+  cancellationPolicy?: CancellationPolicy;
   users?: User[];
   venues?: Venue[];
   venueBlocks?: VenueBlock[];
@@ -113,6 +120,8 @@ type AppContextValue = {
   packageRates: PackageRates;
   specialDays: SpecialDay[];
   creditNoteSettings: CreditNoteSettings;
+  gstSettings: GstSettings;
+  cancellationPolicy: CancellationPolicy;
   users: User[];
   venues: Venue[];
   venueBlocks: VenueBlock[];
@@ -124,6 +133,8 @@ type AppContextValue = {
   addSpecialDay: (sd: SpecialDay) => void;
   removeSpecialDay: (id: string) => void;
   updateCreditNoteSettings: (s: CreditNoteSettings) => void;
+  updateGstSettings: (s: GstSettings) => void;
+  updateCancellationPolicy: (p: CancellationPolicy) => void;
   addUser: (u: User) => void;
   updateUser: (id: string, patch: Partial<User>) => void;
   removeUser: (id: string) => void;
@@ -153,6 +164,12 @@ function normalizeBooking(b: Partial<Booking>): Booking {
     payments: Array.isArray(b.payments) ? b.payments : [],
     extras: Array.isArray(b.extras) ? b.extras : [],
     pricingRows: Array.isArray(b.pricingRows) ? b.pricingRows : [],
+    driverCount: b.driverCount ?? 0,
+    driverTotal: b.driverTotal ?? 0,
+    driverGst: b.driverGst ?? 0,
+    driverMealOn: b.driverMealOn ?? false,
+    driverMealTotal: b.driverMealTotal ?? 0,
+    driverMealGst: b.driverMealGst ?? 0,
   };
 }
 
@@ -172,6 +189,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [specialDays, setSpecialDays] = useState<SpecialDay[]>(SEED_SPECIAL_DAYS);
   const [creditNoteSettings, setCreditNoteSettings] =
     useState<CreditNoteSettings>(SEED_CREDIT_NOTE_SETTINGS);
+  const [gstSettings, setGstSettings] =
+    useState<GstSettings>(SEED_GST_SETTINGS);
+  const [cancellationPolicy, setCancellationPolicy] =
+    useState<CancellationPolicy>(SEED_CANCELLATION_POLICY);
   const [users, setUsers] = useState<User[]>(SEED_USERS);
   const [venues, setVenues] = useState<Venue[]>(SEED_VENUES);
   const [venueBlocks, setVenueBlocks] = useState<VenueBlock[]>(SEED_VENUE_BLOCKS);
@@ -180,7 +201,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [notif, setNotif] = useState<{ msg: string; kind: NotifKind } | null>(null);
   const [modal, setModal] = useState<ModalState>({ kind: null });
 
-  // Hydrate from localStorage on mount
+  // Hydrate from localStorage on mount.
+  // v2 key: full restore. If not present, migrate user data from v1 (bookings,
+  // users, venues) but intentionally drop all master-setup config so new seed
+  // prices and rates are applied cleanly.
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
@@ -200,14 +224,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setRoomInventory(parsed.roomInventory);
         }
         if (parsed.discountCaps) setDiscountCapsState(parsed.discountCaps);
-        if (parsed.packageRates) setPackageRatesState(parsed.packageRates);
+        if (parsed.packageRates) setPackageRatesState({ ...SEED_PACKAGE_RATES, ...parsed.packageRates });
         if (Array.isArray(parsed.specialDays)) setSpecialDays(parsed.specialDays);
         if (parsed.creditNoteSettings) setCreditNoteSettings(parsed.creditNoteSettings);
+        if (parsed.gstSettings) setGstSettings(parsed.gstSettings);
+        if (parsed.cancellationPolicy) setCancellationPolicy(parsed.cancellationPolicy);
         if (Array.isArray(parsed.users) && parsed.users.length > 0) {
           setUsers(parsed.users);
         }
         if (Array.isArray(parsed.venues)) setVenues(parsed.venues);
         if (Array.isArray(parsed.venueBlocks)) setVenueBlocks(parsed.venueBlocks);
+      } else {
+        // No v2 data — check for v1 and migrate user data only.
+        const legacyRaw = window.localStorage.getItem(LEGACY_KEY);
+        if (legacyRaw) {
+          const legacy = JSON.parse(legacyRaw) as Partial<PersistedState>;
+          if (Array.isArray(legacy.bookings) && legacy.bookings.length > 0) {
+            setBookings((legacy.bookings as Partial<Booking>[]).map(normalizeBooking));
+          }
+          if (legacy.guestNotes && typeof legacy.guestNotes === "object") {
+            setGuestNotes(legacy.guestNotes);
+          }
+          if (Array.isArray(legacy.users) && legacy.users.length > 0) {
+            setUsers(legacy.users);
+          }
+          if (Array.isArray(legacy.venues)) setVenues(legacy.venues);
+          if (Array.isArray(legacy.venueBlocks)) setVenueBlocks(legacy.venueBlocks);
+          // All master-setup config (rooms, rates, GST, cancellation policy, etc.)
+          // intentionally reset to new seeds — do not restore from v1.
+          window.localStorage.removeItem(LEGACY_KEY);
+        }
       }
     } catch {
       // corrupt state, ignore and stay on seed
@@ -228,6 +274,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         packageRates,
         specialDays,
         creditNoteSettings,
+        gstSettings,
+        cancellationPolicy,
         users,
         venues,
         venueBlocks,
@@ -246,6 +294,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     packageRates,
     specialDays,
     creditNoteSettings,
+    gstSettings,
+    cancellationPolicy,
     users,
     venues,
     venueBlocks,
@@ -272,9 +322,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setRoomInventory(parsed.roomInventory);
         }
         if (parsed.discountCaps) setDiscountCapsState(parsed.discountCaps);
-        if (parsed.packageRates) setPackageRatesState(parsed.packageRates);
+        if (parsed.packageRates) setPackageRatesState({ ...SEED_PACKAGE_RATES, ...parsed.packageRates });
         if (Array.isArray(parsed.specialDays)) setSpecialDays(parsed.specialDays);
         if (parsed.creditNoteSettings) setCreditNoteSettings(parsed.creditNoteSettings);
+        if (parsed.gstSettings) setGstSettings(parsed.gstSettings);
+        if (parsed.cancellationPolicy) setCancellationPolicy(parsed.cancellationPolicy);
         if (Array.isArray(parsed.users) && parsed.users.length > 0) {
           setUsers(parsed.users);
         }
@@ -355,6 +407,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
   const updateCreditNoteSettings = useCallback(
     (s: CreditNoteSettings) => setCreditNoteSettings(s),
+    []
+  );
+  const updateGstSettings = useCallback(
+    (s: GstSettings) => setGstSettings(s),
+    []
+  );
+  const updateCancellationPolicy = useCallback(
+    (p: CancellationPolicy) => setCancellationPolicy(p),
     []
   );
   const addUser = useCallback((u: User) => {
@@ -644,6 +704,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       packageRates,
       specialDays,
       creditNoteSettings,
+      gstSettings,
+      cancellationPolicy,
       users,
       venues,
       venueBlocks,
@@ -655,6 +717,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addSpecialDay,
       removeSpecialDay,
       updateCreditNoteSettings,
+      updateGstSettings,
+      updateCancellationPolicy,
       addUser,
       updateUser,
       removeUser,
@@ -695,6 +759,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       packageRates,
       specialDays,
       creditNoteSettings,
+      gstSettings,
+      cancellationPolicy,
       users,
       venues,
       venueBlocks,
@@ -706,6 +772,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addSpecialDay,
       removeSpecialDay,
       updateCreditNoteSettings,
+      updateGstSettings,
+      updateCancellationPolicy,
       addUser,
       updateUser,
       removeUser,

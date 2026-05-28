@@ -2,11 +2,12 @@ import type {
   Booking,
   BookingStatus,
   DiscountCaps,
+  GstSettings,
   PricingRow,
   Role,
   RoomInventoryItem,
 } from "@/types";
-import { ROOM_INVENTORY, ROOMS } from "@/lib/data";
+import { ROOM_INVENTORY, ROOMS, SEED_GST_SETTINGS } from "@/lib/data";
 
 export const fmt = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
 
@@ -71,8 +72,12 @@ export function maxDiscountForRowAndRole(
   role: Role,
   caps: DiscountCaps
 ): number {
-  // Fri-Sat rows always hard-cap at 15% regardless of role (business rule).
-  const rowCap = rowType === "fri-sat" ? 15 : 20;
+  // Per-day-type hard caps regardless of role.
+  const rowCap =
+    rowType === "sat" ? 10
+    : rowType === "fri" ? 15
+    : rowType === "fri-sat" ? 15   // legacy rows
+    : 24;
   return Math.min(rowCap, maxDiscountForRole(role, caps));
 }
 
@@ -118,19 +123,21 @@ export function formatLongDate(d: Date = new Date()): string {
 }
 
 // ─────── PRICING / ROW HELPERS ───────
-export function splitNightsByType(checkin: string, checkout: string): { weekday: number; weekend: number } {
+export function splitNightsByType(checkin: string, checkout: string): { weekday: number; friday: number; saturday: number } {
   let weekday = 0;
-  let weekend = 0;
-  if (!checkin || !checkout || checkout <= checkin) return { weekday, weekend };
+  let friday = 0;
+  let saturday = 0;
+  if (!checkin || !checkout || checkout <= checkin) return { weekday, friday, saturday };
   const cur = new Date(checkin);
   const end = new Date(checkout);
   while (cur < end) {
     const d = cur.getDay();
-    if (d === 5 || d === 6) weekend++;
+    if (d === 5) friday++;
+    else if (d === 6) saturday++;
     else weekday++;
     cur.setDate(cur.getDate() + 1);
   }
-  return { weekday, weekend };
+  return { weekday, friday, saturday };
 }
 
 export function calcPricingRow(
@@ -139,14 +146,15 @@ export function calcPricingRow(
   tariff: number,
   nights: number,
   numRooms: number,
-  discountPct: number
+  discountPct: number,
+  gstSettings: GstSettings = SEED_GST_SETTINGS
 ): PricingRow {
   const room = ROOMS.find((r) => r.id === roomId);
-  const gst = room?.gst ?? 0;
+  const gstRate = tariff > gstSettings.threshold ? gstSettings.aboveRate : gstSettings.belowRate;
   const roomCharges = tariff * nights * numRooms;
   const discountAmt = roomCharges * (discountPct / 100);
   const netCharges = roomCharges - discountAmt;
-  const gstAmt = netCharges * (gst / 100);
+  const gstAmt = netCharges * (gstRate / 100);
   const totalAmt = netCharges + gstAmt;
   return {
     rowType,
@@ -159,7 +167,7 @@ export function calcPricingRow(
     discountPct,
     discountAmt,
     netCharges,
-    gstRate: gst,
+    gstRate,
     gstAmt,
     totalAmt,
   };

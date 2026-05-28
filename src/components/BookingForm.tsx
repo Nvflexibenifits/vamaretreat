@@ -36,8 +36,10 @@ type FieldErrors = {
 
 const ROW_LABEL: Record<PricingRowType, string> = {
   "sun-thu": "Sun–Thu",
-  "fri-sat": "Fri–Sat",
-  custom: "Custom",
+  "fri":     "Friday",
+  "sat":     "Sat & Peak",
+  "fri-sat": "Fri–Sat",   // legacy
+  custom:    "Custom",
 };
 
 const newUid = () => Math.random().toString(36).slice(2, 9);
@@ -94,6 +96,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     roomInventory,
     discountCaps,
     packageRates,
+    gstSettings,
   } = useApp();
 
   const isEdit = mode === "edit" && !!initial;
@@ -112,6 +115,8 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   const [infants, setInfants] = useState(String(initial?.infantsBelow2 ?? 0));
   const [seniors, setSeniors] = useState(String(initial?.seniors ?? 0));
   const [pets, setPets] = useState(String(initial?.pets ?? 0));
+  const [drivers, setDrivers] = useState(String(initial?.driverCount ?? 0));
+  const [driverMealOn, setDriverMealOn] = useState(initial?.driverMealOn ?? false);
 
   const [checkin, setCheckin] = useState(initial?.checkin ?? "");
   const [checkout, setCheckout] = useState(initial?.checkout ?? "");
@@ -139,7 +144,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   }, []);
 
   const totalNights = nightsBetween(checkin, checkout);
-  const { weekday, weekend } = useMemo(
+  const { weekday, friday, saturday } = useMemo(
     () => splitNightsByType(checkin, checkout),
     [checkin, checkout]
   );
@@ -150,41 +155,33 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     setRows((prev) => {
       const customRows = prev.filter((r) => r.rowType === "custom");
       const sunThu = prev.find((r) => r.rowType === "sun-thu");
-      const friSat = prev.find((r) => r.rowType === "fri-sat");
+      const friRow = prev.find((r) => r.rowType === "fri");
+      const satRow = prev.find((r) => r.rowType === "sat");
       const next: FormRow[] = [];
       if (weekday > 0) {
         next.push(
           sunThu
             ? { ...sunThu, nights: String(weekday) }
-            : {
-                uid: newUid(),
-                rowType: "sun-thu",
-                roomId: "",
-                tariff: "0",
-                nights: String(weekday),
-                numRooms: "1",
-                discountPct: "0",
-              }
+            : { uid: newUid(), rowType: "sun-thu", roomId: "", tariff: "0", nights: String(weekday), numRooms: "1", discountPct: "0" }
         );
       }
-      if (weekend > 0) {
+      if (friday > 0) {
         next.push(
-          friSat
-            ? { ...friSat, nights: String(weekend) }
-            : {
-                uid: newUid(),
-                rowType: "fri-sat",
-                roomId: "",
-                tariff: "0",
-                nights: String(weekend),
-                numRooms: "1",
-                discountPct: "0",
-              }
+          friRow
+            ? { ...friRow, nights: String(friday) }
+            : { uid: newUid(), rowType: "fri", roomId: "", tariff: "0", nights: String(friday), numRooms: "1", discountPct: "0" }
+        );
+      }
+      if (saturday > 0) {
+        next.push(
+          satRow
+            ? { ...satRow, nights: String(saturday) }
+            : { uid: newUid(), rowType: "sat", roomId: "", tariff: "0", nights: String(saturday), numRooms: "1", discountPct: "0" }
         );
       }
       return [...next, ...customRows];
     });
-  }, [checkin, checkout, weekday, weekend]);
+  }, [checkin, checkout, weekday, friday, saturday]);
 
   const setRow = (uid: string, patch: Partial<FormRow>) =>
     setRows((prev) => prev.map((r) => (r.uid === uid ? { ...r, ...patch } : r)));
@@ -216,9 +213,9 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
         if (room) {
           tariff = String(room.price);
           const dayDisc =
-            r.rowType === "fri-sat"
-              ? room.weekendDiscount
-              : room.weekdayDiscount;
+            r.rowType === "sat" ? room.weekendDiscount
+            : r.rowType === "fri" ? room.fridayDiscount
+            : room.weekdayDiscount;
           discountPct = String(dayDisc);
         }
         return { ...r, roomId, tariff, discountPct };
@@ -248,16 +245,18 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
           Math.min(
             parseFloat(r.discountPct) || 0,
             maxDiscountForRowAndRole(r.rowType, currentRole, discountCaps)
-          )
+          ),
+          gstSettings
         )
       ),
-    [rows, currentRole]
+    [rows, currentRole, gstSettings]
   );
 
   const totalRoomCharges = computedRows.reduce((s, r) => s + r.totalAmt, 0);
 
   const adultsN = parseInt(adults) || 0;
   const petsN = parseInt(pets) || 0;
+  const driversN = parseInt(drivers) || 0;
   const advN = isEdit ? initialAdvance : parseInt(advance) || 0;
 
   const mealCharges = mealOn ? packageRates.mealPerAdultPerNight * totalNights * adultsN : 0;
@@ -268,7 +267,11 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   const petGstAmt = petCharges * 0.18;
   const totalPetAmt = petCharges + petGstAmt;
 
-  const totalMealPet = totalMealAmt + totalPetAmt;
+  const driverMealCharges = driverMealOn && driversN > 0 ? packageRates.mealPerAdultPerNight * totalNights * driversN : 0;
+  const driverMealGstAmt = driverMealCharges * 0.18;
+  const totalDriverMealAmt = driverMealCharges + driverMealGstAmt;
+
+  const totalMealPet = totalMealAmt + totalPetAmt + totalDriverMealAmt;
   const grandTotal = totalRoomCharges + totalMealPet;
   const balance = Math.max(0, grandTotal - advN);
 
@@ -328,6 +331,12 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       mealGst: mealGstAmt,
       petTotal: petCharges,
       petGst: petGstAmt,
+      driverCount: driversN,
+      driverTotal: 0,
+      driverGst: 0,
+      driverMealOn,
+      driverMealTotal: driverMealCharges,
+      driverMealGst: driverMealGstAmt,
 
       totalRoomCharges,
       totalMealCharges: totalMealPet,
@@ -384,6 +393,12 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       mealGst: mealGstAmt,
       petTotal: petCharges,
       petGst: petGstAmt,
+      driverCount: driversN,
+      driverTotal: 0,
+      driverGst: 0,
+      driverMealOn,
+      driverMealTotal: driverMealCharges,
+      driverMealGst: driverMealGstAmt,
 
       totalRoomCharges,
       totalMealCharges: totalMealPet,
@@ -542,7 +557,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
           <div className="form-sec-title">
             <span className="form-sec-num">2</span>Guest Count
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 11 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 11, alignItems: "start" }}>
             <div className="field">
               <label>Adults</label>
               <input
@@ -551,6 +566,16 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                 onChange={(e) => setAdults(e.target.value)}
                 min={1}
               />
+            </div>
+            <div className="field">
+              <label>Senior Citizens</label>
+              <input
+                type="number"
+                value={seniors}
+                onChange={(e) => setSeniors(e.target.value)}
+                min={0}
+              />
+              <div className="field-hint">for room setup tracking only</div>
             </div>
             <div className="field">
               <label>Kids &gt; 10 yrs</label>
@@ -587,16 +612,6 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                 onChange={(e) => setInfants(e.target.value)}
                 min={0}
               />
-            </div>
-            <div className="field">
-              <label>Senior Citizens</label>
-              <input
-                type="number"
-                value={seniors}
-                onChange={(e) => setSeniors(e.target.value)}
-                min={0}
-              />
-              <div className="field-hint">for room setup tracking only</div>
             </div>
             <div className="field">
               <label>Pets</label>
@@ -678,8 +693,14 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                           <span
                             className="badge"
                             style={{
-                              background: row.rowType === "fri-sat" ? "var(--acc-bg)" : "var(--bd)",
-                              color: row.rowType === "fri-sat" ? "var(--acc)" : "var(--t2)",
+                              background:
+                                row.rowType === "sat" || row.rowType === "fri-sat" ? "var(--acc-bg)"
+                                : row.rowType === "fri" ? "var(--amb-bg)"
+                                : "var(--bd)",
+                              color:
+                                row.rowType === "sat" || row.rowType === "fri-sat" ? "var(--acc)"
+                                : row.rowType === "fri" ? "var(--amb)"
+                                : "var(--t2)",
                             }}
                           >
                             {ROW_LABEL[row.rowType]}
@@ -829,19 +850,50 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
             <span className="form-sec-num">4</span>Meal &amp; Pet Charges
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 18, marginBottom: 14 }}>
-            <span style={{ fontSize: 13, fontWeight: 500, color: "var(--t1)" }}>
-              Include Meal &amp; Activity Package?
-            </span>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-              <input type="radio" name="meal" checked={mealOn} onChange={() => setMealOn(true)} /> Yes
-            </label>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-              <input type="radio" name="meal" checked={!mealOn} onChange={() => setMealOn(false)} /> No
-            </label>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+              <span style={{ fontSize: 13, fontWeight: 500, color: "var(--t1)", minWidth: 220 }}>
+                Include Meal &amp; Activity Package?
+              </span>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                <input type="radio" name="meal" checked={mealOn} onChange={() => setMealOn(true)} /> Yes
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                <input type="radio" name="meal" checked={!mealOn} onChange={() => setMealOn(false)} /> No
+              </label>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+              <span style={{ fontSize: 13, fontWeight: 500, color: "var(--t1)", minWidth: 220 }}>
+                Drivers / Attendants
+              </span>
+              <input
+                type="number"
+                value={drivers}
+                onChange={(e) => {
+                  const v = Math.max(0, parseInt(e.target.value) || 0);
+                  setDrivers(String(v));
+                  if (v === 0) setDriverMealOn(false);
+                }}
+                min={0}
+                style={{ width: 64, padding: "5px 8px", border: "1px solid var(--bd)", borderRadius: "var(--r3)", fontSize: 13, textAlign: "center", background: "var(--surf)", outline: "none" }}
+              />
+              {driversN > 0 && (
+                <>
+                  <span style={{ fontSize: 13, fontWeight: 500, color: "var(--t1)", marginLeft: 16 }}>
+                    Include Meal for Driver?
+                  </span>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                    <input type="radio" name="driverMeal" checked={driverMealOn} onChange={() => setDriverMealOn(true)} /> Yes
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                    <input type="radio" name="driverMeal" checked={!driverMealOn} onChange={() => setDriverMealOn(false)} /> No
+                  </label>
+                </>
+              )}
+            </div>
           </div>
 
-          {mealOn || petsN > 0 ? (
+          {mealOn || petsN > 0 || (driverMealOn && driversN > 0) ? (
             <table>
               <thead>
                 <tr>
@@ -884,6 +936,20 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                     <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(totalPetAmt)}</td>
                   </tr>
                 )}
+                {driverMealOn && driversN > 0 && (
+                  <tr style={{ cursor: "default" }}>
+                    <td>
+                      <strong>Driver / Attendant Meal</strong>
+                    </td>
+                    <td style={{ textAlign: "right" }}>{fmt(packageRates.mealPerAdultPerNight)}</td>
+                    <td style={{ textAlign: "right" }}>{totalNights}</td>
+                    <td style={{ textAlign: "right" }}>{driversN}</td>
+                    <td style={{ textAlign: "right" }}>{fmt(driverMealCharges)}</td>
+                    <td style={{ textAlign: "right" }}>18%</td>
+                    <td style={{ textAlign: "right" }}>{fmt(driverMealGstAmt)}</td>
+                    <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(totalDriverMealAmt)}</td>
+                  </tr>
+                )}
                 <tr style={{ background: "var(--surf2)" }}>
                   <td colSpan={7} style={{ textAlign: "right", fontWeight: 700, color: "var(--t1)" }}>
                     Total Meal &amp; Pet Charges (B)
@@ -898,7 +964,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
             </table>
           ) : (
             <div style={{ fontSize: 12, color: "var(--t3)" }}>
-              No meal package selected and no pets. Toggle Yes above to add meal charges.
+              No packages selected. Toggle Yes above for meals, or add pets / drivers in Guest Count.
             </div>
           )}
         </div>

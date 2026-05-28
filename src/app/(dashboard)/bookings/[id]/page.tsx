@@ -37,8 +37,8 @@ export default function BookingDetailPage() {
   const totalDiscount = b.pricingRows.reduce((s, r) => s + r.discountAmt, 0);
   const totalNet = b.pricingRows.reduce((s, r) => s + r.netCharges, 0);
   const totalRoomGst = b.pricingRows.reduce((s, r) => s + r.gstAmt, 0);
-  const totalMealPet = b.mealTotal + b.mealGst + b.petTotal + b.petGst;
-  const totalGstAll = totalRoomGst + b.mealGst + b.petGst;
+  const totalMealPet = b.mealTotal + b.mealGst + b.petTotal + b.petGst + (b.driverMealTotal ?? 0) + (b.driverMealGst ?? 0);
+  const totalGstAll = totalRoomGst + b.mealGst + b.petGst + (b.driverMealGst ?? 0);
 
   const roomsSummary = (() => {
     const m = new Map<string, number>();
@@ -307,6 +307,9 @@ export default function BookingDetailPage() {
                 )}
                 {b.petTotal > 0 && (
                   <div className="detail-row"><span className="detail-key">Pet Package</span><span className="detail-val">{fmt(b.petTotal)}</span></div>
+                )}
+                {(b.driverMealTotal ?? 0) > 0 && (
+                  <div className="detail-row"><span className="detail-key">Driver / Attendant Meal</span><span className="detail-val">{fmt(b.driverMealTotal!)}</span></div>
                 )}
                 <div className="detail-row"><span className="detail-key">GST</span><span className="detail-val">{fmt(totalGstAll)}</span></div>
                 {(() => {

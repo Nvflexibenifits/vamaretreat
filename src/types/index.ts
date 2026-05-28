@@ -12,9 +12,26 @@ export type RoomMaster = {
   id: string;
   name: string;
   price: number;
-  weekdayDiscount: number;
-  weekendDiscount: number;
-  gst: number;
+  weekdayDiscount: number;  // Sun–Thu
+  fridayDiscount: number;   // Friday
+  weekendDiscount: number;  // Sat & Peak Days
+};
+
+export type GstSettings = {
+  threshold: number;
+  belowRate: number;
+  aboveRate: number;
+};
+
+export type CancellationTier = {
+  id: string;
+  minDaysBeforeCheckin: number;
+  refundPct: number;
+  resolution: "refund" | "credit-note";
+};
+
+export type CancellationPolicy = {
+  tiers: CancellationTier[];
 };
 
 export type RoomInventoryItem = {
@@ -42,7 +59,7 @@ export type Extra = {
   by: string;
 };
 
-export type PricingRowType = "sun-thu" | "fri-sat" | "custom";
+export type PricingRowType = "sun-thu" | "fri" | "sat" | "fri-sat" | "custom";
 
 export type PricingRow = {
   rowType: PricingRowType;
@@ -144,6 +161,12 @@ export type Booking = {
   mealGst: number;
   petTotal: number;
   petGst: number;
+  driverCount?: number;
+  driverTotal?: number;
+  driverGst?: number;
+  driverMealOn?: boolean;
+  driverMealTotal?: number;
+  driverMealGst?: number;
 
   totalRoomCharges: number;
   totalMealCharges: number;
@@ -194,6 +217,11 @@ export type DiscountCaps = {
 export type PackageRates = {
   mealPerAdultPerNight: number;
   petPerPetPerNight: number;
+  driverPerNight: number;
+  individualBreakfast: number;
+  individualLunchHighTea: number;
+  individualOnlyDinner: number;
+  individualBbqEveningDinner: number;
 };
 
 export type User = {

@@ -105,15 +105,18 @@ export default function ConfirmationPage() {
   const petCharges = b.petTotal || 0;
   const petGstAmt = b.petGst || 0;
   const totalPetAmt = petCharges + petGstAmt;
-  const totalMealPetCharges = mealCharges + petCharges;
-  const totalMealPetGst = mealGst + petGstAmt;
-  const totalMealPet = totalMealAmt + totalPetAmt;
+  const driverMealCharges = b.driverMealTotal ?? 0;
+  const driverMealGstAmt = b.driverMealGst ?? 0;
+  const totalDriverMealAmt = driverMealCharges + driverMealGstAmt;
+  const totalMealPetCharges = mealCharges + petCharges + driverMealCharges;
+  const totalMealPetGst = mealGst + petGstAmt + driverMealGstAmt;
+  const totalMealPet = totalMealAmt + totalPetAmt + totalDriverMealAmt;
 
   const grandTotal = totalRoomAmt + totalMealPet;
   const grandGst = totalRoomGst + totalMealPetGst;
   const grandRaw = totalRoomBaseCharges + totalMealPetCharges;
 
-  const showMealTable = b.mealOn || (b.pets || 0) > 0;
+  const showMealTable = b.mealOn || (b.pets || 0) > 0 || (b.driverMealOn ?? false);
 
   return (
     <div className="confirmation-root" style={{ background: "#fff", minHeight: "100vh" }}>
@@ -367,7 +370,7 @@ export default function ConfirmationPage() {
               {b.mealOn && (
                 <tr>
                   <td style={TD}>Meal &amp; Activity Package</td>
-                  <td style={TD_NUM}>{fmt(2100)}</td>
+                  <td style={TD_NUM}>{b.adults && b.nights ? fmt(mealCharges / b.nights / b.adults) : "—"}</td>
                   <td style={TD_NUM}>{b.nights}</td>
                   <td style={TD_NUM}>{b.adults}</td>
                   <td style={TD_NUM}>{fmt(mealCharges)}</td>
@@ -381,7 +384,7 @@ export default function ConfirmationPage() {
               {(b.pets || 0) > 0 && (
                 <tr>
                   <td style={TD}>Pet Package</td>
-                  <td style={TD_NUM}>{fmt(1200)}</td>
+                  <td style={TD_NUM}>{b.pets && b.nights ? fmt(petCharges / b.nights / b.pets) : "—"}</td>
                   <td style={TD_NUM}>{b.nights}</td>
                   <td style={TD_NUM}>{b.pets}</td>
                   <td style={TD_NUM}>{fmt(petCharges)}</td>
@@ -390,6 +393,20 @@ export default function ConfirmationPage() {
                   <td style={TD_NUM}>18%</td>
                   <td style={TD_NUM}>{fmt(petGstAmt)}</td>
                   <td style={TD_NUM}>{fmt(totalPetAmt)}</td>
+                </tr>
+              )}
+              {(b.driverMealOn ?? false) && (b.driverCount ?? 0) > 0 && (
+                <tr>
+                  <td style={TD}>Driver / Attendant Meal</td>
+                  <td style={TD_NUM}>{b.driverCount && b.nights ? fmt(driverMealCharges / b.nights / b.driverCount) : "—"}</td>
+                  <td style={TD_NUM}>{b.nights}</td>
+                  <td style={TD_NUM}>{b.driverCount}</td>
+                  <td style={TD_NUM}>{fmt(driverMealCharges)}</td>
+                  <td style={TD}></td>
+                  <td style={TD}></td>
+                  <td style={TD_NUM}>18%</td>
+                  <td style={TD_NUM}>{fmt(driverMealGstAmt)}</td>
+                  <td style={TD_NUM}>{fmt(totalDriverMealAmt)}</td>
                 </tr>
               )}
               <tr>
