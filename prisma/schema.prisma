@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"
@@ -12,4 +6,394 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────
+
+enum Role {
+  Sales       @map("Sales")
+  FrontOffice @map("Front Office")
+  Admin       @map("Admin")
+}
+
+enum BookingStatus {
+  Enquiry
+  Tentative
+  Confirmed
+  Completed
+  Lost
+  Cancelled
+}
+
+enum PricingRowType {
+  SunThu @map("sun-thu")
+  Fri    @map("fri")
+  Sat    @map("sat")
+  FriSat @map("fri-sat")
+  Custom @map("custom")
+}
+
+enum VenueType {
+  ConferenceRoom @map("Conference Room")
+  SeminarRoom    @map("Seminar Room")
+  GardenVenue    @map("Garden Venue")
+  EventPlace     @map("Event Place")
+}
+
+// Used by both BulkRoomBlock (required) and VenueBlock (optional)
+enum BlockStatus {
+  Tentative
+  Confirmed
+}
+
+enum CreditNoteStatus {
+  Available
+  PartiallyUsed @map("Partially Used")
+  FullyUsed     @map("Fully Used")
+}
+
+enum UpgradeKind {
+  Complimentary @map("complimentary")
+  Paid          @map("paid")
+}
+
+enum PolicyType {
+  Standard @map("standard")
+  Special  @map("special")
+}
+
+enum CancellationResolution {
+  Refund     @map("refund")
+  CreditNote @map("credit-note")
+}
+
+// ─────────────────────────────────────────────
+// User
+// ─────────────────────────────────────────────
+
+model User {
+  id       String  @id
+  name     String
+  role     Role
+  email    String
+  color    String
+  active   Boolean
+  password String?
+}
+
+// ─────────────────────────────────────────────
+// Room catalogue
+// ─────────────────────────────────────────────
+
+model RoomMaster {
+  id              String @id
+  name            String
+  price           Float
+  weekdayDiscount Float
+  fridayDiscount  Float
+  weekendDiscount Float
+}
+
+model RoomInventoryItem {
+  id            String  @id
+  label         String
+  type          String
+  cat           String
+  active        Boolean
+  blockedReason String?
+}
+
+// ─────────────────────────────────────────────
+// Booking and its child rows
+// ─────────────────────────────────────────────
+
+model Booking {
+  id               String        @id
+  guest            String
+  mobile           String
+  email            String
+  source           String
+  notes            String
+  rex              String
+  checkin          String
+  checkout         String
+  nights           Int
+  adults           Int
+  kidsAbove10      Int
+  kids6to10        Int
+  kids2to6         Int
+  infantsBelow2    Int
+  seniors          Int
+  pets             Int
+  mealOn           Boolean
+  mealTotal        Float
+  mealGst          Float
+  petTotal         Float
+  petGst           Float
+  driverCount      Int?
+  driverTotal      Float?
+  driverGst        Float?
+  driverMealOn     Boolean?
+  driverMealTotal  Float?
+  driverMealGst    Float?
+  totalRoomCharges Float
+  totalMealCharges Float
+  grandTotal       Float
+  advance          Float
+  balance          Float
+  status           BookingStatus
+  allocatedRooms   String[]
+  lostReason       String?
+  lostNotes        String?
+
+  pricingRows         PricingRow[]
+  payments            Payment[]
+  extras              Extra[]
+  nightOverrides      RoomNightOverride[]
+  creditNoteApplied   AppliedCreditNote?
+  cancellationDetails CancellationDetails?
+}
+
+model PricingRow {
+  id          Int            @id @default(autoincrement())
+  bookingId   String
+  booking     Booking        @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  rowType     PricingRowType
+  roomId      String
+  roomName    String
+  tariff      Float
+  nights      Int
+  numRooms    Int
+  roomCharges Float
+  discountPct Float
+  discountAmt Float
+  netCharges  Float
+  gstRate     Float
+  gstAmt      Float
+  totalAmt    Float
+}
+
+model Payment {
+  id        Int     @id @default(autoincrement())
+  bookingId String
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  date      String
+  time      String
+  type      String
+  amount    Float
+  mode      String
+  by        String
+}
+
+model Extra {
+  id        Int     @id @default(autoincrement())
+  bookingId String
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  name      String
+  amount    Float
+  gst       Float?
+  totalPaid Float?
+  date      String
+  by        String
+}
+
+model RoomNightOverride {
+  id         Int               @id @default(autoincrement())
+  bookingId  String
+  booking    Booking           @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  date       String
+  fromRoomId String
+  toRoomId   String
+  upgrade    RoomNightUpgrade?
+}
+
+model RoomNightUpgrade {
+  id               Int               @id @default(autoincrement())
+  overrideId       Int               @unique
+  override         RoomNightOverride @relation(fields: [overrideId], references: [id], onDelete: Cascade)
+  fromCategory     String
+  fromCategoryName String
+  toCategory       String
+  toCategoryName   String
+  upgradeDate      String
+  kind             UpgradeKind
+  extraAmount      Float
+  reason           String?
+  by               String
+}
+
+model AppliedCreditNote {
+  bookingId String  @id
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  code      String
+  amount    Float
+}
+
+model CancellationDetails {
+  bookingId          String                 @id
+  booking            Booking                @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  cancellationDate   String
+  daysBeforeCheckin  Int
+  policyType         PolicyType
+  cancellationCharge Float
+  refundAmount       Float
+  creditNoteAmount   Float
+  resolution         CancellationResolution
+  creditNoteCode     String?
+  processedBy        String
+}
+
+// ─────────────────────────────────────────────
+// Credit notes
+// ─────────────────────────────────────────────
+
+model CreditNote {
+  code              String                  @id
+  guestName         String
+  guestMobile       String
+  originalBookingId String
+  cancellationDate  String
+  totalAmount       Float
+  usedAmount        Float
+  remainingAmount   Float
+  status            CreditNoteStatus
+  transactions      CreditNoteTransaction[]
+}
+
+model CreditNoteTransaction {
+  id             Int        @id @default(autoincrement())
+  creditNoteCode String
+  creditNote     CreditNote @relation(fields: [creditNoteCode], references: [code], onDelete: Cascade)
+  date           String
+  bookingId      String
+  amountUsed     Float
+  remainingAfter Float
+}
+
+// ─────────────────────────────────────────────
+// Special days
+// ─────────────────────────────────────────────
+
+model SpecialDay {
+  id   String @id
+  date String
+  name String
+}
+
+// ─────────────────────────────────────────────
+// Venues and blocks
+// ─────────────────────────────────────────────
+
+model Venue {
+  id       String      @id
+  name     String
+  type     VenueType
+  capacity Int?
+  notes    String?
+  active   Boolean
+  blocks   VenueBlock[]
+}
+
+model VenueBlock {
+  id        String      @id
+  venueId   String
+  venue     Venue       @relation(fields: [venueId], references: [id])
+  checkin   String
+  checkout  String
+  name      String
+  pax       Int
+  amount    Float
+  status    BlockStatus?
+  createdBy String
+  createdAt String
+}
+
+// ─────────────────────────────────────────────
+// Bulk room blocks
+// ─────────────────────────────────────────────
+
+model BulkRoomBlock {
+  id        String             @id
+  label     String
+  guestName String
+  checkin   String
+  checkout  String
+  pax       Int
+  amount    Float
+  status    BlockStatus
+  createdBy String
+  createdAt String
+  rows      BulkRoomBlockRow[]
+}
+
+model BulkRoomBlockRow {
+  id      Int           @id @default(autoincrement())
+  blockId String
+  block   BulkRoomBlock @relation(fields: [blockId], references: [id], onDelete: Cascade)
+  catId   String
+  catName String
+  roomIds String[]
+}
+
+// ─────────────────────────────────────────────
+// Singleton config tables (always one row, id = "singleton")
+// ─────────────────────────────────────────────
+
+model GstSettings {
+  id        String @id @default("singleton")
+  threshold Float
+  belowRate Float
+  aboveRate Float
+}
+
+model DiscountCaps {
+  id    String @id @default("singleton")
+  sales Float
+  admin Float?
+}
+
+model PackageRates {
+  id                         String @id @default("singleton")
+  mealPerAdultPerNight       Float
+  petPerPetPerNight          Float
+  driverPerNight             Float
+  individualBreakfast        Float
+  individualLunchHighTea     Float
+  individualOnlyDinner       Float
+  individualBbqEveningDinner Float
+}
+
+model CreditNoteSettings {
+  id         String @id @default("singleton")
+  prefix     String
+  nextNumber Int
+}
+
+// CancellationPolicy has four CancellationPolicyCell slots (standardAbove,
+// standardBelow, specialAbove, specialBelow), each with three fields
+// (cancellationChargePct, refundPct, creditNotePct). They are flattened here.
+// notes is the array of policy note strings.
+model CancellationPolicy {
+  id                         String   @id @default("singleton")
+  standardThreshold          Int
+  specialThreshold           Int
+  notes                      String[]
+
+  standardAboveChargePct     Float
+  standardAboveRefundPct     Float?
+  standardAboveCreditNotePct Float?
+
+  standardBelowChargePct     Float
+  standardBelowRefundPct     Float?
+  standardBelowCreditNotePct Float?
+
+  specialAboveChargePct      Float
+  specialAboveRefundPct      Float?
+  specialAboveCreditNotePct  Float?
+
+  specialBelowChargePct      Float
+  specialBelowRefundPct      Float?
+  specialBelowCreditNotePct  Float?
 }
