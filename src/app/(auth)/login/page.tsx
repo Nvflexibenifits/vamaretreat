@@ -4,8 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/lib/store";
 
-const PASSWORD = "test@123";
-
 export default function LoginPage() {
   const router = useRouter();
   const { isAuthed, login, users } = useApp();
@@ -35,11 +33,12 @@ export default function LoginPage() {
 
   const onLogin = () => {
     if (selected === null) return;
-    if (password !== PASSWORD) {
+    const u = cards[selected];
+    const correctPwd = u.password || "test@123";
+    if (password !== correctPwd) {
       setError("Incorrect password. Please try again.");
       return;
     }
-    const u = cards[selected];
     login(u.role, u.name);
     router.replace("/");
   };

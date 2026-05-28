@@ -53,7 +53,7 @@ const VENUE_TYPES: VenueType[] = [
   "Event Place",
 ];
 
-const ROLE_OPTIONS: Role[] = ["Sales REX", "Manager", "Room Allocator", "Admin"];
+const ROLE_OPTIONS: Role[] = ["Sales", "Front Office", "Admin"];
 
 const COLOR_PALETTE = [
   "#172f24",
@@ -77,7 +77,16 @@ function uid(): string {
 }
 
 export default function MasterSetupPage() {
+  const { currentRole } = useApp();
   const [tab, setTab] = useState<Tab>("rooms-pricing");
+
+  if (currentRole !== "Admin") {
+    return (
+      <div className="view">
+        <div className="pg-hd"><div><h2>Access Denied</h2><p>Master Setup is only available to Admins.</p></div></div>
+      </div>
+    );
+  }
 
   return (
     <div className="view">
@@ -1160,37 +1169,19 @@ function DiscountTab() {
         </p>
         <div className="disc-role-row">
           <div>
-            <div className="disc-role-name">Sales REX</div>
+            <div className="disc-role-name">Sales</div>
             <div className="disc-role-sub">
-              Front-line sales. Fri–Sat rows always cap at 15% regardless.
+              Sales team. Fri–Sat rows always cap at 15% regardless.
             </div>
           </div>
           <div className="disc-inp">
             <input
               type="number"
-              value={draft.salesRex}
+              value={draft.sales}
               min={0}
               max={100}
               onChange={(e) =>
-                setDraft((prev) => ({ ...prev, salesRex: parseInt(e.target.value) || 0 }))
-              }
-            />{" "}
-            %
-          </div>
-        </div>
-        <div className="disc-role-row">
-          <div>
-            <div className="disc-role-name">Manager</div>
-            <div className="disc-role-sub">Property operations manager</div>
-          </div>
-          <div className="disc-inp">
-            <input
-              type="number"
-              value={draft.manager}
-              min={0}
-              max={100}
-              onChange={(e) =>
-                setDraft((prev) => ({ ...prev, manager: parseInt(e.target.value) || 0 }))
+                setDraft((prev) => ({ ...prev, sales: parseInt(e.target.value) || 0 }))
               }
             />{" "}
             %
@@ -1198,7 +1189,7 @@ function DiscountTab() {
         </div>
         <div className="disc-role-row" style={{ borderBottom: "none" }}>
           <div>
-            <div className="disc-role-name">Admin / Owner</div>
+            <div className="disc-role-name">Admin</div>
             <div className="disc-role-sub">No limit</div>
           </div>
           <div style={{ fontSize: 13, fontWeight: 600, color: "var(--grn)" }}>
@@ -1830,7 +1821,7 @@ function UsersTab() {
     setEditing({
       id: uid(),
       name: "",
-      role: "Sales REX",
+      role: "Sales",
       email: "",
       color: colorFor("New User"),
       active: true,

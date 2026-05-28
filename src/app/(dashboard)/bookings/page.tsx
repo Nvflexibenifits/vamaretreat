@@ -16,8 +16,16 @@ const FILTERS: ("All" | BookingStatus)[] = [
 ];
 
 export default function BookingsPage() {
-  const { bookings } = useApp();
+  const { bookings, currentRole } = useApp();
   const router = useRouter();
+
+  if (currentRole === "Front Office") {
+    return (
+      <div className="view">
+        <div className="pg-hd"><div><h2>Access Denied</h2><p>Booking list is not available for your role.</p></div></div>
+      </div>
+    );
+  }
   const [statusFilter, setStatusFilter] = useState<"All" | BookingStatus>("All");
   const [search, setSearch] = useState("");
   const [from, setFrom] = useState("");

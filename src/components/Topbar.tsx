@@ -31,7 +31,7 @@ export function Topbar() {
     setDateStr(formatLongDate());
   }, []);
 
-  const showNewBtn = currentRole !== "Room Allocator";
+  const showNewBtn = currentRole === "Sales" || currentRole === "Admin";
 
   return (
     <div id="topbar">

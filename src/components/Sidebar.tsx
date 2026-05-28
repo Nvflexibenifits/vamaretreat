@@ -17,7 +17,7 @@ function isSimpleActive(pathname: string, href: string): boolean {
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { logout } = useApp();
+  const { logout, currentRole, currentUser } = useApp();
 
   const [bookingsOpen, setBookingsOpen] = useState<boolean>(
     pathname.startsWith("/bookings")
@@ -31,6 +31,9 @@ export function Sidebar() {
     logout();
     router.replace("/login");
   };
+
+  const isFrontOffice = currentRole === "Front Office";
+  const isAdmin = currentRole === "Admin";
 
   return (
     <div id="sidebar">
@@ -51,41 +54,45 @@ export function Sidebar() {
           Home
         </Link>
 
-        <button
-          type="button"
-          className={`nav-it${bookingsOpen ? " active" : ""}`}
-          onClick={() => setBookingsOpen((v) => !v)}
-          style={{ background: "transparent", border: "none", width: "100%", textAlign: "left" }}
-        >
-          Bookings
-          <span className={`nav-arrow${bookingsOpen ? " open" : ""}`}>{bookingsOpen ? "-" : "+"}</span>
-        </button>
-
-        {bookingsOpen && (
-          <div className="nav-children">
-            <Link
-              href="/bookings"
-              className={`nav-it child${isB2CActive(pathname) ? " active" : ""}`}
+        {!isFrontOffice && (
+          <>
+            <button
+              type="button"
+              className={`nav-it${bookingsOpen ? " active" : ""}`}
+              onClick={() => setBookingsOpen((v) => !v)}
+              style={{ background: "transparent", border: "none", width: "100%", textAlign: "left" }}
             >
-              B2C Bookings
-            </Link>
-            <span className="nav-it child soon">
-              Group Bookings
-              <span className="nav-soon">Coming Soon</span>
-            </span>
-            <span className="nav-it child soon">
-              Corporate Bookings
-              <span className="nav-soon">Coming Soon</span>
-            </span>
-            <span className="nav-it child soon">
-              School Bookings
-              <span className="nav-soon">Coming Soon</span>
-            </span>
-            <span className="nav-it child soon">
-              Institute Bookings
-              <span className="nav-soon">Coming Soon</span>
-            </span>
-          </div>
+              Bookings
+              <span className={`nav-arrow${bookingsOpen ? " open" : ""}`}>{bookingsOpen ? "-" : "+"}</span>
+            </button>
+
+            {bookingsOpen && (
+              <div className="nav-children">
+                <Link
+                  href="/bookings"
+                  className={`nav-it child${isB2CActive(pathname) ? " active" : ""}`}
+                >
+                  B2C Bookings
+                </Link>
+                <span className="nav-it child soon">
+                  Group Bookings
+                  <span className="nav-soon">Coming Soon</span>
+                </span>
+                <span className="nav-it child soon">
+                  Corporate Bookings
+                  <span className="nav-soon">Coming Soon</span>
+                </span>
+                <span className="nav-it child soon">
+                  School Bookings
+                  <span className="nav-soon">Coming Soon</span>
+                </span>
+                <span className="nav-it child soon">
+                  Institute Bookings
+                  <span className="nav-soon">Coming Soon</span>
+                </span>
+              </div>
+            )}
+          </>
         )}
 
         <Link
@@ -95,26 +102,35 @@ export function Sidebar() {
           Room Chart
         </Link>
 
-        <Link
-          href="/revenue"
-          className={`nav-it${isSimpleActive(pathname, "/revenue") ? " active" : ""}`}
-        >
-          Revenue
-        </Link>
+        {!isFrontOffice && (
+          <>
+            <Link
+              href="/revenue"
+              className={`nav-it${isSimpleActive(pathname, "/revenue") ? " active" : ""}`}
+            >
+              Revenue
+            </Link>
 
-        <span className="nav-it soon">
-          Reports
-          <span className="nav-soon">Coming Soon</span>
-        </span>
+            <span className="nav-it soon">
+              Reports
+              <span className="nav-soon">Coming Soon</span>
+            </span>
 
-        <Link
-          href="/master-setup"
-          className={`nav-it${isSimpleActive(pathname, "/master-setup") ? " active" : ""}`}
-        >
-          Master Setup
-        </Link>
+            {isAdmin && (
+              <Link
+                href="/master-setup"
+                className={`nav-it${isSimpleActive(pathname, "/master-setup") ? " active" : ""}`}
+              >
+                Master Setup
+              </Link>
+            )}
+          </>
+        )}
       </nav>
       <div className="sb-ft">
+        <div style={{ fontSize: 11, color: "var(--t3)", marginBottom: 8, paddingLeft: 12 }}>
+          {currentUser} · {currentRole}
+        </div>
         <button type="button" className="sb-logout-btn" onClick={onLogout}>
           Logout
         </button>

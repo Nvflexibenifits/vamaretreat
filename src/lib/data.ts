@@ -421,44 +421,31 @@ export const SEED_BOOKINGS: Booking[] = SEED_SPECS.map(buildBooking);
 // ─────────── Users ───────────
 export const SEED_USERS: User[] = [
   {
-    id: "u-karthik",
-    name: "Karthik",
-    role: "Sales REX",
-    email: "karthik@vamaretreats.com",
+    id: "u-sales",
+    name: "Sales User",
+    role: "Sales",
+    email: "sales@vamaretreats.com",
     color: "#172f24",
     active: true,
+    password: "test@123",
   },
   {
-    id: "u-anagha",
-    name: "Anagha",
-    role: "Sales REX",
-    email: "anagha@vamaretreats.com",
-    color: "#5b21b6",
-    active: true,
-  },
-  {
-    id: "u-priya",
-    name: "Priya",
-    role: "Manager",
-    email: "priya@vamaretreats.com",
-    color: "#c9873a",
-    active: true,
-  },
-  {
-    id: "u-rahul",
-    name: "Rahul",
-    role: "Room Allocator",
-    email: "rahul@vamaretreats.com",
+    id: "u-frontoffice",
+    name: "Front Office",
+    role: "Front Office",
+    email: "frontoffice@vamaretreats.com",
     color: "#1a4fd6",
     active: true,
+    password: "test@123",
   },
   {
-    id: "u-owner",
-    name: "Owner",
+    id: "u-admin",
+    name: "Admin",
     role: "Admin",
-    email: "owner@vamaretreats.com",
+    email: "admin@vamaretreats.com",
     color: "#0f2318",
     active: true,
+    password: "test@123",
   },
 ];
 
@@ -467,8 +454,7 @@ export const USERS = SEED_USERS;
 
 // ─────────── Discount caps + package rates ───────────
 export const SEED_DISCOUNT_CAPS: DiscountCaps = {
-  salesRex: 20,
-  manager: 25,
+  sales: 20,
   admin: null,
 };
 

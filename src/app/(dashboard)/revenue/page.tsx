@@ -7,7 +7,15 @@ import { fmt, fmtIN } from "@/lib/utils";
 
 export default function RevenuePage() {
   const router = useRouter();
-  const { revenueEntries, bookings } = useApp();
+  const { revenueEntries, bookings, currentRole } = useApp();
+
+  if (currentRole === "Front Office") {
+    return (
+      <div className="view">
+        <div className="pg-hd"><div><h2>Access Denied</h2><p>Revenue is not available for your role.</p></div></div>
+      </div>
+    );
+  }
   const [monthFilter, setMonthFilter] = useState("2026-05");
 
   let entries = revenueEntries.filter((e) => e.amount > 0);

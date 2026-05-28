@@ -183,8 +183,8 @@ function normalizeBooking(b: Partial<Booking>): Booking {
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [isAuthed, setIsAuthed] = useState(false);
-  const [currentRole, setCurrentRole] = useState<Role>("Sales REX");
-  const [currentUser, setCurrentUser] = useState<string>("Karthik");
+  const [currentRole, setCurrentRole] = useState<Role>("Sales");
+  const [currentUser, setCurrentUser] = useState<string>("Sales User");
 
   const [bookings, setBookings] = useState<Booking[]>(SEED_BOOKINGS);
   const [guestNotes, setGuestNotes] = useState<Record<string, string>>({});
@@ -232,14 +232,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (Array.isArray(parsed.roomInventory) && parsed.roomInventory.length > 0) {
           setRoomInventory(parsed.roomInventory);
         }
-        if (parsed.discountCaps) setDiscountCapsState(parsed.discountCaps);
+        if (parsed.discountCaps) { const _dc = parsed.discountCaps as Record<string, unknown>; setDiscountCapsState({ sales: (_dc.sales as number) ?? (_dc.salesRex as number) ?? SEED_DISCOUNT_CAPS.sales, admin: (_dc.admin as number | null) ?? SEED_DISCOUNT_CAPS.admin }); }
         if (parsed.packageRates) setPackageRatesState({ ...SEED_PACKAGE_RATES, ...parsed.packageRates });
         if (Array.isArray(parsed.specialDays)) setSpecialDays(parsed.specialDays);
         if (parsed.creditNoteSettings) setCreditNoteSettings(parsed.creditNoteSettings);
         if (parsed.gstSettings) setGstSettings(parsed.gstSettings);
         if (parsed.cancellationPolicy && "standardThreshold" in parsed.cancellationPolicy) setCancellationPolicy(parsed.cancellationPolicy);
         if (Array.isArray(parsed.users) && parsed.users.length > 0) {
-          setUsers(parsed.users);
+          { const validRoles: Role[] = ["Sales", "Front Office", "Admin"]; const vu = (parsed.users as User[]).filter((u) => validRoles.includes(u.role)); if (vu.length > 0) setUsers(vu); }
         }
         if (Array.isArray(parsed.venues)) setVenues(parsed.venues);
         if (Array.isArray(parsed.venueBlocks)) setVenueBlocks(parsed.venueBlocks);
@@ -333,14 +333,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (Array.isArray(parsed.roomInventory) && parsed.roomInventory.length > 0) {
           setRoomInventory(parsed.roomInventory);
         }
-        if (parsed.discountCaps) setDiscountCapsState(parsed.discountCaps);
+        if (parsed.discountCaps) { const _dc = parsed.discountCaps as Record<string, unknown>; setDiscountCapsState({ sales: (_dc.sales as number) ?? (_dc.salesRex as number) ?? SEED_DISCOUNT_CAPS.sales, admin: (_dc.admin as number | null) ?? SEED_DISCOUNT_CAPS.admin }); }
         if (parsed.packageRates) setPackageRatesState({ ...SEED_PACKAGE_RATES, ...parsed.packageRates });
         if (Array.isArray(parsed.specialDays)) setSpecialDays(parsed.specialDays);
         if (parsed.creditNoteSettings) setCreditNoteSettings(parsed.creditNoteSettings);
         if (parsed.gstSettings) setGstSettings(parsed.gstSettings);
         if (parsed.cancellationPolicy && "standardThreshold" in parsed.cancellationPolicy) setCancellationPolicy(parsed.cancellationPolicy);
         if (Array.isArray(parsed.users) && parsed.users.length > 0) {
-          setUsers(parsed.users);
+          { const validRoles: Role[] = ["Sales", "Front Office", "Admin"]; const vu = (parsed.users as User[]).filter((u) => validRoles.includes(u.role)); if (vu.length > 0) setUsers(vu); }
         }
         if (Array.isArray(parsed.venues)) setVenues(parsed.venues);
         if (Array.isArray(parsed.venueBlocks)) setVenueBlocks(parsed.venueBlocks);

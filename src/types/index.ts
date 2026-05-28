@@ -1,4 +1,4 @@
-export type Role = "Sales REX" | "Room Allocator" | "Manager" | "Admin";
+export type Role = "Sales" | "Front Office" | "Admin";
 
 export type BookingStatus =
   | "Enquiry"
@@ -216,8 +216,7 @@ export type CreditNoteSettings = {
 };
 
 export type DiscountCaps = {
-  salesRex: number; // weekday cap; Fri-Sat row still hard-caps at 15
-  manager: number;
+  sales: number;
   admin: number | null; // null = Unlimited
 };
 
@@ -238,6 +237,7 @@ export type User = {
   email: string;
   color: string;
   active: boolean;
+  password?: string;
 };
 
 export type VenueType =

@@ -11,7 +11,8 @@ export default function BookingDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const id = params?.id;
-  const { bookings, roomInventory, openModal, hydrated } = useApp();
+  const { bookings, roomInventory, openModal, hydrated, currentRole } = useApp();
+  const isFrontOffice = currentRole === "Front Office";
   const b = bookings.find((x) => x.id === id);
 
   useEffect(() => {
@@ -21,13 +22,11 @@ export default function BookingDetailPage() {
 
   if (!b) return null;
 
-  const canConfirm = b.status === "Enquiry" || b.status === "Tentative";
-  const canLost =
-    b.status === "Enquiry" || b.status === "Tentative" || b.status === "Confirmed";
-  const canPay = b.status === "Confirmed" && b.balance > 0;
-  const canComplete = b.status === "Confirmed";
-  const canEdit =
-    b.status === "Enquiry" || b.status === "Tentative" || b.status === "Confirmed" || b.status === "Completed";
+  const canConfirm = !isFrontOffice && (b.status === "Enquiry" || b.status === "Tentative");
+  const canLost = !isFrontOffice && (b.status === "Enquiry" || b.status === "Tentative" || b.status === "Confirmed");
+  const canPay = !isFrontOffice && b.status === "Confirmed" && b.balance > 0;
+  const canComplete = !isFrontOffice && b.status === "Confirmed";
+  const canEdit = !isFrontOffice && (b.status === "Enquiry" || b.status === "Tentative" || b.status === "Confirmed" || b.status === "Completed");
   const editLabel = b.status === "Completed" ? "Add Expenses" : "Edit";
 
   const totalCollected =

@@ -64,8 +64,7 @@ export function statusBadgeDot(_s: BookingStatus): string {
 
 export function maxDiscountForRole(role: Role, caps: DiscountCaps): number {
   if (role === "Admin") return caps.admin ?? 100;
-  if (role === "Manager") return caps.manager;
-  return caps.salesRex;
+  return caps.sales;
 }
 
 export function maxDiscountForRowAndRole(
