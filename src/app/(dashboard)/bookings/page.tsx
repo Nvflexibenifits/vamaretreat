@@ -13,9 +13,6 @@ const FILTERS: ("All" | BookingStatus)[] = [
   "Enquiry",
   "Tentative",
   "Confirmed",
-  "Completed",
-  "Lost",
-  "Cancelled",
 ];
 
 export default function BookingsPage() {
@@ -158,6 +155,7 @@ export default function BookingsPage() {
               <th>Nights</th>
               <th>Rooms</th>
               <th>Total</th>
+              <th>Paid</th>
               <th>Balance</th>
               <th>Status</th>
               <th>REX</th>
@@ -167,7 +165,7 @@ export default function BookingsPage() {
           <tbody>
             {data.length === 0 ? (
               <tr>
-                <td colSpan={12}>
+                <td colSpan={13}>
                   <div className="empty-state">
                     <h3>No bookings found</h3>
                     <p>Try adjusting your filters</p>
@@ -205,6 +203,9 @@ export default function BookingsPage() {
                     })()}
                   </td>
                   <td style={{ fontWeight: 600 }}>{fmt(b.grandTotal)}</td>
+                  <td style={{ fontWeight: 500, color: "var(--grn)" }}>
+                    {fmt(b.grandTotal - b.balance)}
+                  </td>
                   <td
                     style={{
                       fontWeight: 500,

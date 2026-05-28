@@ -23,15 +23,20 @@ export type GstSettings = {
   aboveRate: number;
 };
 
-export type CancellationTier = {
-  id: string;
-  minDaysBeforeCheckin: number;
-  refundPct: number;
-  resolution: "refund" | "credit-note";
+export type CancellationPolicyCell = {
+  cancellationChargePct: number;
+  refundPct: number | null;
+  creditNotePct: number | null;
 };
 
 export type CancellationPolicy = {
-  tiers: CancellationTier[];
+  standardThreshold: number;
+  specialThreshold: number;
+  standardAbove: CancellationPolicyCell;
+  standardBelow: CancellationPolicyCell;
+  specialAbove: CancellationPolicyCell;
+  specialBelow: CancellationPolicyCell;
+  notes: string[];
 };
 
 export type RoomInventoryItem = {

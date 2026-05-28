@@ -228,7 +228,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (Array.isArray(parsed.specialDays)) setSpecialDays(parsed.specialDays);
         if (parsed.creditNoteSettings) setCreditNoteSettings(parsed.creditNoteSettings);
         if (parsed.gstSettings) setGstSettings(parsed.gstSettings);
-        if (parsed.cancellationPolicy) setCancellationPolicy(parsed.cancellationPolicy);
+        if (parsed.cancellationPolicy && "standardThreshold" in parsed.cancellationPolicy) setCancellationPolicy(parsed.cancellationPolicy);
         if (Array.isArray(parsed.users) && parsed.users.length > 0) {
           setUsers(parsed.users);
         }
@@ -326,7 +326,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (Array.isArray(parsed.specialDays)) setSpecialDays(parsed.specialDays);
         if (parsed.creditNoteSettings) setCreditNoteSettings(parsed.creditNoteSettings);
         if (parsed.gstSettings) setGstSettings(parsed.gstSettings);
-        if (parsed.cancellationPolicy) setCancellationPolicy(parsed.cancellationPolicy);
+        if (parsed.cancellationPolicy && "standardThreshold" in parsed.cancellationPolicy) setCancellationPolicy(parsed.cancellationPolicy);
         if (Array.isArray(parsed.users) && parsed.users.length > 0) {
           setUsers(parsed.users);
         }

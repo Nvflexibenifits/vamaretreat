@@ -137,6 +137,46 @@ export default function RoomChartPage() {
     return `${fmtIN(dates[0])} — ${fmtIN(dates[dates.length - 1])}`;
   }, [dates]);
 
+  // Month dropdown: current month + next 12 months
+  const monthOptions = useMemo(() => {
+    if (!today) return [];
+    const base = new Date(today + "T00:00:00");
+    base.setDate(1);
+    return Array.from({ length: 13 }, (_, i) => {
+      const d = new Date(base.getFullYear(), base.getMonth() + i, 1);
+      return {
+        value: d.toISOString().slice(0, 7),
+        label: d.toLocaleDateString("en-IN", { month: "long", year: "numeric" }),
+      };
+    });
+  }, [today]);
+
+  const selectedMonth = useMemo(() => {
+    if (!today) return "";
+    const d = new Date(today + "T00:00:00");
+    d.setDate(d.getDate() + offset);
+    return d.toISOString().slice(0, 7);
+  }, [today, offset]);
+
+  const goToMonth = (ym: string) => {
+    if (!today) return;
+    const [y, m] = ym.split("-").map(Number);
+    const target = new Date(y, m - 1, 1);
+    const todayDate = new Date(today + "T00:00:00");
+    const diff = Math.round((target.getTime() - todayDate.getTime()) / 86400000);
+    setOffset(Math.max(0, diff));
+  };
+
+  const goNextMonth = () => {
+    if (!today) return;
+    const d = new Date(today + "T00:00:00");
+    d.setDate(d.getDate() + offset);
+    const next = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+    const todayDate = new Date(today + "T00:00:00");
+    const diff = Math.round((next.getTime() - todayDate.getTime()) / 86400000);
+    setOffset(Math.max(0, diff));
+  };
+
   // Per-night cell map: tracks the booking, original slot, and any active
   // override for each (effective room, date) cell.
   const cellMap = useMemo(() => {
@@ -561,23 +601,29 @@ export default function RoomChartPage() {
           <p>30-day availability view · {rangeLabel}</p>
         </div>
         <div className="pg-hd-actions">
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={() => setOffset((o) => o - DAYS_WINDOW)}
-          >
-            Previous Month
-          </button>
-          {offset !== 0 && (
-            <button className="btn btn-ghost btn-sm" onClick={() => setOffset(0)}>
-              Today
-            </button>
-          )}
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={() => setOffset((o) => o + DAYS_WINDOW)}
-          >
+          <button className="btn btn-ghost btn-sm" onClick={goNextMonth}>
             Next Month
           </button>
+          <select
+            value={selectedMonth}
+            onChange={(e) => goToMonth(e.target.value)}
+            style={{
+              height: 32,
+              padding: "0 10px",
+              fontSize: 13,
+              border: "1px solid var(--bd)",
+              borderRadius: "var(--r2)",
+              background: "var(--surf)",
+              color: "var(--t1)",
+              cursor: "pointer",
+            }}
+          >
+            {monthOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
           <button className="btn btn-primary btn-sm" onClick={openCreate}>
             Block Venue
           </button>
@@ -632,7 +678,7 @@ export default function RoomChartPage() {
                 className="rc-legend-dot"
                 style={{ background: "#ede9fe", border: "1px solid #7c3aed" }}
               ></div>
-              Venue
+              Pets
             </div>
             <div className="rc-legend-item">
               <div className="rc-legend-dot" style={{ background: "var(--bd)" }}></div>
@@ -710,10 +756,6 @@ export default function RoomChartPage() {
                             >
                               <div
                                 className="rc-cell-booked"
-                                style={{
-                                  background: "#ede9fe",
-                                  color: "#5b21b6",
-                                }}
                                 onClick={() => openEdit(block)}
                                 onMouseEnter={(e) =>
                                   showHover({
@@ -806,7 +848,8 @@ export default function RoomChartPage() {
                     }
                     if (booking && cell) {
                       let cls = "rc-cell-booked";
-                      if (booking.status === "Completed") cls += " status-completed";
+                      if (booking.pets > 0) cls += " status-pet";
+                      else if (booking.status === "Completed") cls += " status-completed";
                       else if (booking.status === "Tentative") cls += " status-tentative";
                       const draggable = isBookingDraggable(booking);
                       // For per-night drag: drop is allowed only on the same date column.

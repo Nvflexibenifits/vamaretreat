@@ -11,7 +11,7 @@ import {
 } from "@/lib/data";
 import type {
   CancellationPolicy,
-  CancellationTier,
+  CancellationPolicyCell,
   CreditNoteSettings,
   DiscountCaps,
   GstSettings,
@@ -1360,57 +1360,55 @@ function CancellationSetupTab() {
   );
 }
 
+const ROMAN = ["i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"];
+
+type ColKey = "standardAbove" | "standardBelow" | "specialAbove" | "specialBelow";
+
+const COL_KEYS: ColKey[] = ["standardAbove", "standardBelow", "specialAbove", "specialBelow"];
+
 function CancellationLogicSection() {
   const { cancellationPolicy, updateCancellationPolicy, showNotif } = useApp();
   const [draft, setDraft] = useState<CancellationPolicy>(cancellationPolicy);
 
   useEffect(() => setDraft(cancellationPolicy), [cancellationPolicy]);
 
-  const updateTier = (id: string, patch: Partial<CancellationTier>) => {
-    setDraft((prev) => ({
-      tiers: prev.tiers.map((t) => (t.id === id ? { ...t, ...patch } : t)),
-    }));
-  };
+  const setThreshold = (field: "standardThreshold" | "specialThreshold", v: number) =>
+    setDraft((prev) => ({ ...prev, [field]: v }));
 
-  const addTier = () => {
-    const newTier: CancellationTier = {
-      id: "ct-" + Math.random().toString(36).slice(2, 7),
-      minDaysBeforeCheckin: 0,
-      refundPct: 0,
-      resolution: "credit-note",
-    };
-    setDraft((prev) => ({
-      tiers: [...prev.tiers, newTier].sort(
-        (a, b) => b.minDaysBeforeCheckin - a.minDaysBeforeCheckin
-      ),
-    }));
-  };
+  const setCell = (col: ColKey, field: keyof CancellationPolicyCell, value: number | null) =>
+    setDraft((prev) => ({ ...prev, [col]: { ...prev[col], [field]: value } }));
 
-  const removeTier = (id: string) => {
-    setDraft((prev) => ({ tiers: prev.tiers.filter((t) => t.id !== id) }));
-  };
+  const setNote = (i: number, v: string) =>
+    setDraft((prev) => {
+      const notes = [...prev.notes];
+      notes[i] = v;
+      return { ...prev, notes };
+    });
+
+  const addNote = () => setDraft((prev) => ({ ...prev, notes: [...prev.notes, ""] }));
+
+  const removeNote = (i: number) =>
+    setDraft((prev) => ({ ...prev, notes: prev.notes.filter((_, idx) => idx !== i) }));
 
   const save = () => {
-    const sorted = [...draft.tiers].sort(
-      (a, b) => b.minDaysBeforeCheckin - a.minDaysBeforeCheckin
-    );
-    updateCancellationPolicy({ tiers: sorted });
+    updateCancellationPolicy(draft);
     showNotif("Cancellation policy saved", "success");
   };
+
+  const colHeaders = [
+    `> ${draft.standardThreshold} days (Standard)`,
+    `< ${draft.standardThreshold} days (Standard)`,
+    `> ${draft.specialThreshold} days (Special)`,
+    `< ${draft.specialThreshold} days (Special)`,
+  ];
 
   return (
     <div className="settings-panel">
       <div className="sp-hd">
-        <h3>Cancellation Logic</h3>
+        <h3>Cancellation Policy</h3>
         <div style={{ display: "flex", gap: 8 }}>
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={() => setDraft(SEED_CANCELLATION_POLICY)}
-          >
+          <button className="btn btn-ghost btn-sm" onClick={() => setDraft(SEED_CANCELLATION_POLICY)}>
             Reset to defaults
-          </button>
-          <button className="btn btn-ghost btn-sm" onClick={addTier}>
-            Add Tier
           </button>
           <button className="btn btn-primary btn-sm" onClick={save}>
             Save Changes
@@ -1418,76 +1416,296 @@ function CancellationLogicSection() {
         </div>
       </div>
       <div className="sp-body">
-        <p style={{ fontSize: 12, color: "var(--t3)", marginBottom: 14 }}>
-          Refund percentage is applied to the advance paid. Tiers are matched top-to-bottom
-          by days remaining before check-in — the first tier where days &ge; minimum wins.
-          Resolution sets the default method when cancellation is processed.
-        </p>
-        <table className="pricing-tbl">
-          <thead>
-            <tr>
-              <th>Days Before Check-in (minimum)</th>
-              <th style={{ textAlign: "right", width: 130 }}>Refund %</th>
-              <th style={{ width: 160 }}>Default Resolution</th>
-              <th style={{ width: 80, textAlign: "right" }}></th>
-            </tr>
-          </thead>
-          <tbody>
-            {draft.tiers.map((tier) => (
-              <tr key={tier.id}>
-                <td>
-                  <input
-                    type="number"
-                    value={tier.minDaysBeforeCheckin}
-                    min={0}
-                    onChange={(e) =>
-                      updateTier(tier.id, {
-                        minDaysBeforeCheckin: parseInt(e.target.value) || 0,
-                      })
-                    }
-                  />
-                </td>
-                <td>
-                  <input
-                    type="number"
-                    value={tier.refundPct}
-                    min={0}
-                    max={100}
-                    onChange={(e) =>
-                      updateTier(tier.id, { refundPct: parseInt(e.target.value) || 0 })
-                    }
-                  />
-                </td>
-                <td>
-                  <select
-                    value={tier.resolution}
-                    onChange={(e) =>
-                      updateTier(tier.id, {
-                        resolution: e.target.value as CancellationTier["resolution"],
-                      })
-                    }
-                  >
-                    <option value="refund">Cash Refund</option>
-                    <option value="credit-note">Credit Note</option>
-                  </select>
-                </td>
-                <td style={{ textAlign: "right" }}>
-                  <button
-                    className="btn btn-ghost btn-xs"
-                    style={{ color: "var(--red)" }}
-                    onClick={() => removeTier(tier.id)}
-                  >
-                    Remove
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 10 }}>
-          Example: 90% refund at 30+ days means guest gets back 90% of advance in cash.
-          At 0 days, 0% refund means no cash back but a credit note may still be issued.
+
+        {/* Threshold settings */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24, maxWidth: 520 }}>
+          <div className="field">
+            <label>Standard Days Threshold</label>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input
+                type="number"
+                value={draft.standardThreshold}
+                min={1}
+                style={{ width: 72 }}
+                onChange={(e) => setThreshold("standardThreshold", parseInt(e.target.value) || 1)}
+              />
+              <span style={{ fontSize: 13, color: "var(--t3)" }}>days before check-in</span>
+            </div>
+          </div>
+          <div className="field">
+            <label>Special Days Threshold</label>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input
+                type="number"
+                value={draft.specialThreshold}
+                min={1}
+                style={{ width: 72 }}
+                onChange={(e) => setThreshold("specialThreshold", parseInt(e.target.value) || 1)}
+              />
+              <span style={{ fontSize: 13, color: "var(--t3)" }}>days before check-in</span>
+            </div>
+          </div>
         </div>
+
+        {/* Matrix table */}
+        <div style={{ overflowX: "auto" }}>
+          <table className="pricing-tbl" style={{ tableLayout: "fixed", width: "100%" }}>
+            <colgroup>
+              <col style={{ width: "22%" }} />
+              <col style={{ width: "19.5%" }} />
+              <col style={{ width: "19.5%" }} />
+              <col style={{ width: "19.5%" }} />
+              <col style={{ width: "19.5%" }} />
+            </colgroup>
+            <thead>
+              <tr>
+                <th></th>
+                <th
+                  colSpan={2}
+                  style={{
+                    textAlign: "center",
+                    background: "var(--surf2)",
+                    fontFamily: "var(--font-outfit), Outfit, sans-serif",
+                    fontSize: 11,
+                    letterSpacing: ".5px",
+                    padding: "10px 8px",
+                  }}
+                >
+                  STANDARD DAYS
+                </th>
+                <th
+                  colSpan={2}
+                  style={{
+                    textAlign: "center",
+                    background: "var(--surf3)",
+                    fontFamily: "var(--font-outfit), Outfit, sans-serif",
+                    fontSize: 11,
+                    letterSpacing: ".5px",
+                    padding: "10px 8px",
+                  }}
+                >
+                  SPECIAL DAYS
+                </th>
+              </tr>
+              <tr>
+                <th></th>
+                {colHeaders.map((h) => (
+                  <th
+                    key={h}
+                    style={{
+                      textAlign: "center",
+                      fontSize: 11,
+                      fontWeight: 500,
+                      color: "var(--t2)",
+                      padding: "8px 6px",
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {/* Cancellation Charges */}
+              <tr>
+                <td style={{ fontWeight: 500, fontSize: 13 }}>Cancellation Charges</td>
+                {COL_KEYS.map((col) => (
+                  <td key={col} style={{ padding: "10px 8px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <input
+                        type="number"
+                        value={draft[col].cancellationChargePct}
+                        min={0}
+                        max={100}
+                        style={{ flex: 1, minWidth: 0, textAlign: "center" }}
+                        onChange={(e) =>
+                          setCell(col, "cancellationChargePct", parseInt(e.target.value) || 0)
+                        }
+                      />
+                      <span style={{ fontSize: 13, color: "var(--t2)", flexShrink: 0 }}>%</span>
+                    </div>
+                  </td>
+                ))}
+              </tr>
+
+              {/* Refund */}
+              <tr>
+                <td style={{ fontWeight: 500, fontSize: 13 }}>Refund</td>
+                {COL_KEYS.map((col) => {
+                  const v = draft[col].refundPct;
+                  return (
+                    <td key={col} style={{ padding: "10px 8px" }}>
+                      {v === null ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <span
+                            style={{
+                              flex: 1,
+                              textAlign: "center",
+                              fontSize: 13,
+                              fontWeight: 600,
+                              color: "var(--t3)",
+                              background: "var(--surf3)",
+                              border: "1px solid var(--bd)",
+                              borderRadius: "var(--r1)",
+                              padding: "6px 4px",
+                              cursor: "default",
+                            }}
+                          >
+                            NA
+                          </span>
+                          <button
+                            className="btn btn-ghost btn-xs"
+                            style={{ flexShrink: 0 }}
+                            title="Enter a value"
+                            onClick={() => setCell(col, "refundPct", 100)}
+                          >
+                            Set
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <input
+                            type="number"
+                            value={v}
+                            min={0}
+                            max={100}
+                            style={{ flex: 1, minWidth: 0, textAlign: "center" }}
+                            onChange={(e) =>
+                              setCell(col, "refundPct", parseInt(e.target.value) || 0)
+                            }
+                          />
+                          <span style={{ fontSize: 13, color: "var(--t2)", flexShrink: 0 }}>%</span>
+                          <button
+                            className="btn btn-ghost btn-xs"
+                            style={{ flexShrink: 0, color: "var(--t3)" }}
+                            title="Set as NA"
+                            onClick={() => setCell(col, "refundPct", null)}
+                          >
+                            NA
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+
+              {/* Credit Note */}
+              <tr>
+                <td style={{ fontWeight: 500, fontSize: 13 }}>Credit Note</td>
+                {COL_KEYS.map((col) => {
+                  const v = draft[col].creditNotePct;
+                  return (
+                    <td key={col} style={{ padding: "10px 8px" }}>
+                      {v === null ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <span
+                            style={{
+                              flex: 1,
+                              textAlign: "center",
+                              fontSize: 13,
+                              fontWeight: 600,
+                              color: "var(--t3)",
+                              background: "var(--surf3)",
+                              border: "1px solid var(--bd)",
+                              borderRadius: "var(--r1)",
+                              padding: "6px 4px",
+                              cursor: "default",
+                            }}
+                          >
+                            NA
+                          </span>
+                          <button
+                            className="btn btn-ghost btn-xs"
+                            style={{ flexShrink: 0 }}
+                            title="Enter a value"
+                            onClick={() => setCell(col, "creditNotePct", 100)}
+                          >
+                            Set
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <input
+                            type="number"
+                            value={v}
+                            min={0}
+                            max={100}
+                            style={{ flex: 1, minWidth: 0, textAlign: "center" }}
+                            onChange={(e) =>
+                              setCell(col, "creditNotePct", parseInt(e.target.value) || 0)
+                            }
+                          />
+                          <span style={{ fontSize: 13, color: "var(--t2)", flexShrink: 0 }}>%</span>
+                          <button
+                            className="btn btn-ghost btn-xs"
+                            style={{ flexShrink: 0, color: "var(--t3)" }}
+                            title="Set as NA"
+                            onClick={() => setCell(col, "creditNotePct", null)}
+                          >
+                            NA
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        {/* Notes */}
+        <div style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid var(--bd)" }}>
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            marginBottom: 12,
+          }}>
+            <span style={{
+              fontFamily: "var(--font-outfit), Outfit, sans-serif",
+              fontSize: 13,
+              fontWeight: 700,
+              color: "var(--t1)",
+            }}>
+              Notes
+            </span>
+            <button className="btn btn-ghost btn-xs" onClick={addNote}>
+              Add Note
+            </button>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {draft.notes.map((note, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{
+                  fontSize: 12,
+                  color: "var(--t3)",
+                  minWidth: 24,
+                  textAlign: "right",
+                  flexShrink: 0,
+                }}>
+                  ({ROMAN[i] ?? i + 1})
+                </span>
+                <input
+                  type="text"
+                  value={note}
+                  onChange={(e) => setNote(i, e.target.value)}
+                  style={{ flex: 1, fontSize: 13 }}
+                />
+                <button
+                  className="btn btn-ghost btn-xs"
+                  style={{ color: "var(--red)", flexShrink: 0 }}
+                  onClick={() => removeNote(i)}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+
       </div>
     </div>
   );

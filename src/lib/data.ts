@@ -488,12 +488,17 @@ export const SEED_GST_SETTINGS: GstSettings = {
 };
 
 export const SEED_CANCELLATION_POLICY: CancellationPolicy = {
-  tiers: [
-    { id: "ct-30", minDaysBeforeCheckin: 30, refundPct: 90, resolution: "refund" },
-    { id: "ct-15", minDaysBeforeCheckin: 15, refundPct: 75, resolution: "refund" },
-    { id: "ct-7",  minDaysBeforeCheckin:  7, refundPct: 50, resolution: "credit-note" },
-    { id: "ct-1",  minDaysBeforeCheckin:  1, refundPct: 25, resolution: "credit-note" },
-    { id: "ct-0",  minDaysBeforeCheckin:  0, refundPct:  0, resolution: "credit-note" },
+  standardThreshold: 5,
+  specialThreshold: 10,
+  standardAbove: { cancellationChargePct: 0,  refundPct: 100, creditNotePct: null },
+  standardBelow: { cancellationChargePct: 0,  refundPct: null, creditNotePct: 100 },
+  specialAbove:  { cancellationChargePct: 0,  refundPct: 100, creditNotePct: null },
+  specialBelow:  { cancellationChargePct: 50, refundPct: null, creditNotePct: 50  },
+  notes: [
+    "Above policy is applicable for accommodation charges.",
+    "Meal charges will be refunded 100% for cancellation upto 1 day before check-in date.",
+    "Credit note is not valid for use on Saturdays or any peak days like Diwali, Dusherra, Ugaadi, Republic Day, Independence Day, Good Friday, Christmas, New Year.",
+    "Refunds shall be processed through bank transfer only.",
   ],
 };
 
