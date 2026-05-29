@@ -1,28 +1,38 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/lib/store";
 
+type ApiUser = {
+  id: string;
+  name: string;
+  role: string;
+  email: string;
+  color: string;
+  active: boolean;
+};
+
 export default function LoginPage() {
   const router = useRouter();
-  const { isAuthed, login, users } = useApp();
+  const { login } = useApp();
+
+  const [users, setUsers] = useState<ApiUser[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(true);
   const [selected, setSelected] = useState<number | null>(null);
   const [password, setPassword] = useState("");
   const [showPwd, setShowPwd] = useState(false);
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const [forgotMsg, setForgotMsg] = useState(false);
 
-  const cards = useMemo(() => users.filter((u) => u.active), [users]);
-
   useEffect(() => {
-    if (isAuthed) router.replace("/");
-  }, [isAuthed, router]);
-
-  // If the user list shrinks (e.g. admin deleted the selected user), reset.
-  useEffect(() => {
-    if (selected !== null && selected >= cards.length) setSelected(null);
-  }, [selected, cards.length]);
+    fetch("/api/users")
+      .then((r) => r.json())
+      .then((data: ApiUser[]) => setUsers(data.filter((u) => u.active)))
+      .catch(() => setUsers([]))
+      .finally(() => setLoadingUsers(false));
+  }, []);
 
   const onSelect = (i: number) => {
     setSelected(i);
@@ -31,16 +41,35 @@ export default function LoginPage() {
     setForgotMsg(false);
   };
 
-  const onLogin = () => {
+  const onLogin = async () => {
     if (selected === null) return;
-    const u = cards[selected];
-    const correctPwd = u.password || "test@123";
-    if (password !== correctPwd) {
-      setError("Incorrect password. Please try again.");
-      return;
+    const u = users[selected];
+    if (!u) return;
+
+    setSubmitting(true);
+    setError("");
+
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: u.email, password }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || "Incorrect password. Please try again.");
+        return;
+      }
+
+      login(data.user.role as never, data.user.name);
+      router.push("/");
+    } catch {
+      setError("Something went wrong. Please try again.");
+    } finally {
+      setSubmitting(false);
     }
-    login(u.role, u.name);
-    router.replace("/");
   };
 
   return (
@@ -53,20 +82,32 @@ export default function LoginPage() {
             <div className="login-sub">Back Office · Internal Tool</div>
           </div>
         </div>
+
         <div className="login-section-label">Select your role to continue</div>
-        <div className="role-grid">
-          {cards.map((u, i) => (
-            <button
-              key={u.id}
-              type="button"
-              className={`role-btn${selected === i ? " selected" : ""}`}
-              onClick={() => onSelect(i)}
-            >
-              <div className="role-btn-name">{u.role}</div>
-              <div className="role-btn-desc">{u.name}</div>
-            </button>
-          ))}
-        </div>
+
+        {loadingUsers ? (
+          <div style={{ textAlign: "center", padding: "24px 0", fontSize: 13, color: "var(--t3)" }}>
+            Loading users...
+          </div>
+        ) : users.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "24px 0", fontSize: 13, color: "var(--t3)" }}>
+            No users found. Contact your administrator.
+          </div>
+        ) : (
+          <div className="role-grid">
+            {users.map((u, i) => (
+              <button
+                key={u.id}
+                type="button"
+                className={`role-btn${selected === i ? " selected" : ""}`}
+                onClick={() => onSelect(i)}
+              >
+                <div className="role-btn-name">{u.role}</div>
+                <div className="role-btn-desc">{u.name}</div>
+              </button>
+            ))}
+          </div>
+        )}
 
         {selected !== null && (
           <div style={{ marginBottom: 16 }}>
@@ -75,13 +116,8 @@ export default function LoginPage() {
               <input
                 type={showPwd ? "text" : "password"}
                 value={password}
-                onChange={(e) => {
-                  setPassword(e.target.value);
-                  setError("");
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") onLogin();
-                }}
+                onChange={(e) => { setPassword(e.target.value); setError(""); }}
+                onKeyDown={(e) => { if (e.key === "Enter") onLogin(); }}
                 placeholder="••••••••"
                 autoFocus
                 style={{
@@ -100,17 +136,10 @@ export default function LoginPage() {
                 type="button"
                 onClick={() => setShowPwd((v) => !v)}
                 style={{
-                  position: "absolute",
-                  right: 8,
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  background: "transparent",
-                  border: "none",
-                  padding: "4px 8px",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: "var(--t3)",
-                  cursor: "pointer",
+                  position: "absolute", right: 8, top: "50%",
+                  transform: "translateY(-50%)", background: "transparent",
+                  border: "none", padding: "4px 8px", fontSize: 12,
+                  fontWeight: 600, color: "var(--t3)", cursor: "pointer",
                 }}
                 aria-label={showPwd ? "Hide password" : "Show password"}
               >
@@ -124,32 +153,20 @@ export default function LoginPage() {
               type="button"
               onClick={() => setForgotMsg(true)}
               style={{
-                background: "transparent",
-                border: "none",
-                padding: 0,
-                marginTop: 8,
-                fontSize: 11,
-                color: "var(--acc)",
-                cursor: "pointer",
-                fontWeight: 600,
+                background: "transparent", border: "none", padding: 0,
+                marginTop: 8, fontSize: 11, color: "var(--acc)",
+                cursor: "pointer", fontWeight: 600,
               }}
             >
               Forgot Password?
             </button>
             {forgotMsg && (
-              <div
-                style={{
-                  marginTop: 8,
-                  padding: "10px 12px",
-                  background: "var(--acc-lt)",
-                  border: "1px solid var(--acc-bg)",
-                  borderRadius: "var(--r2)",
-                  fontSize: 11,
-                  color: "var(--t2)",
-                  lineHeight: 1.5,
-                }}
-              >
-                A password reset link will be sent to the admin email. Please contact your administrator.
+              <div style={{
+                marginTop: 8, padding: "10px 12px",
+                background: "var(--acc-lt)", border: "1px solid var(--acc-bg)",
+                borderRadius: "var(--r2)", fontSize: 11, color: "var(--t2)", lineHeight: 1.5,
+              }}>
+                Please contact your administrator to reset your password.
               </div>
             )}
           </div>
@@ -158,15 +175,14 @@ export default function LoginPage() {
         <button
           className="btn-login"
           onClick={onLogin}
-          disabled={selected === null || !password}
+          disabled={selected === null || !password || submitting}
           style={{
-            opacity: selected === null || !password ? 0.5 : 1,
-            cursor: selected === null || !password ? "not-allowed" : "pointer",
+            opacity: selected === null || !password || submitting ? 0.5 : 1,
+            cursor: selected === null || !password || submitting ? "not-allowed" : "pointer",
           }}
         >
-          Enter Back Office
+          {submitting ? "Signing in..." : "Enter Back Office"}
         </button>
-        <div className="login-hint">Demo mode — all data is in-memory</div>
       </div>
     </div>
   );

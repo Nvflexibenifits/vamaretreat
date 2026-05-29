@@ -1811,11 +1811,49 @@ function CreditNoteSection() {
   );
 }
 
-// ─────────── Users ───────────
+// ─────────── Users (API-driven, syncs with Clerk) ───────────
+type ApiUser = {
+  id: string;
+  clerkId?: string | null;
+  name: string;
+  role: Role;
+  email: string;
+  color: string;
+  active: boolean;
+};
+
+type DraftUser = {
+  id: string;
+  name: string;
+  role: Role;
+  email: string;
+  color: string;
+  active: boolean;
+  password: string;
+};
+
 function UsersTab() {
-  const { users, addUser, updateUser, removeUser, showNotif } = useApp();
-  const [editing, setEditing] = useState<User | null>(null);
+  const { showNotif } = useApp();
+  const [apiUsers, setApiUsers] = useState<ApiUser[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState<DraftUser | null>(null);
   const [isNew, setIsNew] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<ApiUser | null>(null);
+
+  const fetchUsers = async () => {
+    try {
+      const res = await fetch("/api/users");
+      const data = await res.json();
+      if (Array.isArray(data)) setApiUsers(data);
+    } catch {
+      showNotif("Failed to load users", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchUsers(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const openNew = () => {
     setEditing({
@@ -1825,41 +1863,96 @@ function UsersTab() {
       email: "",
       color: colorFor("New User"),
       active: true,
+      password: "test@123",
     });
     setIsNew(true);
   };
 
-  const openEdit = (u: User) => {
-    setEditing({ ...u });
+  const openEdit = (u: ApiUser) => {
+    setEditing({ ...u, password: "" });
     setIsNew(false);
   };
 
-  const close = () => {
-    setEditing(null);
-    setIsNew(false);
-  };
+  const close = () => { setEditing(null); setIsNew(false); };
 
-  const save = () => {
+  const save = async () => {
     if (!editing) return;
-    if (!editing.name.trim()) {
-      showNotif("Name is required", "error");
-      return;
+    if (!editing.name.trim()) { showNotif("Name is required", "error"); return; }
+    if (!editing.email.trim()) { showNotif("Email is required", "error"); return; }
+    if (isNew && !editing.password.trim()) { showNotif("Password is required", "error"); return; }
+
+    // Auto-suggest email format if empty
+    const email = editing.email.trim() ||
+      `${editing.name.toLowerCase().replace(/\s+/g, ".")}@vamaretreats.com`;
+
+    setSaving(true);
+    try {
+      if (isNew) {
+        const res = await fetch("/api/users", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: editing.name.trim(),
+            email,
+            password: editing.password.trim(),
+            role: editing.role,
+            color: editing.color || colorFor(editing.name),
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          showNotif(data.error || "Failed to create user", "error");
+          return;
+        }
+        showNotif(`${editing.name} added`, "success");
+      } else {
+        const body: Record<string, unknown> = {
+          name: editing.name.trim(),
+          email,
+          role: editing.role,
+          color: editing.color || colorFor(editing.name),
+          active: editing.active,
+          ...(editing.password.trim() && { password: editing.password.trim() }),
+        };
+        const res = await fetch(`/api/users/${editing.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          showNotif(data.error || "Failed to update user", "error");
+          return;
+        }
+        showNotif("User updated", "success");
+      }
+      close();
+      await fetchUsers();
+    } catch {
+      showNotif("Network error", "error");
+    } finally {
+      setSaving(false);
     }
-    const next: User = {
-      ...editing,
-      name: editing.name.trim(),
-      email: editing.email.trim(),
-      color: editing.color || colorFor(editing.name),
-    };
-    if (isNew) addUser(next);
-    else updateUser(next.id, next);
-    showNotif(isNew ? `${next.name} added` : "User updated", "success");
-    close();
   };
 
-  const remove = (u: User) => {
-    removeUser(u.id);
-    showNotif(`${u.name} removed`, "success");
+  const confirmDelete = async () => {
+    if (!deleteConfirm) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/users/${deleteConfirm.id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) {
+        showNotif(data.error || "Failed to delete user", "error");
+        return;
+      }
+      showNotif(`${deleteConfirm.name} removed`, "success");
+      setDeleteConfirm(null);
+      await fetchUsers();
+    } catch {
+      showNotif("Network error", "error");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -1871,12 +1964,14 @@ function UsersTab() {
         </button>
       </div>
       <div className="sp-body">
-        {users.length === 0 ? (
+        {loading ? (
+          <div style={{ padding: 24, fontSize: 13, color: "var(--t3)" }}>Loading users…</div>
+        ) : apiUsers.length === 0 ? (
           <div className="empty-state" style={{ padding: 24 }}>
             <p>No users yet</p>
           </div>
         ) : (
-          users.map((u) => (
+          apiUsers.map((u) => (
             <div key={u.id} className="user-item">
               <div className="user-av" style={{ background: u.color }}>
                 {u.name[0] || "?"}
@@ -1886,13 +1981,11 @@ function UsersTab() {
                 <div className="user-email">{u.email || "—"}</div>
               </div>
               <div className="user-role-tag">{u.role}</div>
-              <button className="btn btn-ghost btn-xs" onClick={() => openEdit(u)}>
-                Edit
-              </button>
+              <button className="btn btn-ghost btn-xs" onClick={() => openEdit(u)}>Edit</button>
               <button
                 className="btn btn-ghost btn-xs"
-                onClick={() => remove(u)}
                 style={{ color: "var(--red)" }}
+                onClick={() => setDeleteConfirm(u)}
               >
                 Delete
               </button>
@@ -1901,13 +1994,9 @@ function UsersTab() {
         )}
       </div>
 
+      {/* Add / Edit modal */}
       {editing && (
-        <div
-          className="modal-overlay"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) close();
-          }}
-        >
+        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
           <div className="modal modal-sm">
             <h3>{isNew ? "Add User" : `Edit ${editing.name || "User"}`}</h3>
             <div className="fg" style={{ marginTop: 12 }}>
@@ -1917,9 +2006,12 @@ function UsersTab() {
                   type="text"
                   value={editing.name}
                   onChange={(e) =>
-                    setEditing((prev) =>
-                      prev ? { ...prev, name: e.target.value, color: colorFor(e.target.value) } : prev
-                    )
+                    setEditing((prev) => prev ? {
+                      ...prev,
+                      name: e.target.value,
+                      color: colorFor(e.target.value),
+                      email: prev.email || `${e.target.value.toLowerCase().replace(/\s+/g, ".")}@vamaretreats.com`,
+                    } : prev)
                   }
                 />
               </div>
@@ -1927,37 +2019,58 @@ function UsersTab() {
                 <label>Role</label>
                 <select
                   value={editing.role}
-                  onChange={(e) =>
-                    setEditing((prev) =>
-                      prev ? { ...prev, role: e.target.value as Role } : prev
-                    )
-                  }
+                  onChange={(e) => setEditing((prev) => prev ? { ...prev, role: e.target.value as Role } : prev)}
                 >
                   {ROLE_OPTIONS.map((r) => (
-                    <option key={r} value={r}>
-                      {r}
-                    </option>
+                    <option key={r} value={r}>{r}</option>
                   ))}
                 </select>
               </div>
               <div className="field" style={{ gridColumn: "span 2" }}>
-                <label>Email</label>
+                <label>Email *</label>
                 <input
                   type="email"
                   value={editing.email}
-                  onChange={(e) =>
-                    setEditing((prev) => (prev ? { ...prev, email: e.target.value } : prev))
-                  }
-                  placeholder="user@vamaretreats.com"
+                  onChange={(e) => setEditing((prev) => prev ? { ...prev, email: e.target.value } : prev)}
+                  placeholder="name@vamaretreats.com"
+                />
+              </div>
+              <div className="field" style={{ gridColumn: "span 2" }}>
+                <label>{isNew ? "Password *" : "Password"}</label>
+                <input
+                  type="password"
+                  value={editing.password}
+                  onChange={(e) => setEditing((prev) => prev ? { ...prev, password: e.target.value } : prev)}
+                  placeholder={isNew ? "Set a password" : "Leave blank to keep existing"}
+                  autoComplete="new-password"
                 />
               </div>
             </div>
             <div className="modal-actions">
-              <button className="btn btn-ghost" onClick={close}>
+              <button className="btn btn-ghost" onClick={close} disabled={saving}>Cancel</button>
+              <button className="btn btn-primary" onClick={save} disabled={saving}>
+                {saving ? "Saving…" : isNew ? "Add User" : "Save Changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirmation */}
+      {deleteConfirm && (
+        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setDeleteConfirm(null); }}>
+          <div className="modal modal-sm">
+            <h3>Delete {deleteConfirm.name}?</h3>
+            <p className="modal-desc">
+              Are you sure you want to delete <strong>{deleteConfirm.name}</strong>?
+              They will no longer be able to log in.
+            </p>
+            <div className="modal-actions">
+              <button className="btn btn-ghost" onClick={() => setDeleteConfirm(null)} disabled={saving}>
                 Cancel
               </button>
-              <button className="btn btn-primary" onClick={save}>
-                {isNew ? "Add User" : "Save Changes"}
+              <button className="btn btn-danger" onClick={confirmDelete} disabled={saving}>
+                {saving ? "Deleting…" : "Yes, Delete"}
               </button>
             </div>
           </div>

@@ -75,6 +75,7 @@ enum CancellationResolution {
 
 model User {
   id       String  @id
+  clerkId  String? @unique
   name     String
   role     Role
   email    String

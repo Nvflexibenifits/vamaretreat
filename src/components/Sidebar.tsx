@@ -27,9 +27,10 @@ export function Sidebar() {
     if (pathname.startsWith("/bookings")) setBookingsOpen(true);
   }, [pathname]);
 
-  const onLogout = () => {
+  const onLogout = async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
     logout();
-    router.replace("/login");
+    router.push("/login");
   };
 
   const isFrontOffice = currentRole === "Front Office";

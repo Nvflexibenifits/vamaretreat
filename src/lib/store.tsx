@@ -210,6 +210,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [notif, setNotif] = useState<{ msg: string; kind: NotifKind } | null>(null);
   const [modal, setModal] = useState<ModalState>({ kind: null });
 
+  // Restore session from HTTP-only cookie via /api/auth/me on mount.
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.user) {
+          setCurrentRole(data.user.role as Role);
+          setCurrentUser(data.user.name);
+          setIsAuthed(true);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   // Hydrate from localStorage on mount.
   // v2 key: full restore. If not present, migrate user data from v1 (bookings,
   // users, venues) but intentionally drop all master-setup config so new seed
