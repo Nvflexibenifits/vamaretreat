@@ -30,7 +30,6 @@ type Tab =
   | "rooms-inventory"
   | "venues"
   | "meal"
-  | "discount"
   | "special"
   | "cancellation"
   | "users";
@@ -40,13 +39,12 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "rooms-inventory", label: "Room Inventory" },
   { id: "venues", label: "Venue Master" },
   { id: "meal", label: "Meal Package" },
-  { id: "discount", label: "Discount Rules" },
   { id: "special", label: "Special Days" },
   { id: "cancellation", label: "Cancellation Setup" },
   { id: "users", label: "Users" },
 ];
 
-const VENUE_TYPES: VenueType[] = [
+const VENUE_TYPES: string[] = [
   "Conference Room",
   "Seminar Room",
   "Garden Venue",
@@ -115,7 +113,6 @@ export default function MasterSetupPage() {
           {tab === "rooms-inventory" && <RoomInventorySection />}
           {tab === "venues" && <VenueMasterTab />}
           {tab === "meal" && <MealPackageTab />}
-          {tab === "discount" && <DiscountTab />}
           {tab === "special" && <SpecialDaysTab />}
           {tab === "cancellation" && <CancellationSetupTab />}
           {tab === "users" && <UsersTab />}
@@ -129,10 +126,13 @@ export default function MasterSetupPage() {
 function VenueMasterTab() {
   const { venues, addVenue, updateVenue, removeVenue, showNotif } = useApp();
 
-  const [addOpen, setAddOpen] = useState<VenueType | null>(null);
+  const [venueTypes, setVenueTypes] = useState<string[]>(VENUE_TYPES);
+  const [addOpen, setAddOpen] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const [newCap, setNewCap] = useState("");
   const [newNotes, setNewNotes] = useState("");
+  const [newCatName, setNewCatName] = useState("");
+  const [addCatOpen, setAddCatOpen] = useState(false);
   const [editing, setEditing] = useState<{
     id: string;
     name: string;
@@ -141,11 +141,11 @@ function VenueMasterTab() {
   } | null>(null);
 
   const grouped = useMemo(() => {
-    return VENUE_TYPES.map((type) => ({
+    return venueTypes.map((type) => ({
       type,
       items: venues.filter((v) => v.type === type),
     }));
-  }, [venues]);
+  }, [venues, venueTypes]);
 
   const resetAddForm = () => {
     setNewName("");
@@ -153,7 +153,7 @@ function VenueMasterTab() {
     setNewNotes("");
   };
 
-  const onAdd = (type: VenueType) => {
+  const onAdd = (type: string) => {
     const name = newName.trim();
     if (!name) {
       showNotif("Enter a name", "error");
@@ -171,7 +171,7 @@ function VenueMasterTab() {
     addVenue({
       id: uid(),
       name,
-      type,
+      type: type as VenueType,
       capacity: !isNaN(cap) && cap > 0 ? cap : undefined,
       notes: newNotes.trim() || undefined,
       active: true,
@@ -202,10 +202,18 @@ function VenueMasterTab() {
     <div className="settings-panel">
       <div className="sp-hd">
         <h3>Venue Master</h3>
-        <span style={{ fontSize: 12, color: "var(--t3)" }}>
-          {venues.length} venue{venues.length === 1 ? "" : "s"} across{" "}
-          {VENUE_TYPES.length} categories
-        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 12, color: "var(--t3)" }}>
+            {venues.length} venue{venues.length === 1 ? "" : "s"} across{" "}
+            {venueTypes.length} categories
+          </span>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => { setAddCatOpen((v) => !v); setNewCatName(""); }}
+          >
+            {addCatOpen ? "Close" : "Add Category"}
+          </button>
+        </div>
       </div>
       <div className="sp-body">
         <p style={{ fontSize: 12, color: "var(--t3)", marginBottom: 14 }}>
@@ -213,6 +221,60 @@ function VenueMasterTab() {
           be added in Phase 2 — for now, list all conference rooms, seminar
           rooms, garden venues and event places at the resort.
         </p>
+
+        {addCatOpen && (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr auto auto",
+              gap: 8,
+              alignItems: "end",
+              padding: 10,
+              background: "var(--surf2)",
+              border: "1px solid var(--bd)",
+              borderRadius: "var(--r2)",
+              marginBottom: 14,
+            }}
+          >
+            <div className="field">
+              <label>Category Name</label>
+              <input
+                type="text"
+                value={newCatName}
+                onChange={(e) => setNewCatName(e.target.value)}
+                placeholder="e.g. Rooftop Venue"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    const name = newCatName.trim();
+                    if (!name) { showNotif("Enter a category name", "error"); return; }
+                    if (venueTypes.includes(name)) { showNotif(`${name} already exists`, "error"); return; }
+                    setVenueTypes((prev) => [...prev, name]);
+                    showNotif(`${name} added`, "success");
+                    setNewCatName("");
+                    setAddCatOpen(false);
+                  }
+                  if (e.key === "Escape") setAddCatOpen(false);
+                }}
+                autoFocus
+              />
+            </div>
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={() => {
+                const name = newCatName.trim();
+                if (!name) { showNotif("Enter a category name", "error"); return; }
+                if (venueTypes.includes(name)) { showNotif(`${name} already exists`, "error"); return; }
+                setVenueTypes((prev) => [...prev, name]);
+                showNotif(`${name} added`, "success");
+                setNewCatName("");
+                setAddCatOpen(false);
+              }}
+            >
+              Add
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={() => { setAddCatOpen(false); setNewCatName(""); }}>Cancel</button>
+          </div>
+        )}
 
         {grouped.map(({ type, items }) => (
           <div key={type} style={{ marginBottom: 22 }}>
@@ -242,9 +304,18 @@ function VenueMasterTab() {
               >
                 {items.length}
               </span>
+              {items.length === 0 && (
+                <button
+                  className="btn btn-ghost btn-xs"
+                  style={{ color: "var(--red)" }}
+                  onClick={() => setVenueTypes((prev) => prev.filter((t) => t !== type))}
+                >
+                  Remove Category
+                </button>
+              )}
               <button
                 className="btn btn-ghost btn-xs"
-                style={{ marginLeft: "auto" }}
+                style={{ marginLeft: items.length === 0 ? 0 : "auto" }}
                 onClick={() => {
                   if (addOpen === type) {
                     setAddOpen(null);
@@ -617,8 +688,8 @@ function RoomPricingSection() {
       </div>
       <div className="sp-body">
         <p style={{ fontSize: 12, color: "var(--t3)", marginBottom: 14 }}>
-          Standard rates w.e.f. 22.09.25. Three discount tiers auto-apply on the booking form:
-          Sun–Thu, Friday, and Sat &amp; Peak Days. GST is computed per the rule below — not stored per room.
+          Standard rates w.e.f. 22.09.25. Four discount tiers auto-apply on the booking form:
+          Sun–Thu, Friday, Saturday, and Special Days. GST is computed per the rule below — not stored per room.
         </p>
         <table className="pricing-tbl">
           <thead>
@@ -627,7 +698,8 @@ function RoomPricingSection() {
               <th style={{ textAlign: "right", width: 120 }}>Tariff (₹)</th>
               <th style={{ textAlign: "right", width: 120 }}>Sun–Thu Disc %</th>
               <th style={{ textAlign: "right", width: 120 }}>Friday Disc %</th>
-              <th style={{ textAlign: "right", width: 140 }}>Sat & Peak Disc %</th>
+              <th style={{ textAlign: "right", width: 120 }}>Sat Disc %</th>
+              <th style={{ textAlign: "right", width: 140 }}>Special Days Disc %</th>
             </tr>
           </thead>
           <tbody>
@@ -674,6 +746,17 @@ function RoomPricingSection() {
                     max={100}
                     onChange={(e) =>
                       setRoomField(r.id, "weekendDiscount", parseInt(e.target.value) || 0)
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    type="number"
+                    value={r.specialDayDiscount ?? 0}
+                    min={0}
+                    max={100}
+                    onChange={(e) =>
+                      setRoomField(r.id, "specialDayDiscount", parseInt(e.target.value) || 0)
                     }
                   />
                 </td>
@@ -760,18 +843,21 @@ function RoomPricingSection() {
 function RoomInventorySection() {
   const {
     rooms,
+    updateRooms,
     roomInventory,
     addRoomInventoryItem,
     updateRoomInventoryItem,
+    removeRoomInventoryItem,
     bookings,
     showNotif,
   } = useApp();
 
   const [editingLabel, setEditingLabel] = useState<{ id: string; value: string } | null>(null);
-  const [blockTarget, setBlockTarget] = useState<RoomInventoryItem | null>(null);
-  const [blockReason, setBlockReason] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<RoomInventoryItem | null>(null);
   const [addOpen, setAddOpen] = useState<string | null>(null); // cat id when open
   const [addLabel, setAddLabel] = useState("");
+  const [addCatOpen, setAddCatOpen] = useState(false);
+  const [newCatName, setNewCatName] = useState("");
 
   // Group inventory by category, preserve master ROOMS order.
   const grouped = useMemo(() => {
@@ -823,30 +909,56 @@ function RoomInventorySection() {
     setAddLabel("");
   };
 
-  const onConfirmBlock = () => {
-    if (!blockTarget) return;
-    const usedBy = isRoomInUse(blockTarget.id);
+  const onConfirmDelete = () => {
+    if (!deleteTarget) return;
+    const usedBy = isRoomInUse(deleteTarget.id);
     if (usedBy > 0) {
       showNotif(
-        `${blockTarget.label} is allocated to ${usedBy} active booking${
+        `${deleteTarget.label} is allocated to ${usedBy} active booking${
           usedBy > 1 ? "s" : ""
         } — reassign or cancel first`,
         "error"
       );
+      setDeleteTarget(null);
       return;
     }
-    updateRoomInventoryItem(blockTarget.id, {
-      active: false,
-      blockedReason: blockReason.trim() || undefined,
-    });
-    showNotif(`${blockTarget.label} blocked`, "success");
-    setBlockTarget(null);
-    setBlockReason("");
+    removeRoomInventoryItem(deleteTarget.id);
+    showNotif(`${deleteTarget.label} deleted`, "success");
+    setDeleteTarget(null);
   };
 
   const onUnblock = (room: RoomInventoryItem) => {
     updateRoomInventoryItem(room.id, { active: true, blockedReason: undefined });
     showNotif(`${room.label} unblocked`, "success");
+  };
+
+  const onAddCategory = () => {
+    const name = newCatName.trim();
+    if (!name) { showNotif("Enter a category name", "error"); return; }
+    if (rooms.some((r) => r.name.toLowerCase() === name.toLowerCase())) {
+      showNotif(`${name} already exists`, "error");
+      return;
+    }
+    updateRooms([
+      ...rooms,
+      {
+        id: uid(),
+        name,
+        price: 0,
+        weekdayDiscount: 0,
+        fridayDiscount: 0,
+        weekendDiscount: 0,
+        specialDayDiscount: 0,
+      },
+    ]);
+    showNotif(`${name} added`, "success");
+    setNewCatName("");
+    setAddCatOpen(false);
+  };
+
+  const onRemoveCategory = (catId: string) => {
+    updateRooms(rooms.filter((r) => r.id !== catId));
+    showNotif("Category removed", "success");
   };
 
   const onLabelSave = () => {
@@ -882,16 +994,53 @@ function RoomInventorySection() {
     <div className="settings-panel">
       <div className="sp-hd">
         <h3>Room Inventory</h3>
-        <span style={{ fontSize: 12, color: "var(--t3)" }}>
-          {roomInventory.filter((r) => r.active).length} active · {roomInventory.length} total
-        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 12, color: "var(--t3)" }}>
+            {roomInventory.filter((r) => r.active).length} active · {roomInventory.length} total
+          </span>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => { setAddCatOpen((v) => !v); setNewCatName(""); }}
+          >
+            {addCatOpen ? "Close" : "Add Category"}
+          </button>
+        </div>
       </div>
       <div className="sp-body">
         <p style={{ fontSize: 12, color: "var(--t3)", marginBottom: 14 }}>
-          Edit physical room labels, add new rooms when commissioned, or block a room for
-          renovation. Blocked rooms are skipped by the auto-allocator and shaded out in the
-          Room Chart.
+          Edit physical room labels, add new rooms when commissioned, or delete a decommissioned
+          room. Blocked rooms are skipped by the auto-allocator and shaded out in the Room Chart.
         </p>
+
+        {addCatOpen && (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr auto auto",
+              gap: 8,
+              alignItems: "end",
+              padding: 10,
+              background: "var(--surf2)",
+              border: "1px solid var(--bd)",
+              borderRadius: "var(--r2)",
+              marginBottom: 14,
+            }}
+          >
+            <div className="field">
+              <label>Category Name</label>
+              <input
+                type="text"
+                value={newCatName}
+                onChange={(e) => setNewCatName(e.target.value)}
+                placeholder="e.g. Deluxe Suite"
+                onKeyDown={(e) => { if (e.key === "Enter") onAddCategory(); if (e.key === "Escape") setAddCatOpen(false); }}
+                autoFocus
+              />
+            </div>
+            <button className="btn btn-primary btn-sm" onClick={onAddCategory}>Add</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => { setAddCatOpen(false); setNewCatName(""); }}>Cancel</button>
+          </div>
+        )}
 
         {grouped.map(({ cat, items, active, total }) => (
           <div key={cat.id} style={{ marginBottom: 22 }}>
@@ -921,9 +1070,18 @@ function RoomInventorySection() {
               >
                 {active} active{active !== total ? ` / ${total} total` : ""}
               </span>
+              {items.length === 0 && (
+                <button
+                  className="btn btn-ghost btn-xs"
+                  style={{ color: "var(--red)" }}
+                  onClick={() => onRemoveCategory(cat.id)}
+                >
+                  Remove Category
+                </button>
+              )}
               <button
                 className="btn btn-ghost btn-xs"
-                style={{ marginLeft: "auto" }}
+                style={{ marginLeft: items.length === 0 ? 0 : "auto" }}
                 onClick={() => {
                   setAddOpen(addOpen === cat.id ? null : cat.id);
                   setAddLabel(nextLabelFor(cat.id));
@@ -1068,13 +1226,10 @@ function RoomInventorySection() {
                               {r.active ? (
                                 <button
                                   className="btn btn-ghost btn-xs"
-                                  style={{ color: "var(--amb)" }}
-                                  onClick={() => {
-                                    setBlockTarget(r);
-                                    setBlockReason(r.blockedReason || "");
-                                  }}
+                                  style={{ color: "var(--red)" }}
+                                  onClick={() => setDeleteTarget(r)}
                                 >
-                                  Block
+                                  Delete
                                 </button>
                               ) : (
                                 <button
@@ -1098,34 +1253,24 @@ function RoomInventorySection() {
         ))}
       </div>
 
-      {blockTarget && (
+      {deleteTarget && (
         <div
           className="modal-overlay"
           onClick={(e) => {
-            if (e.target === e.currentTarget) setBlockTarget(null);
+            if (e.target === e.currentTarget) setDeleteTarget(null);
           }}
         >
           <div className="modal modal-sm">
-            <h3>Block {blockTarget.label}</h3>
+            <h3>Delete {deleteTarget.label}?</h3>
             <p className="modal-desc">
-              Blocked rooms are skipped by the auto-allocator and shaded out on the chart.
-              Unblock from this same screen when work is done.
+              This cannot be undone. The room will be permanently removed from inventory.
             </p>
-            <div className="field">
-              <label>Reason (optional)</label>
-              <input
-                type="text"
-                value={blockReason}
-                onChange={(e) => setBlockReason(e.target.value)}
-                placeholder="e.g. Renovation — bathroom retile"
-              />
-            </div>
             <div className="modal-actions">
-              <button className="btn btn-ghost" onClick={() => setBlockTarget(null)}>
+              <button className="btn btn-ghost" onClick={() => setDeleteTarget(null)}>
                 Cancel
               </button>
-              <button className="btn btn-danger" onClick={onConfirmBlock}>
-                Block Room
+              <button className="btn btn-danger" onClick={onConfirmDelete}>
+                Delete
               </button>
             </div>
           </div>
@@ -1136,71 +1281,6 @@ function RoomInventorySection() {
 }
 
 // ─────────── Discount Rules ───────────
-function DiscountTab() {
-  const { discountCaps, updateDiscountCaps, showNotif } = useApp();
-  const [draft, setDraft] = useState<DiscountCaps>(discountCaps);
-
-  useEffect(() => setDraft(discountCaps), [discountCaps]);
-
-  const save = () => {
-    updateDiscountCaps(draft);
-    showNotif("Discount rules saved", "success");
-  };
-
-  return (
-    <div className="settings-panel">
-      <div className="sp-hd">
-        <h3>Discount Rules by Role</h3>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={() => setDraft(SEED_DISCOUNT_CAPS)}
-          >
-            Reset to defaults
-          </button>
-          <button className="btn btn-primary btn-sm" onClick={save}>
-            Save Changes
-          </button>
-        </div>
-      </div>
-      <div className="sp-body">
-        <p style={{ fontSize: 12, color: "var(--t3)", marginBottom: 18 }}>
-          Employees cannot exceed their ceiling. System enforces this on the booking form.
-        </p>
-        <div className="disc-role-row">
-          <div>
-            <div className="disc-role-name">Sales</div>
-            <div className="disc-role-sub">
-              Sales team. Fri–Sat rows always cap at 15% regardless.
-            </div>
-          </div>
-          <div className="disc-inp">
-            <input
-              type="number"
-              value={draft.sales}
-              min={0}
-              max={100}
-              onChange={(e) =>
-                setDraft((prev) => ({ ...prev, sales: parseInt(e.target.value) || 0 }))
-              }
-            />{" "}
-            %
-          </div>
-        </div>
-        <div className="disc-role-row" style={{ borderBottom: "none" }}>
-          <div>
-            <div className="disc-role-name">Admin</div>
-            <div className="disc-role-sub">No limit</div>
-          </div>
-          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--grn)" }}>
-            Unlimited
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─────────── Special Days ───────────
 function SpecialDaysTab() {
   const { specialDays, addSpecialDay, removeSpecialDay, showNotif } = useApp();
@@ -1355,8 +1435,6 @@ const ROMAN = ["i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"];
 
 type ColKey = "standardAbove" | "standardBelow" | "specialAbove" | "specialBelow";
 
-const COL_KEYS: ColKey[] = ["standardAbove", "standardBelow", "specialAbove", "specialBelow"];
-
 function CancellationLogicSection() {
   const { cancellationPolicy, updateCancellationPolicy, showNotif } = useApp();
   const [draft, setDraft] = useState<CancellationPolicy>(cancellationPolicy);
@@ -1386,12 +1464,139 @@ function CancellationLogicSection() {
     showNotif("Cancellation policy saved", "success");
   };
 
-  const colHeaders = [
-    `> ${draft.standardThreshold} days (Standard)`,
-    `< ${draft.standardThreshold} days (Standard)`,
-    `> ${draft.specialThreshold} days (Special)`,
-    `< ${draft.specialThreshold} days (Special)`,
-  ];
+  const renderCancellationCell = (col: ColKey) => (
+    <td key={col} style={{ padding: "10px 8px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <input
+          type="number"
+          value={draft[col].cancellationChargePct}
+          min={0}
+          max={100}
+          style={{ flex: 1, minWidth: 0, textAlign: "center" }}
+          onChange={(e) =>
+            setCell(col, "cancellationChargePct", parseInt(e.target.value) || 0)
+          }
+        />
+        <span style={{ fontSize: 13, color: "var(--t2)", flexShrink: 0 }}>%</span>
+      </div>
+    </td>
+  );
+
+  const renderRefundCell = (col: ColKey) => {
+    const v = draft[col].refundPct;
+    return (
+      <td key={col} style={{ padding: "10px 8px" }}>
+        {v === null ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span
+              style={{
+                flex: 1,
+                textAlign: "center",
+                fontSize: 13,
+                fontWeight: 600,
+                color: "var(--t3)",
+                background: "var(--surf3)",
+                border: "1px solid var(--bd)",
+                borderRadius: "var(--r1)",
+                padding: "6px 4px",
+                cursor: "default",
+              }}
+            >
+              NA
+            </span>
+            <button
+              className="btn btn-ghost btn-xs"
+              style={{ flexShrink: 0 }}
+              title="Enter a value"
+              onClick={() => setCell(col, "refundPct", 100)}
+            >
+              Set
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <input
+              type="number"
+              value={v}
+              min={0}
+              max={100}
+              style={{ flex: 1, minWidth: 0, textAlign: "center" }}
+              onChange={(e) =>
+                setCell(col, "refundPct", parseInt(e.target.value) || 0)
+              }
+            />
+            <span style={{ fontSize: 13, color: "var(--t2)", flexShrink: 0 }}>%</span>
+            <button
+              className="btn btn-ghost btn-xs"
+              style={{ flexShrink: 0, color: "var(--t3)" }}
+              title="Set as NA"
+              onClick={() => setCell(col, "refundPct", null)}
+            >
+              NA
+            </button>
+          </div>
+        )}
+      </td>
+    );
+  };
+
+  const renderCreditNoteCell = (col: ColKey) => {
+    const v = draft[col].creditNotePct;
+    return (
+      <td key={col} style={{ padding: "10px 8px" }}>
+        {v === null ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span
+              style={{
+                flex: 1,
+                textAlign: "center",
+                fontSize: 13,
+                fontWeight: 600,
+                color: "var(--t3)",
+                background: "var(--surf3)",
+                border: "1px solid var(--bd)",
+                borderRadius: "var(--r1)",
+                padding: "6px 4px",
+                cursor: "default",
+              }}
+            >
+              NA
+            </span>
+            <button
+              className="btn btn-ghost btn-xs"
+              style={{ flexShrink: 0 }}
+              title="Enter a value"
+              onClick={() => setCell(col, "creditNotePct", 100)}
+            >
+              Set
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <input
+              type="number"
+              value={v}
+              min={0}
+              max={100}
+              style={{ flex: 1, minWidth: 0, textAlign: "center" }}
+              onChange={(e) =>
+                setCell(col, "creditNotePct", parseInt(e.target.value) || 0)
+              }
+            />
+            <span style={{ fontSize: 13, color: "var(--t2)", flexShrink: 0 }}>%</span>
+            <button
+              className="btn btn-ghost btn-xs"
+              style={{ flexShrink: 0, color: "var(--t3)" }}
+              title="Set as NA"
+              onClick={() => setCell(col, "creditNotePct", null)}
+            >
+              NA
+            </button>
+          </div>
+        )}
+      </td>
+    );
+  };
 
   return (
     <div className="settings-panel">
@@ -1408,247 +1613,149 @@ function CancellationLogicSection() {
       </div>
       <div className="sp-body">
 
-        {/* Threshold settings */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24, maxWidth: 520 }}>
-          <div className="field">
-            <label>Standard Days Threshold</label>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {/* Table 1: Standard Days */}
+        <div style={{ marginBottom: 28 }}>
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+            marginBottom: 12,
+          }}>
+            <div style={{
+              fontFamily: "var(--font-outfit), Outfit, sans-serif",
+              fontSize: 13,
+              fontWeight: 700,
+              color: "var(--t1)",
+              textTransform: "uppercase",
+              letterSpacing: ".4px",
+            }}>
+              Standard Days
+            </div>
+            <div className="field" style={{ marginBottom: 0, display: "flex", alignItems: "center", gap: 8 }}>
+              <label style={{ marginBottom: 0, whiteSpace: "nowrap", fontSize: 12 }}>Threshold:</label>
               <input
                 type="number"
                 value={draft.standardThreshold}
                 min={1}
-                style={{ width: 72 }}
+                style={{ width: 60 }}
                 onChange={(e) => setThreshold("standardThreshold", parseInt(e.target.value) || 1)}
               />
-              <span style={{ fontSize: 13, color: "var(--t3)" }}>days before check-in</span>
+              <span style={{ fontSize: 12, color: "var(--t3)", whiteSpace: "nowrap" }}>days before check-in</span>
             </div>
           </div>
-          <div className="field">
-            <label>Special Days Threshold</label>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ overflowX: "auto" }}>
+            <table className="pricing-tbl" style={{ tableLayout: "fixed", width: "100%" }}>
+              <colgroup>
+                <col style={{ width: "34%" }} />
+                <col style={{ width: "33%" }} />
+                <col style={{ width: "33%" }} />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th></th>
+                  <th style={{ textAlign: "center", fontSize: 11, fontWeight: 500, color: "var(--t2)", padding: "8px 6px", lineHeight: 1.4 }}>
+                    {`> ${draft.standardThreshold} days`}
+                  </th>
+                  <th style={{ textAlign: "center", fontSize: 11, fontWeight: 500, color: "var(--t2)", padding: "8px 6px", lineHeight: 1.4 }}>
+                    {`< ${draft.standardThreshold} days`}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td style={{ fontWeight: 500, fontSize: 13 }}>Cancellation Charges</td>
+                  {renderCancellationCell("standardAbove")}
+                  {renderCancellationCell("standardBelow")}
+                </tr>
+                <tr>
+                  <td style={{ fontWeight: 500, fontSize: 13 }}>Refund</td>
+                  {renderRefundCell("standardAbove")}
+                  {renderRefundCell("standardBelow")}
+                </tr>
+                <tr>
+                  <td style={{ fontWeight: 500, fontSize: 13 }}>Credit Note</td>
+                  {renderCreditNoteCell("standardAbove")}
+                  {renderCreditNoteCell("standardBelow")}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Divider */}
+        <div style={{ borderTop: "1px solid var(--bd)", marginBottom: 28 }} />
+
+        {/* Table 2: Special Days */}
+        <div style={{ marginBottom: 24 }}>
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+            marginBottom: 12,
+          }}>
+            <div style={{
+              fontFamily: "var(--font-outfit), Outfit, sans-serif",
+              fontSize: 13,
+              fontWeight: 700,
+              color: "var(--t1)",
+              textTransform: "uppercase",
+              letterSpacing: ".4px",
+            }}>
+              Special Days
+            </div>
+            <div className="field" style={{ marginBottom: 0, display: "flex", alignItems: "center", gap: 8 }}>
+              <label style={{ marginBottom: 0, whiteSpace: "nowrap", fontSize: 12 }}>Threshold:</label>
               <input
                 type="number"
                 value={draft.specialThreshold}
                 min={1}
-                style={{ width: 72 }}
+                style={{ width: 60 }}
                 onChange={(e) => setThreshold("specialThreshold", parseInt(e.target.value) || 1)}
               />
-              <span style={{ fontSize: 13, color: "var(--t3)" }}>days before check-in</span>
+              <span style={{ fontSize: 12, color: "var(--t3)", whiteSpace: "nowrap" }}>days before check-in</span>
             </div>
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table className="pricing-tbl" style={{ tableLayout: "fixed", width: "100%" }}>
+              <colgroup>
+                <col style={{ width: "34%" }} />
+                <col style={{ width: "33%" }} />
+                <col style={{ width: "33%" }} />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th></th>
+                  <th style={{ textAlign: "center", fontSize: 11, fontWeight: 500, color: "var(--t2)", padding: "8px 6px", lineHeight: 1.4 }}>
+                    {`> ${draft.specialThreshold} days`}
+                  </th>
+                  <th style={{ textAlign: "center", fontSize: 11, fontWeight: 500, color: "var(--t2)", padding: "8px 6px", lineHeight: 1.4 }}>
+                    {`< ${draft.specialThreshold} days`}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td style={{ fontWeight: 500, fontSize: 13 }}>Cancellation Charges</td>
+                  {renderCancellationCell("specialAbove")}
+                  {renderCancellationCell("specialBelow")}
+                </tr>
+                <tr>
+                  <td style={{ fontWeight: 500, fontSize: 13 }}>Refund</td>
+                  {renderRefundCell("specialAbove")}
+                  {renderRefundCell("specialBelow")}
+                </tr>
+                <tr>
+                  <td style={{ fontWeight: 500, fontSize: 13 }}>Credit Note</td>
+                  {renderCreditNoteCell("specialAbove")}
+                  {renderCreditNoteCell("specialBelow")}
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
 
-        {/* Matrix table */}
-        <div style={{ overflowX: "auto" }}>
-          <table className="pricing-tbl" style={{ tableLayout: "fixed", width: "100%" }}>
-            <colgroup>
-              <col style={{ width: "22%" }} />
-              <col style={{ width: "19.5%" }} />
-              <col style={{ width: "19.5%" }} />
-              <col style={{ width: "19.5%" }} />
-              <col style={{ width: "19.5%" }} />
-            </colgroup>
-            <thead>
-              <tr>
-                <th></th>
-                <th
-                  colSpan={2}
-                  style={{
-                    textAlign: "center",
-                    background: "var(--surf2)",
-                    fontFamily: "var(--font-outfit), Outfit, sans-serif",
-                    fontSize: 11,
-                    letterSpacing: ".5px",
-                    padding: "10px 8px",
-                  }}
-                >
-                  STANDARD DAYS
-                </th>
-                <th
-                  colSpan={2}
-                  style={{
-                    textAlign: "center",
-                    background: "var(--surf3)",
-                    fontFamily: "var(--font-outfit), Outfit, sans-serif",
-                    fontSize: 11,
-                    letterSpacing: ".5px",
-                    padding: "10px 8px",
-                  }}
-                >
-                  SPECIAL DAYS
-                </th>
-              </tr>
-              <tr>
-                <th></th>
-                {colHeaders.map((h) => (
-                  <th
-                    key={h}
-                    style={{
-                      textAlign: "center",
-                      fontSize: 11,
-                      fontWeight: 500,
-                      color: "var(--t2)",
-                      padding: "8px 6px",
-                      lineHeight: 1.4,
-                    }}
-                  >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {/* Cancellation Charges */}
-              <tr>
-                <td style={{ fontWeight: 500, fontSize: 13 }}>Cancellation Charges</td>
-                {COL_KEYS.map((col) => (
-                  <td key={col} style={{ padding: "10px 8px" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <input
-                        type="number"
-                        value={draft[col].cancellationChargePct}
-                        min={0}
-                        max={100}
-                        style={{ flex: 1, minWidth: 0, textAlign: "center" }}
-                        onChange={(e) =>
-                          setCell(col, "cancellationChargePct", parseInt(e.target.value) || 0)
-                        }
-                      />
-                      <span style={{ fontSize: 13, color: "var(--t2)", flexShrink: 0 }}>%</span>
-                    </div>
-                  </td>
-                ))}
-              </tr>
-
-              {/* Refund */}
-              <tr>
-                <td style={{ fontWeight: 500, fontSize: 13 }}>Refund</td>
-                {COL_KEYS.map((col) => {
-                  const v = draft[col].refundPct;
-                  return (
-                    <td key={col} style={{ padding: "10px 8px" }}>
-                      {v === null ? (
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <span
-                            style={{
-                              flex: 1,
-                              textAlign: "center",
-                              fontSize: 13,
-                              fontWeight: 600,
-                              color: "var(--t3)",
-                              background: "var(--surf3)",
-                              border: "1px solid var(--bd)",
-                              borderRadius: "var(--r1)",
-                              padding: "6px 4px",
-                              cursor: "default",
-                            }}
-                          >
-                            NA
-                          </span>
-                          <button
-                            className="btn btn-ghost btn-xs"
-                            style={{ flexShrink: 0 }}
-                            title="Enter a value"
-                            onClick={() => setCell(col, "refundPct", 100)}
-                          >
-                            Set
-                          </button>
-                        </div>
-                      ) : (
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <input
-                            type="number"
-                            value={v}
-                            min={0}
-                            max={100}
-                            style={{ flex: 1, minWidth: 0, textAlign: "center" }}
-                            onChange={(e) =>
-                              setCell(col, "refundPct", parseInt(e.target.value) || 0)
-                            }
-                          />
-                          <span style={{ fontSize: 13, color: "var(--t2)", flexShrink: 0 }}>%</span>
-                          <button
-                            className="btn btn-ghost btn-xs"
-                            style={{ flexShrink: 0, color: "var(--t3)" }}
-                            title="Set as NA"
-                            onClick={() => setCell(col, "refundPct", null)}
-                          >
-                            NA
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                  );
-                })}
-              </tr>
-
-              {/* Credit Note */}
-              <tr>
-                <td style={{ fontWeight: 500, fontSize: 13 }}>Credit Note</td>
-                {COL_KEYS.map((col) => {
-                  const v = draft[col].creditNotePct;
-                  return (
-                    <td key={col} style={{ padding: "10px 8px" }}>
-                      {v === null ? (
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <span
-                            style={{
-                              flex: 1,
-                              textAlign: "center",
-                              fontSize: 13,
-                              fontWeight: 600,
-                              color: "var(--t3)",
-                              background: "var(--surf3)",
-                              border: "1px solid var(--bd)",
-                              borderRadius: "var(--r1)",
-                              padding: "6px 4px",
-                              cursor: "default",
-                            }}
-                          >
-                            NA
-                          </span>
-                          <button
-                            className="btn btn-ghost btn-xs"
-                            style={{ flexShrink: 0 }}
-                            title="Enter a value"
-                            onClick={() => setCell(col, "creditNotePct", 100)}
-                          >
-                            Set
-                          </button>
-                        </div>
-                      ) : (
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <input
-                            type="number"
-                            value={v}
-                            min={0}
-                            max={100}
-                            style={{ flex: 1, minWidth: 0, textAlign: "center" }}
-                            onChange={(e) =>
-                              setCell(col, "creditNotePct", parseInt(e.target.value) || 0)
-                            }
-                          />
-                          <span style={{ fontSize: 13, color: "var(--t2)", flexShrink: 0 }}>%</span>
-                          <button
-                            className="btn btn-ghost btn-xs"
-                            style={{ flexShrink: 0, color: "var(--t3)" }}
-                            title="Set as NA"
-                            onClick={() => setCell(col, "creditNotePct", null)}
-                          >
-                            NA
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                  );
-                })}
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
         {/* Notes */}
-        <div style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid var(--bd)" }}>
+        <div style={{ marginTop: 4, paddingTop: 20, borderTop: "1px solid var(--bd)" }}>
           <div style={{
             display: "flex",
             alignItems: "center",

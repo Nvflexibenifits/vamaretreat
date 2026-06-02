@@ -194,13 +194,16 @@ export default function DashboardPage() {
                 <th>Guest Name</th>
                 <th>Check-in</th>
                 <th>Check-out</th>
-                <th style={{ textAlign: "right" }}>Amount Pending</th>
+                <th style={{ textAlign: "right" }}>Total</th>
+                <th style={{ textAlign: "right" }}>Received</th>
+                <th style={{ textAlign: "right" }}>Pending</th>
+                <th style={{ textAlign: "right" }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {pendingBookings.length === 0 ? (
                 <tr>
-                  <td colSpan={5}>
+                  <td colSpan={8}>
                     <div className="empty-state">
                       <h3>All bookings paid up</h3>
                       <p>No pending balances right now</p>
@@ -209,7 +212,7 @@ export default function DashboardPage() {
                 </tr>
               ) : (
                 pendingBookings.map((b) => (
-                  <tr key={b.id} onClick={() => router.push(`/bookings/${b.id}`)}>
+                  <tr key={b.id}>
                     <td>
                       <span style={{ fontSize: 11, fontFamily: "var(--font-outfit), Outfit, sans-serif", color: "var(--t3)", fontWeight: 700 }}>
                         {b.id}
@@ -221,8 +224,23 @@ export default function DashboardPage() {
                     </td>
                     <td>{fmtIN(b.checkin)}</td>
                     <td>{fmtIN(b.checkout)}</td>
-                    <td style={{ textAlign: "right", fontWeight: 700, color: "var(--amb)" }}>
-                      {fmt(b.balance)}
+                    <td style={{ textAlign: "right" }}>{fmt(b.grandTotal)}</td>
+                    <td style={{ textAlign: "right", color: "var(--grn)" }}>{fmt(b.advance)}</td>
+                    <td style={{ textAlign: "right", fontWeight: 700, color: "var(--amb)" }}>{fmt(b.balance)}</td>
+                    <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                      <button
+                        className="btn btn-ghost btn-xs"
+                        style={{ marginRight: 4 }}
+                        onClick={() => router.push(`/bookings/${b.id}`)}
+                      >
+                        View
+                      </button>
+                      <button
+                        className="btn btn-ghost btn-xs"
+                        onClick={() => router.push(`/bookings/${b.id}/edit`)}
+                      >
+                        Edit
+                      </button>
                     </td>
                   </tr>
                 ))

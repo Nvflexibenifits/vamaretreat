@@ -19,15 +19,15 @@ import type {
 // Room Tariff FY 2025-26 w.e.f. 22.09.25. GST is computed dynamically via
 // GstSettings (threshold 7500: below=5%, above=18%) — not stored per room.
 export const ROOMS: RoomMaster[] = [
-  { id: "TENT",    name: "Tent",                                price:  3800, weekdayDiscount: 20, fridayDiscount: 15, weekendDiscount: 10 },
-  { id: "CPL",     name: "Couple Room",                         price:  6200, weekdayDiscount: 20, fridayDiscount: 15, weekendDiscount: 10 },
-  { id: "FM",      name: "Family Room",                         price:  7600, weekdayDiscount: 20, fridayDiscount: 15, weekendDiscount: 10 },
-  { id: "1BHK",    name: "1 BHK Villa",                         price:  8300, weekdayDiscount: 18, fridayDiscount: 15, weekendDiscount: 10 },
-  { id: "1BHK-GV", name: "1 BHK Garden Villa (Ideal for Pets)", price: 10000, weekdayDiscount: 16, fridayDiscount: 15, weekendDiscount: 10 },
-  { id: "2BHK",    name: "2 BHK Villa",                         price: 11500, weekdayDiscount: 16, fridayDiscount: 15, weekendDiscount: 10 },
-  { id: "2BHK-GV", name: "2 BHK Garden Villa (Ideal for Pets)", price: 12500, weekdayDiscount: 15, fridayDiscount: 15, weekendDiscount: 10 },
-  { id: "3BHK-GV", name: "3 BHK Garden Villa",                  price: 16000, weekdayDiscount: 15, fridayDiscount: 15, weekendDiscount: 10 },
-  { id: "PV",      name: "1 BHK Pool Villa",                    price: 24500, weekdayDiscount: 20, fridayDiscount: 15, weekendDiscount: 10 },
+  { id: "TENT",    name: "Tent",                                price:  3800, weekdayDiscount: 20, fridayDiscount: 15, weekendDiscount: 10, specialDayDiscount: 0 },
+  { id: "CPL",     name: "Couple Room",                         price:  6200, weekdayDiscount: 20, fridayDiscount: 15, weekendDiscount: 10, specialDayDiscount: 0 },
+  { id: "FM",      name: "Family Room",                         price:  7600, weekdayDiscount: 20, fridayDiscount: 15, weekendDiscount: 10, specialDayDiscount: 0 },
+  { id: "1BHK",    name: "1 BHK Villa",                         price:  8300, weekdayDiscount: 18, fridayDiscount: 15, weekendDiscount: 10, specialDayDiscount: 0 },
+  { id: "1BHK-GV", name: "1 BHK Garden Villa (Ideal for Pets)", price: 10000, weekdayDiscount: 16, fridayDiscount: 15, weekendDiscount: 10, specialDayDiscount: 0 },
+  { id: "2BHK",    name: "2 BHK Villa",                         price: 11500, weekdayDiscount: 16, fridayDiscount: 15, weekendDiscount: 10, specialDayDiscount: 0 },
+  { id: "2BHK-GV", name: "2 BHK Garden Villa (Ideal for Pets)", price: 12500, weekdayDiscount: 15, fridayDiscount: 15, weekendDiscount: 10, specialDayDiscount: 0 },
+  { id: "3BHK-GV", name: "3 BHK Garden Villa",                  price: 16000, weekdayDiscount: 15, fridayDiscount: 15, weekendDiscount: 10, specialDayDiscount: 0 },
+  { id: "PV",      name: "1 BHK Pool Villa",                    price: 24500, weekdayDiscount: 20, fridayDiscount: 15, weekendDiscount: 10, specialDayDiscount: 0 },
 ];
 
 // ─────────── PHYSICAL ROOMS (51 total per doc §1) ───────────

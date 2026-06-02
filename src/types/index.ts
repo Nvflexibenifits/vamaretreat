@@ -12,9 +12,10 @@ export type RoomMaster = {
   id: string;
   name: string;
   price: number;
-  weekdayDiscount: number;  // Sun–Thu
-  fridayDiscount: number;   // Friday
-  weekendDiscount: number;  // Sat & Peak Days
+  weekdayDiscount: number;   // Sun–Thu
+  fridayDiscount: number;    // Friday
+  weekendDiscount: number;   // Saturday
+  specialDayDiscount: number; // Special / Peak Days
 };
 
 export type GstSettings = {
@@ -240,11 +241,7 @@ export type User = {
   password?: string;
 };
 
-export type VenueType =
-  | "Conference Room"
-  | "Seminar Room"
-  | "Garden Venue"
-  | "Event Place";
+export type VenueType = string;
 
 export type Venue = {
   id: string;

@@ -132,6 +132,7 @@ type AppContextValue = {
   updateRooms: (rooms: RoomMaster[]) => void;
   addRoomInventoryItem: (item: RoomInventoryItem) => void;
   updateRoomInventoryItem: (id: string, patch: Partial<RoomInventoryItem>) => void;
+  removeRoomInventoryItem: (id: string) => void;
   updateDiscountCaps: (caps: DiscountCaps) => void;
   updatePackageRates: (rates: PackageRates) => void;
   addSpecialDay: (sd: SpecialDay) => void;
@@ -432,6 +433,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     },
     []
   );
+  const removeRoomInventoryItem = useCallback((id: string) => {
+    setRoomInventory((prev) => prev.filter((r) => r.id !== id));
+  }, []);
   const updateDiscountCaps = useCallback(
     (caps: DiscountCaps) => setDiscountCapsState(caps),
     []
@@ -764,6 +768,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updateRooms,
       addRoomInventoryItem,
       updateRoomInventoryItem,
+      removeRoomInventoryItem,
       updateDiscountCaps,
       updatePackageRates,
       addSpecialDay,
@@ -824,6 +829,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updateRooms,
       addRoomInventoryItem,
       updateRoomInventoryItem,
+      removeRoomInventoryItem,
       updateDiscountCaps,
       updatePackageRates,
       addSpecialDay,

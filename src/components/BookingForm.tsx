@@ -132,9 +132,12 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
 
   const initialAdvance = initial?.advance ?? 0;
   const [advance, setAdvance] = useState(String(initialAdvance));
-  const [paymode, setPaymode] = useState(initial?.payments?.[0]?.mode ?? "UPI / QR");
+  const [paymode, setPaymode] = useState(initial?.payments?.[0]?.mode ?? "Bank Transfer");
 
   const [errors, setErrors] = useState<FieldErrors>({});
+
+  type AddOnRow = { uid: string; category: string; amount: string; gstPct: string };
+  const [addOnRows, setAddOnRows] = useState<AddOnRow[]>([]);
 
   // Seed default dates on create
   useEffect(() => {
@@ -275,7 +278,18 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   const totalDriverMealAmt = driverMealCharges + driverMealGstAmt;
 
   const totalMealPet = totalMealAmt + totalPetAmt + totalDriverMealAmt;
-  const grandTotal = totalRoomCharges + totalMealPet;
+
+  const addOnTotals = addOnRows.map(r => {
+    const amt = parseFloat(r.amount) || 0;
+    const gstPct = parseFloat(r.gstPct) || 0;
+    const gstAmt = amt * gstPct / 100;
+    return { amt, gstAmt, total: amt + gstAmt };
+  });
+  const totalAddOnBasic = addOnTotals.reduce((s, r) => s + r.amt, 0);
+  const totalAddOnGst = addOnTotals.reduce((s, r) => s + r.gstAmt, 0);
+  const totalAddOn = addOnTotals.reduce((s, r) => s + r.total, 0);
+
+  const grandTotal = totalRoomCharges + totalMealPet + totalAddOn;
   const balance = Math.max(0, grandTotal - advN);
 
   // ─── Validation ───
@@ -856,17 +870,17 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
         </div>
       </div>
 
-      {/* §4 Meal & Pet Charges */}
+      {/* §4 Meal Charges */}
       <div className="form-panel">
         <div className="form-sec">
           <div className="form-sec-title">
-            <span className="form-sec-num">4</span>Meal &amp; Pet Charges
+            <span className="form-sec-num">4</span>Meal Charges
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
               <span style={{ fontSize: 13, fontWeight: 500, color: "var(--t1)", minWidth: 220 }}>
-                Include Meal &amp; Activity Package?
+                Include Meal Package?
               </span>
               <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
                 <input type="radio" name="meal" checked={mealOn} onChange={() => setMealOn(true)} /> Yes
@@ -965,7 +979,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                 )}
                 <tr style={{ background: "var(--surf2)" }}>
                   <td colSpan={7} style={{ textAlign: "right", fontWeight: 700, color: "var(--t1)" }}>
-                    Total Meal &amp; Pet Charges (B)
+                    Total Meal Charges (B)
                   </td>
                   <td
                     style={{ textAlign: "right", fontWeight: 800, color: "var(--sb)", fontSize: 14 }}
@@ -977,54 +991,199 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
             </table>
           ) : (
             <div style={{ fontSize: 12, color: "var(--t3)" }}>
-              No packages selected. Toggle Yes above for meals, or add pets / drivers in Guest Count.
+              No packages selected. Toggle Yes above to include meal package, or add pets / drivers in Guest Count.
             </div>
           )}
         </div>
       </div>
 
-      {/* §5 Totals & Payment */}
+      {/* §5 Add On Charges */}
       <div className="form-panel">
         <div className="form-sec">
           <div className="form-sec-title">
-            <span className="form-sec-num">5</span>Totals &amp; Payment
+            <span className="form-sec-num">5</span>Add On Charges
+          </div>
+
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            style={{ marginBottom: 12 }}
+            onClick={() =>
+              setAddOnRows(prev => [
+                ...prev,
+                { uid: newUid(), category: "Room Charges", amount: "0", gstPct: "0" },
+              ])
+            }
+          >
+            Add Row
+          </button>
+
+          {addOnRows.length === 0 ? (
+            <div style={{ fontSize: 12, color: "var(--t3)" }}>
+              No add on charges. Click Add Row to add charges.
+            </div>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ minWidth: 700 }}>
+                <thead>
+                  <tr>
+                    <th style={{ whiteSpace: "nowrap" }}>Category</th>
+                    <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Amount (₹)</th>
+                    <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>GST %</th>
+                    <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>GST Amt</th>
+                    <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Total</th>
+                    <th style={{ width: 60 }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {addOnRows.map((row, i) => {
+                    const t = addOnTotals[i];
+                    return (
+                      <tr key={row.uid} style={{ cursor: "default" }}>
+                        <td style={{ verticalAlign: "middle" }}>
+                          <select
+                            value={row.category}
+                            onChange={(e) =>
+                              setAddOnRows(prev =>
+                                prev.map(r => r.uid === row.uid ? { ...r, category: e.target.value } : r)
+                              )
+                            }
+                            style={{
+                              width: "100%",
+                              padding: "5px 8px",
+                              border: "1px solid var(--bd)",
+                              borderRadius: "var(--r3)",
+                              fontSize: 12,
+                              background: "var(--surf)",
+                              outline: "none",
+                            }}
+                          >
+                            <option>Room Charges</option>
+                            <option>Meal Charges</option>
+                            <option>Venue Charges</option>
+                          </select>
+                        </td>
+                        <td style={{ verticalAlign: "middle" }}>
+                          <input
+                            type="number"
+                            value={row.amount}
+                            min={0}
+                            onChange={(e) =>
+                              setAddOnRows(prev =>
+                                prev.map(r => r.uid === row.uid ? { ...r, amount: e.target.value } : r)
+                              )
+                            }
+                            style={cellInputStyle}
+                          />
+                        </td>
+                        <td style={{ verticalAlign: "middle" }}>
+                          <input
+                            type="number"
+                            value={row.gstPct}
+                            min={0}
+                            max={28}
+                            onChange={(e) =>
+                              setAddOnRows(prev =>
+                                prev.map(r => r.uid === row.uid ? { ...r, gstPct: e.target.value } : r)
+                              )
+                            }
+                            style={cellInputStyle}
+                          />
+                        </td>
+                        <td style={{ textAlign: "right", verticalAlign: "middle" }}>
+                          {fmt(t.gstAmt)}
+                        </td>
+                        <td style={{ textAlign: "right", verticalAlign: "middle", fontWeight: 700 }}>
+                          {fmt(t.total)}
+                        </td>
+                        <td style={{ verticalAlign: "middle" }}>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-xs"
+                            onClick={() =>
+                              setAddOnRows(prev => prev.filter(r => r.uid !== row.uid))
+                            }
+                            title="Remove row"
+                          >
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* §6 Amount Due */}
+      <div className="form-panel">
+        <div className="form-sec">
+          <div className="form-sec-title">
+            <span className="form-sec-num">6</span>Amount Due
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
-            <div>
-              <div className="detail-row">
-                <span className="detail-key">Total Room Charges (A)</span>
-                <span className="detail-val">{fmt(totalRoomCharges)}</span>
-              </div>
-              <div className="detail-row">
-                <span className="detail-key">Total Meal &amp; Pet Charges (B)</span>
-                <span className="detail-val">{fmt(totalMealPet)}</span>
-              </div>
-              <div
-                className="detail-row"
-                style={{
-                  background: "var(--surf2)",
-                  padding: "12px 0",
-                  borderTop: "2px solid var(--bd)",
-                }}
-              >
-                <span
-                  className="detail-key"
-                  style={{ fontSize: 14, fontWeight: 700, color: "var(--t1)" }}
-                >
-                  Total Amount Payable (A + B)
-                </span>
-                <span
-                  className="detail-val"
-                  style={{
-                    fontFamily: "var(--font-outfit), Outfit, sans-serif",
-                    fontSize: 22,
-                    fontWeight: 800,
-                    color: "var(--sb)",
-                  }}
-                >
-                  {fmt(grandTotal)}
-                </span>
-              </div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ minWidth: 420 }}>
+                <thead>
+                  <tr>
+                    <th style={{ whiteSpace: "nowrap" }}>Items</th>
+                    <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Basic Amount</th>
+                    <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>GST Amount</th>
+                    <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr style={{ cursor: "default" }}>
+                    <td>Room Charges (A)</td>
+                    <td style={{ textAlign: "right" }}>
+                      {fmt(computedRows.reduce((s, r) => s + r.netCharges, 0))}
+                    </td>
+                    <td style={{ textAlign: "right" }}>
+                      {fmt(computedRows.reduce((s, r) => s + r.gstAmt, 0))}
+                    </td>
+                    <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(totalRoomCharges)}</td>
+                  </tr>
+                  {totalMealPet > 0 && (
+                    <tr style={{ cursor: "default" }}>
+                      <td>Meal Charges (B)</td>
+                      <td style={{ textAlign: "right" }}>
+                        {fmt(mealCharges + petCharges + driverMealCharges)}
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        {fmt(mealGstAmt + petGstAmt + driverMealGstAmt)}
+                      </td>
+                      <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(totalMealPet)}</td>
+                    </tr>
+                  )}
+                  {totalAddOn > 0 && (
+                    <tr style={{ cursor: "default" }}>
+                      <td>Add On Charges (C)</td>
+                      <td style={{ textAlign: "right" }}>{fmt(totalAddOnBasic)}</td>
+                      <td style={{ textAlign: "right" }}>{fmt(totalAddOnGst)}</td>
+                      <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(totalAddOn)}</td>
+                    </tr>
+                  )}
+                  <tr style={{ background: "var(--surf2)", borderTop: "2px solid var(--bd)" }}>
+                    <td style={{ fontWeight: 700, color: "var(--t1)", fontSize: 14 }}>Amount Due</td>
+                    <td style={{ textAlign: "right", color: "var(--t3)" }}>—</td>
+                    <td style={{ textAlign: "right", color: "var(--t3)" }}>—</td>
+                    <td
+                      style={{
+                        textAlign: "right",
+                        fontFamily: "var(--font-outfit), Outfit, sans-serif",
+                        fontSize: 20,
+                        fontWeight: 800,
+                        color: "var(--sb)",
+                      }}
+                    >
+                      {fmt(grandTotal)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
             <div>
               <div className="fg">
@@ -1049,9 +1208,10 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                     onChange={(e) => setPaymode(e.target.value)}
                     disabled={isEdit}
                   >
-                    <option>UPI / QR</option>
-                    <option>Cash</option>
                     <option>Bank Transfer</option>
+                    <option>Cash</option>
+                    <option>Credit Card</option>
+                    <option>Credit Note</option>
                   </select>
                 </div>
               </div>
@@ -1065,7 +1225,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                 }}
               >
                 <span className="detail-key" style={{ fontWeight: 600 }}>
-                  Balance at Check-in
+                  Balance Due
                 </span>
                 <span
                   className="detail-val"
