@@ -139,6 +139,12 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   type AddOnRow = { uid: string; category: string; amount: string; gstPct: string };
   const [addOnRows, setAddOnRows] = useState<AddOnRow[]>([]);
 
+  type PaymentRow = { uid: string; date: string; amount: string; mode: string };
+  const todayDate = typeof window !== "undefined" ? new Date().toISOString().split("T")[0] : "";
+  const [newPaymentRows, setNewPaymentRows] = useState<PaymentRow[]>([
+    { uid: newUid(), date: todayDate, amount: "", mode: "Bank Transfer" },
+  ]);
+
   // Seed default dates on create
   useEffect(() => {
     if (!isEdit && (!checkin || !checkout)) {
@@ -384,6 +390,22 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
 
   const buildEditPatch = (allocatedRooms: string[]): Partial<Booking> => {
     const pricingRows = computedRows.filter((r) => r.roomId);
+    const validNewPayments = newPaymentRows
+      .filter((p) => p.date && (parseFloat(p.amount) || 0) > 0)
+      .map((p) => ({
+        date: p.date,
+        time: new Date().toTimeString().slice(0, 5),
+        type: "Payment",
+        amount: parseFloat(p.amount) || 0,
+        mode: p.mode,
+        by: currentUser,
+      }));
+    const allPayments = validNewPayments.length > 0
+      ? [...(initial?.payments ?? []), ...validNewPayments]
+      : undefined;
+    const newAdvance = validNewPayments.length > 0
+      ? initialAdvance + validNewPayments.reduce((s, p) => s + p.amount, 0)
+      : undefined;
     return {
       guest: name.trim(),
       mobile: mobile.trim(),
@@ -421,7 +443,14 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       totalMealCharges: totalMealPet,
       grandTotal,
 
-      balance: Math.max(0, grandTotal - initialAdvance),
+      ...(allPayments !== undefined && { payments: allPayments }),
+      ...(newAdvance !== undefined && {
+        advance: newAdvance,
+        balance: Math.max(0, grandTotal - newAdvance),
+      }),
+      ...(newAdvance === undefined && {
+        balance: Math.max(0, grandTotal - initialAdvance),
+      }),
       allocatedRooms,
     };
   };
@@ -507,7 +536,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
           <h2>{isEdit ? `Edit Booking — ${initial!.id}` : "New B2C Booking"}</h2>
           <p>
             {isEdit
-              ? "All fields editable. Advance is locked — record new payments from the detail page."
+              ? "All fields editable. Add payment rows below to record new payments."
               : "Pricing auto-calculates as you fill the form"}
           </p>
         </div>
@@ -1186,35 +1215,106 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
               </table>
             </div>
             <div>
-              <div className="fg">
-                <div className="field">
-                  <label>{isEdit ? "Advance Already Paid (read-only)" : "Advance Amount Paid"}</label>
-                  <input
-                    type="number"
-                    value={advance}
-                    onChange={(e) => setAdvance(e.target.value)}
-                    min={0}
-                    placeholder="0"
-                    readOnly={isEdit}
-                  />
-                  {isEdit && (
-                    <div className="field-hint">Record additional payments from the detail page.</div>
-                  )}
-                </div>
-                <div className="field">
-                  <label>Payment Mode</label>
-                  <select
-                    value={paymode}
-                    onChange={(e) => setPaymode(e.target.value)}
-                    disabled={isEdit}
+              {isEdit ? (
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--t1)", marginBottom: 10 }}>
+                    Record Payments
+                  </div>
+                  <table className="pricing-tbl" style={{ marginBottom: 8 }}>
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Amount (₹)</th>
+                        <th>Mode</th>
+                        <th style={{ width: 32 }}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {newPaymentRows.map((row) => (
+                        <tr key={row.uid}>
+                          <td>
+                            <input
+                              type="date"
+                              value={row.date}
+                              onChange={(e) => setNewPaymentRows((prev) =>
+                                prev.map((r) => r.uid === row.uid ? { ...r, date: e.target.value } : r)
+                              )}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              min={0}
+                              placeholder="0"
+                              value={row.amount}
+                              onChange={(e) => setNewPaymentRows((prev) =>
+                                prev.map((r) => r.uid === row.uid ? { ...r, amount: e.target.value } : r)
+                              )}
+                            />
+                          </td>
+                          <td>
+                            <select
+                              value={row.mode}
+                              onChange={(e) => setNewPaymentRows((prev) =>
+                                prev.map((r) => r.uid === row.uid ? { ...r, mode: e.target.value } : r)
+                              )}
+                            >
+                              <option>Bank Transfer</option>
+                              <option>Cash</option>
+                              <option>Credit Card</option>
+                              <option>Credit Note</option>
+                            </select>
+                          </td>
+                          <td style={{ textAlign: "center" }}>
+                            {newPaymentRows.length > 1 && (
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-xs"
+                                style={{ color: "var(--red)" }}
+                                onClick={() => setNewPaymentRows((prev) => prev.filter((r) => r.uid !== row.uid))}
+                              >
+                                ×
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-xs"
+                    onClick={() => setNewPaymentRows((prev) => [
+                      ...prev,
+                      { uid: newUid(), date: todayDate, amount: "", mode: "Bank Transfer" },
+                    ])}
                   >
-                    <option>Bank Transfer</option>
-                    <option>Cash</option>
-                    <option>Credit Card</option>
-                    <option>Credit Note</option>
-                  </select>
+                    + Add Row
+                  </button>
                 </div>
-              </div>
+              ) : (
+                <div className="fg">
+                  <div className="field">
+                    <label>Advance Amount Paid</label>
+                    <input
+                      type="number"
+                      value={advance}
+                      onChange={(e) => setAdvance(e.target.value)}
+                      min={0}
+                      placeholder="0"
+                    />
+                  </div>
+                  <div className="field">
+                    <label>Payment Mode</label>
+                    <select value={paymode} onChange={(e) => setPaymode(e.target.value)}>
+                      <option>Bank Transfer</option>
+                      <option>Cash</option>
+                      <option>Credit Card</option>
+                      <option>Credit Note</option>
+                    </select>
+                  </div>
+                </div>
+              )}
               <div
                 className="detail-row"
                 style={{

@@ -27,7 +27,7 @@ export default function BookingDetailPage() {
   const canPay = !isFrontOffice && b.status === "Confirmed" && b.balance > 0;
   const canComplete = !isFrontOffice && b.status === "Confirmed";
   const canEdit = !isFrontOffice && (b.status === "Enquiry" || b.status === "Tentative" || b.status === "Confirmed" || b.status === "Completed");
-  const editLabel = b.status === "Completed" ? "Add Expenses" : "Edit";
+  const editLabel = "Edit";
 
   const totalCollected =
     b.payments.reduce((s, p) => s + p.amount, 0) +
