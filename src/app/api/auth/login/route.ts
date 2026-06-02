@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/lib/db";
+import { users } from "@/lib/schema";
+import { eq, and } from "drizzle-orm";
 
 export async function POST(req: NextRequest) {
   try {
@@ -11,9 +13,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Email and password required" }, { status: 400 });
     }
 
-    const user = await prisma.user.findFirst({
-      where: { email: email.toLowerCase().trim(), active: true },
-    });
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(and(eq(users.email, email.toLowerCase().trim()), eq(users.active, true)))
+      .limit(1);
 
     if (!user || !user.password) {
       return NextResponse.json({ error: "Incorrect password. Please try again." }, { status: 401 });
@@ -24,17 +28,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Incorrect password. Please try again." }, { status: 401 });
     }
 
-    const displayRole = user.role === "FrontOffice" ? "Front Office" : user.role;
-
     const token = jwt.sign(
-      { userId: user.id, name: user.name, role: displayRole, email: user.email },
+      { userId: user.id, name: user.name, role: user.role, email: user.email },
       process.env.JWT_SECRET!,
       { expiresIn: "8h" }
     );
 
     const res = NextResponse.json({
       success: true,
-      user: { id: user.id, name: user.name, role: displayRole, email: user.email },
+      user: { id: user.id, name: user.name, role: user.role, email: user.email },
     });
 
     res.cookies.set("vama-session", token, {

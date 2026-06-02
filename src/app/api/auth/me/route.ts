@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import jwt from "jsonwebtoken";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/lib/db";
+import { users } from "@/lib/schema";
+import { eq } from "drizzle-orm";
 
 export async function GET(req: NextRequest) {
   try {
@@ -16,18 +18,17 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id: payload.userId },
-      select: { id: true, name: true, role: true, email: true, active: true },
-    });
+    const [user] = await db
+      .select({ id: users.id, name: users.name, role: users.role, email: users.email, active: users.active })
+      .from(users)
+      .where(eq(users.id, payload.userId))
+      .limit(1);
 
     if (!user || !user.active) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    return NextResponse.json({
-      user: { ...user, role: user.role === "FrontOffice" ? "Front Office" : user.role },
-    });
+    return NextResponse.json({ user });
   } catch (err) {
     console.error("[GET /api/auth/me]", err);
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });

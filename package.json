@@ -4,19 +4,19 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
+    "build": "next build",
     "start": "next start",
     "lint": "eslint"
   },
   "dependencies": {
     "@clerk/backend": "^3.4.14",
     "@clerk/nextjs": "^7.4.2",
-    "@prisma/client": "^6.19.3",
+    "@neondatabase/serverless": "^1.1.0",
     "bcryptjs": "^3.0.3",
+    "drizzle-orm": "^0.45.2",
     "jose": "^6.2.3",
     "jsonwebtoken": "^9.0.3",
     "next": "16.2.5",
-    "prisma": "^6.19.3",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
@@ -27,6 +27,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.2.5",
     "tailwindcss": "^4",

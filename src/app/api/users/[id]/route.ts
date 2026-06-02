@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/lib/db";
+import { users } from "@/lib/schema";
+import { eq } from "drizzle-orm";
 
 function getSession(req: NextRequest): { userId: string } | null {
   const token = req.cookies.get("vama-session")?.value;
@@ -36,32 +38,26 @@ export async function PATCH(
       password?: string;
     };
 
-    const existing = await prisma.user.findUnique({ where: { id } });
+    const [existing] = await db.select().from(users).where(eq(users.id, id)).limit(1);
     if (!existing) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
     const hashedPassword = password?.trim() ? await bcrypt.hash(password.trim(), 10) : undefined;
 
-    const updated = await prisma.user.update({
-      where: { id },
-      data: {
-        ...(name && { name: name.trim() }),
-        ...(email && { email: email.trim().toLowerCase() }),
-        ...(role && { role: role as never }),
-        ...(color && { color }),
-        ...(typeof active === "boolean" && { active }),
-        ...(hashedPassword && { password: hashedPassword }),
-      },
-      select: {
-        id: true,
-        name: true,
-        role: true,
-        email: true,
-        color: true,
-        active: true,
-      },
-    });
+    const updateData: Record<string, unknown> = {};
+    if (name) updateData.name = name.trim();
+    if (email) updateData.email = email.trim().toLowerCase();
+    if (role) updateData.role = role;
+    if (color) updateData.color = color;
+    if (typeof active === "boolean") updateData.active = active;
+    if (hashedPassword) updateData.password = hashedPassword;
+
+    const [updated] = await db
+      .update(users)
+      .set(updateData)
+      .where(eq(users.id, id))
+      .returning({ id: users.id, name: users.name, role: users.role, email: users.email, color: users.color, active: users.active });
 
     return NextResponse.json(updated);
   } catch (err) {
@@ -83,12 +79,12 @@ export async function DELETE(
   const { id } = await params;
 
   try {
-    const existing = await prisma.user.findUnique({ where: { id } });
+    const [existing] = await db.select().from(users).where(eq(users.id, id)).limit(1);
     if (!existing) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    await prisma.user.delete({ where: { id } });
+    await db.delete(users).where(eq(users.id, id));
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error("[DELETE /api/users]", err);

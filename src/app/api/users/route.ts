@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/lib/db";
+import { users } from "@/lib/schema";
+import { asc } from "drizzle-orm";
 
 function getSession(req: NextRequest): { userId: string } | null {
   const token = req.cookies.get("vama-session")?.value;
@@ -16,20 +18,12 @@ function getSession(req: NextRequest): { userId: string } | null {
 // GET /api/users — public (login page needs this before auth)
 export async function GET() {
   try {
-    const users = await prisma.user.findMany({
-      orderBy: { name: "asc" },
-      select: {
-        id: true,
-        name: true,
-        role: true,
-        email: true,
-        color: true,
-        active: true,
-      },
-    });
-    return NextResponse.json(
-      users.map((u) => ({ ...u, role: u.role === "FrontOffice" ? "Front Office" : u.role }))
-    );
+    const result = await db
+      .select({ id: users.id, name: users.name, role: users.role, email: users.email, color: users.color, active: users.active })
+      .from(users)
+      .orderBy(asc(users.name));
+
+    return NextResponse.json(result.filter((u) => u.active));
   } catch (err) {
     console.error("[GET /api/users]", err);
     return NextResponse.json({ error: "Failed to fetch users" }, { status: 500 });
@@ -59,22 +53,20 @@ export async function POST(req: NextRequest) {
 
     const hashed = await bcrypt.hash(password, 10);
 
-    const dbUser = await prisma.user.create({
-      data: {
+    const [created] = await db
+      .insert(users)
+      .values({
         id: crypto.randomUUID(),
         name: name.trim(),
         email: email.trim().toLowerCase(),
         password: hashed,
-        role: role as never,
+        role,
         color: color || "#172f24",
         active: true,
-      },
-    });
+      })
+      .returning({ id: users.id, name: users.name, role: users.role, email: users.email, color: users.color, active: users.active });
 
-    return NextResponse.json(
-      { id: dbUser.id, name: dbUser.name, role: dbUser.role, email: dbUser.email, color: dbUser.color, active: dbUser.active },
-      { status: 201 }
-    );
+    return NextResponse.json(created, { status: 201 });
   } catch (err) {
     console.error("[POST /api/users]", err);
     return NextResponse.json({ error: "Failed to create user" }, { status: 500 });
