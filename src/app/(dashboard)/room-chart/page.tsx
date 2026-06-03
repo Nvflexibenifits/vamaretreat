@@ -28,9 +28,9 @@ type HoverState =
   | { kind: "venue"; block: VenueBlock; venue: Venue; rect: DOMRect }
   | { kind: "bulk"; block: BulkRoomBlock; rect: DOMRect };
 
-type BlockModalState =
+type UnifiedModalState =
   | { open: false }
-  | { open: true; editingId?: string };
+  | { open: true; editingBulkId?: string; editingVenueId?: string };
 
 type CellValue =
   | { kind: "booking"; booking: Booking; fromRoomId: string; isOverridden: boolean }
@@ -102,28 +102,17 @@ export default function RoomChartPage() {
   const [hover, setHover] = useState<HoverState | null>(null);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Choice modal (Venue vs Bulk Rooms)
-  const [choiceModal, setChoiceModal] = useState(false);
-
-  // Venue block modal state
-  const [blockModal, setBlockModal] = useState<BlockModalState>({ open: false });
-  const [fVenueId, setFVenueId] = useState("");
-  const [fCheckin, setFCheckin] = useState("");
-  const [fCheckout, setFCheckout] = useState("");
-  const [fName, setFName] = useState("");
-  const [fPax, setFPax] = useState("");
-  const [fAmount, setFAmount] = useState("");
-
-  // Bulk rooms block modal state
-  const [bulkModal, setBulkModal] = useState<BlockModalState>({ open: false });
-  const [bGuestName, setBGuestName] = useState("");
-  const [bLabel, setBLabel] = useState("");
-  const [bCheckin, setBCheckin] = useState("");
-  const [bCheckout, setBCheckout] = useState("");
-  const [bPax, setBPax] = useState("");
-  const [bAmount, setBAmount] = useState("");
-  const [bStatus, setBStatus] = useState<"Tentative" | "Confirmed">("Tentative");
-  const [bCatRows, setBCatRows] = useState<BulkCatRow[]>([{ catId: "", count: 1 }]);
+  // Unified block modal
+  const [unifiedModal, setUnifiedModal] = useState<UnifiedModalState>({ open: false });
+  const [uName, setUName] = useState("");
+  const [uCheckin, setUCheckin] = useState("");
+  const [uCheckout, setUCheckout] = useState("");
+  const [uPax, setUPax] = useState("");
+  const [uAmount, setUAmount] = useState("");
+  const [uBulkOpen, setUBulkOpen] = useState(false);
+  const [uCatRows, setUCatRows] = useState<BulkCatRow[]>([{ catId: "", count: 1 }]);
+  const [uVenueOpen, setUVenueOpen] = useState(false);
+  const [uVenueId, setUVenueId] = useState("");
 
   // Bulk block detail/delete modal
   const [bulkDetail, setBulkDetail] = useState<BulkRoomBlock | null>(null);
@@ -308,48 +297,56 @@ export default function RoomChartPage() {
       b.allocatedRooms.length === 0
   );
 
-  // ─── Venue block modal handlers ───
-  const resetForm = () => {
-    setFVenueId("");
-    setFCheckin("");
-    setFCheckout("");
-    setFName("");
-    setFPax("");
-    setFAmount("");
-  };
-
-  const openCreate = () => {
-    if (venues.length === 0) {
-      showNotif(
-        "No venues defined. Add venues in Master Setup → Venue Master first.",
-        "error"
-      );
-      return;
-    }
-    resetForm();
-    // Default dates: today → tomorrow
+  // ─── Unified block modal handlers ───
+  const resetUnifiedForm = () => {
     const t = todayStr();
-    setFCheckin(t);
-    setFCheckout(addDays(t, 1));
-    setHover(null);
-    setBlockModal({ open: true });
+    setUName("");
+    setUCheckin(t);
+    setUCheckout(addDays(t, 1));
+    setUPax("");
+    setUAmount("");
+    setUBulkOpen(false);
+    setUCatRows([{ catId: "", count: 1 }]);
+    setUVenueOpen(false);
+    setUVenueId("");
   };
 
-  const openEdit = (block: VenueBlock) => {
-    setFVenueId(block.venueId);
-    setFCheckin(block.checkin);
-    setFCheckout(block.checkout);
-    setFName(block.name);
-    setFPax(String(block.pax || ""));
-    setFAmount(String(block.amount || ""));
+  const openUnifiedCreate = () => {
+    resetUnifiedForm();
     setHover(null);
-    setBlockModal({ open: true, editingId: block.id });
+    setUnifiedModal({ open: true });
   };
 
-  const closeBlockModal = () => {
-    setBlockModal({ open: false });
-    resetForm();
+  const openVenueEdit = (block: VenueBlock) => {
+    setUName(block.name);
+    setUCheckin(block.checkin);
+    setUCheckout(block.checkout);
+    setUPax(String(block.pax || ""));
+    setUAmount(String(block.amount || ""));
+    setUVenueOpen(true);
+    setUVenueId(block.venueId);
+    setUBulkOpen(false);
+    setUCatRows([{ catId: "", count: 1 }]);
+    setHover(null);
+    setUnifiedModal({ open: true, editingVenueId: block.id });
   };
+
+  const openBulkEdit = (blk: BulkRoomBlock) => {
+    setUName(blk.guestName);
+    setUCheckin(blk.checkin);
+    setUCheckout(blk.checkout);
+    setUPax(String(blk.pax || ""));
+    setUAmount(String(blk.amount || ""));
+    setUBulkOpen(true);
+    setUCatRows(blk.rows.map((r) => ({ catId: r.catId, count: r.roomIds.length })));
+    setUVenueOpen(false);
+    setUVenueId("");
+    setBulkDetail(null);
+    setHover(null);
+    setUnifiedModal({ open: true, editingBulkId: blk.id });
+  };
+
+  const closeUnifiedModal = () => setUnifiedModal({ open: false });
 
   const overlapsExisting = (
     venueId: string,
@@ -368,131 +365,86 @@ export default function RoomChartPage() {
     );
   };
 
-  const saveBlock = (status: "Tentative" | "Confirmed") => {
-    if (!fVenueId) { showNotif("Pick a venue", "error"); return; }
-    if (!fCheckin || !fCheckout) { showNotif("Pick check-in and check-out dates", "error"); return; }
-    if (fCheckout <= fCheckin) { showNotif("Check-out must be after check-in", "error"); return; }
-    if (!fName.trim()) { showNotif("Enter a name", "error"); return; }
-    const editingId = blockModal.open && blockModal.editingId ? blockModal.editingId : undefined;
-    const conflict = overlapsExisting(fVenueId, fCheckin, fCheckout, editingId);
-    if (conflict) {
-      const vname = venueById[conflict.venueId]?.name || "Venue";
-      showNotif(`${vname} already booked (${fmtIN(conflict.checkin)} to ${fmtIN(conflict.checkout)})`, "error");
-      return;
-    }
-    const pax = parseInt(fPax) || 0;
-    const amount = parseInt(fAmount) || 0;
-    if (editingId) {
-      updateVenueBlock(editingId, { venueId: fVenueId, checkin: fCheckin, checkout: fCheckout, name: fName.trim(), pax, amount, status });
-      showNotif("Venue block updated", "success");
-    } else {
-      addVenueBlock({ id: uid(), venueId: fVenueId, checkin: fCheckin, checkout: fCheckout, name: fName.trim(), pax, amount, status, createdBy: currentUser, createdAt: todayStr() });
-      showNotif(status === "Tentative" ? "Venue tentatively booked" : "Venue confirmed", "success");
-    }
-    closeBlockModal();
-  };
-
-  const deleteBlock = () => {
-    if (!blockModal.open || !blockModal.editingId) return;
-    removeVenueBlock(blockModal.editingId);
-    showNotif("Venue block removed", "success");
-    closeBlockModal();
-  };
-
-  // ─── Bulk room block handlers ───
-  const resetBulkForm = () => {
-    setBGuestName("");
-    setBLabel("");
-    setBCheckin(todayStr());
-    setBCheckout(addDays(todayStr(), 1));
-    setBPax("");
-    setBAmount("");
-    setBStatus("Tentative");
-    setBCatRows([{ catId: "", count: 1 }]);
-  };
-
-  const openBulkCreate = () => {
-    resetBulkForm();
-    setChoiceModal(false);
-    setHover(null);
-    setBulkModal({ open: true });
-  };
-
-  const openBulkEdit = (blk: BulkRoomBlock) => {
-    setBGuestName(blk.guestName);
-    setBLabel(blk.label);
-    setBCheckin(blk.checkin);
-    setBCheckout(blk.checkout);
-    setBPax(String(blk.pax || ""));
-    setBAmount(String(blk.amount || ""));
-    setBStatus(blk.status);
-    setBCatRows(blk.rows.map((r) => ({ catId: r.catId, count: r.roomIds.length })));
-    setBulkDetail(null);
-    setBulkModal({ open: true, editingId: blk.id });
-  };
-
-  const closeBulkModal = () => {
-    setBulkModal({ open: false });
-  };
-
   const bulkAvailability = useMemo(() => {
-    if (!bCheckin || !bCheckout || bCheckout <= bCheckin) return {} as Record<string, number>;
-    const editingId = bulkModal.open && (bulkModal as { editingId?: string }).editingId;
+    if (!uCheckin || !uCheckout || uCheckout <= uCheckin) return {} as Record<string, number>;
+    const editingBulkId = unifiedModal.open ? unifiedModal.editingBulkId : undefined;
     const result: Record<string, number> = {};
     rooms.forEach((r) => {
       result[r.id] = findAvailableRoomIds(
-        r.id, bCheckin, bCheckout, bookings, roomInventory,
-        undefined, bulkRoomBlocks, editingId || undefined
+        r.id, uCheckin, uCheckout, bookings, roomInventory,
+        undefined, bulkRoomBlocks, editingBulkId
       ).length;
     });
     return result;
-  }, [bCheckin, bCheckout, bookings, roomInventory, bulkRoomBlocks, rooms, bulkModal]);
+  }, [uCheckin, uCheckout, bookings, roomInventory, bulkRoomBlocks, rooms, unifiedModal]);
 
-  const saveBulkBlock = (status: "Tentative" | "Confirmed") => {
-    if (!bGuestName.trim()) { showNotif("Enter guest name", "error"); return; }
-    if (!bLabel.trim()) { showNotif("Enter a label", "error"); return; }
-    if (!bCheckin || !bCheckout || bCheckout <= bCheckin) { showNotif("Pick valid dates", "error"); return; }
-    const editingId = bulkModal.open && (bulkModal as { editingId?: string }).editingId;
-    const rows: BulkRoomBlockRow[] = [];
-    for (const row of bCatRows) {
-      if (!row.catId || row.count <= 0) continue;
-      const available = findAvailableRoomIds(
-        row.catId, bCheckin, bCheckout, bookings, roomInventory,
-        undefined, bulkRoomBlocks, editingId || undefined
-      );
-      if (available.length < row.count) {
-        const catName = rooms.find((r) => r.id === row.catId)?.name ?? row.catId;
-        showNotif(`Only ${available.length} ${catName} available for selected dates`, "error");
+  const saveUnified = (status: "Tentative" | "Confirmed") => {
+    if (!uName.trim()) { showNotif("Enter group / guest name", "error"); return; }
+    if (!uCheckin || !uCheckout || uCheckout <= uCheckin) { showNotif("Pick valid check-in and check-out dates", "error"); return; }
+    if (!uBulkOpen && !uVenueOpen) { showNotif("Expand at least one section — Bulk Rooms or Venue", "error"); return; }
+
+    const pax = parseInt(uPax) || 0;
+    const amount = parseFloat(uAmount) || 0;
+    const editingBulkId = unifiedModal.open ? unifiedModal.editingBulkId : undefined;
+    const editingVenueId = unifiedModal.open ? unifiedModal.editingVenueId : undefined;
+
+    if (uVenueOpen) {
+      if (!uVenueId) { showNotif("Pick a venue in the Venue section", "error"); return; }
+      const conflict = overlapsExisting(uVenueId, uCheckin, uCheckout, editingVenueId);
+      if (conflict) {
+        const vname = venueById[conflict.venueId]?.name || "Venue";
+        showNotif(`${vname} already booked (${fmtIN(conflict.checkin)} to ${fmtIN(conflict.checkout)})`, "error");
         return;
       }
-      rows.push({
-        catId: row.catId,
-        catName: rooms.find((r) => r.id === row.catId)?.name ?? row.catId,
-        roomIds: available.slice(0, row.count),
-      });
+      if (editingVenueId) {
+        updateVenueBlock(editingVenueId, { venueId: uVenueId, checkin: uCheckin, checkout: uCheckout, name: uName.trim(), pax, amount, status });
+      } else {
+        addVenueBlock({ id: uid(), venueId: uVenueId, checkin: uCheckin, checkout: uCheckout, name: uName.trim(), pax, amount, status, createdBy: currentUser, createdAt: todayStr() });
+      }
     }
-    if (rows.length === 0) { showNotif("Add at least one room category", "error"); return; }
-    const block: BulkRoomBlock = {
-      id: editingId || ("brb-" + uid()),
-      label: bLabel.trim(),
-      guestName: bGuestName.trim(),
-      checkin: bCheckin,
-      checkout: bCheckout,
-      pax: parseInt(bPax) || 0,
-      amount: parseFloat(bAmount) || 0,
-      status,
-      rows,
-      createdBy: currentUser,
-      createdAt: new Date().toISOString(),
-    };
-    if (editingId) {
-      updateBulkRoomBlock(editingId, block);
-      showNotif("Block updated", "success");
-    } else {
-      addBulkRoomBlock(block);
-      showNotif(status === "Tentative" ? "Rooms tentatively booked" : "Rooms confirmed", "success");
+
+    if (uBulkOpen) {
+      const rows: BulkRoomBlockRow[] = [];
+      for (const row of uCatRows) {
+        if (!row.catId || row.count <= 0) continue;
+        const available = findAvailableRoomIds(
+          row.catId, uCheckin, uCheckout, bookings, roomInventory,
+          undefined, bulkRoomBlocks, editingBulkId
+        );
+        if (available.length < row.count) {
+          const catName = rooms.find((r) => r.id === row.catId)?.name ?? row.catId;
+          showNotif(`Only ${available.length} ${catName} available for selected dates`, "error");
+          return;
+        }
+        rows.push({
+          catId: row.catId,
+          catName: rooms.find((r) => r.id === row.catId)?.name ?? row.catId,
+          roomIds: available.slice(0, row.count),
+        });
+      }
+      if (rows.length === 0) { showNotif("Add at least one room category in the Bulk Rooms section", "error"); return; }
+      const block: BulkRoomBlock = {
+        id: editingBulkId || ("brb-" + uid()),
+        label: uName.trim(),
+        guestName: uName.trim(),
+        checkin: uCheckin,
+        checkout: uCheckout,
+        pax,
+        amount,
+        status,
+        rows,
+        createdBy: currentUser,
+        createdAt: new Date().toISOString(),
+      };
+      if (editingBulkId) {
+        updateBulkRoomBlock(editingBulkId, block);
+      } else {
+        addBulkRoomBlock(block);
+      }
     }
-    closeBulkModal();
+
+    showNotif(status === "Tentative" ? "Block saved as tentative" : "Block confirmed", "success");
+    closeUnifiedModal();
   };
 
   // ─── Drag & drop handlers (per-night room override) ───
@@ -722,7 +674,7 @@ export default function RoomChartPage() {
               </option>
             ))}
           </select>
-          <button className="btn btn-primary btn-sm" onClick={() => setChoiceModal(true)}>
+          <button className="btn btn-primary btn-sm" onClick={openUnifiedCreate}>
             Block
           </button>
         </div>
@@ -854,7 +806,7 @@ export default function RoomChartPage() {
                             >
                               <div
                                 className={`rc-cell-booked${block.status === "Tentative" ? " status-tentative" : ""}`}
-                                onClick={() => openEdit(block)}
+                                onClick={() => openVenueEdit(block)}
                                 onMouseEnter={(e) =>
                                   showHover({
                                     kind: "venue",
@@ -1104,163 +1056,178 @@ export default function RoomChartPage() {
         <BulkHoverCard block={hover.block} rect={hover.rect} />
       )}
 
-      {/* Choice modal */}
-      {choiceModal && (
-        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setChoiceModal(false); }}>
-          <div className="modal modal-sm">
-            <h3>Block</h3>
-            <p className="modal-desc">What would you like to block?</p>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
-              {[
-                { title: "Venue", desc: "Block a venue space for an event", onClick: () => { setChoiceModal(false); openCreate(); } },
-                { title: "Bulk Rooms", desc: "Block multiple rooms for a group", onClick: openBulkCreate },
-              ].map((opt) => (
-                <button
-                  key={opt.title}
-                  type="button"
-                  onClick={opt.onClick}
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "flex-start",
-                    gap: 6,
-                    padding: "16px 14px",
-                    background: "var(--surf2)",
-                    border: "1px solid var(--bd)",
-                    borderRadius: "var(--r2)",
-                    cursor: "pointer",
-                    textAlign: "left",
-                    transition: "border-color .15s",
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = "var(--acc)")}
-                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = "var(--bd)")}
-                >
-                  <span style={{ fontSize: 14, fontWeight: 600, color: "var(--t1)" }}>{opt.title}</span>
-                  <span style={{ fontSize: 12, color: "var(--t3)", lineHeight: 1.4 }}>{opt.desc}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Unified block modal */}
+      {unifiedModal.open && (
+        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) closeUnifiedModal(); }}>
+          <div className="modal" style={{ maxWidth: 580, width: "100%" }}>
+            <h3>{(unifiedModal.editingBulkId || unifiedModal.editingVenueId) ? "Edit Block" : "New Block"}</h3>
+            <p className="modal-desc">Block rooms, a venue, or both for a group in one step.</p>
 
-      {/* Bulk rooms block modal */}
-      {bulkModal.open && (
-        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) closeBulkModal(); }}>
-          <div className="modal" style={{ maxWidth: 560, width: "100%" }}>
-            <h3>{(bulkModal as { editingId?: string }).editingId ? "Edit Room Block" : "Block Rooms"}</h3>
-            <p className="modal-desc">Block specific rooms for a group or event. Blocked rooms will not be available for new bookings.</p>
+            {/* Common fields */}
             <div className="fg" style={{ marginTop: 12 }}>
-              <div className="field">
-                <label>Guest / Group Name *</label>
-                <input type="text" value={bGuestName} onChange={(e) => setBGuestName(e.target.value)} placeholder="e.g. Sharma Family" />
-              </div>
-              <div className="field">
-                <label>Label *</label>
-                <input type="text" value={bLabel} onChange={(e) => setBLabel(e.target.value)} placeholder="e.g. Corporate Retreat" />
+              <div className="field" style={{ gridColumn: "span 2" }}>
+                <label>Group / Guest Name *</label>
+                <input type="text" value={uName} onChange={(e) => setUName(e.target.value)} placeholder="e.g. Sharma Family" />
               </div>
               <div className="field">
                 <label>Check-in *</label>
-                <input type="date" value={bCheckin} onChange={(e) => setBCheckin(e.target.value)} />
+                <input type="date" value={uCheckin} onChange={(e) => setUCheckin(e.target.value)} />
               </div>
               <div className="field">
                 <label>Check-out *</label>
-                <input type="date" value={bCheckout} onChange={(e) => setBCheckout(e.target.value)} />
+                <input type="date" value={uCheckout} onChange={(e) => setUCheckout(e.target.value)} />
               </div>
               <div className="field">
                 <label>Pax</label>
-                <input type="number" value={bPax} min={0} onChange={(e) => setBPax(e.target.value)} />
+                <input type="number" value={uPax} min={0} onChange={(e) => setUPax(e.target.value)} placeholder="0" />
               </div>
               <div className="field">
                 <label>Amount (₹)</label>
-                <input type="number" value={bAmount} min={0} onChange={(e) => setBAmount(e.target.value)} />
+                <input type="number" value={uAmount} min={0} onChange={(e) => setUAmount(e.target.value)} placeholder="0" />
               </div>
             </div>
 
-            {/* Category rows */}
-            <div style={{ marginTop: 14 }}>
-              <div style={{ display: "flex", alignItems: "center", marginBottom: 8, gap: 10 }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: "var(--t1)" }}>Rooms to block</span>
-                <button
-                  className="btn btn-ghost btn-xs"
-                  style={{ marginLeft: "auto" }}
-                  onClick={() => setBCatRows((prev) => [...prev, { catId: "", count: 1 }])}
-                >
-                  + Add Row
-                </button>
-              </div>
-              <table className="pricing-tbl">
-                <thead>
-                  <tr>
-                    <th>Room Category</th>
-                    <th style={{ width: 110, textAlign: "center" }}>Available</th>
-                    <th style={{ width: 110, textAlign: "center" }}>Rooms Needed</th>
-                    <th style={{ width: 50 }}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {bCatRows.map((row, idx) => {
-                    const avail = row.catId ? (bulkAvailability[row.catId] ?? 0) : null;
-                    return (
-                      <tr key={idx}>
-                        <td>
-                          <select
-                            value={row.catId}
-                            onChange={(e) =>
-                              setBCatRows((prev) =>
-                                prev.map((r, i) => i === idx ? { ...r, catId: e.target.value } : r)
-                              )
-                            }
-                          >
-                            <option value="">— Category —</option>
-                            {rooms.map((r) => (
-                              <option key={r.id} value={r.id}>{r.name}</option>
-                            ))}
-                          </select>
-                        </td>
-                        <td style={{ textAlign: "center", fontSize: 13 }}>
-                          {avail === null ? "—" : (
-                            <span style={{ color: avail === 0 ? "var(--red)" : avail <= 2 ? "var(--amb)" : "var(--grn)", fontWeight: 600 }}>
-                              {avail}
-                            </span>
-                          )}
-                        </td>
-                        <td>
-                          <input
-                            type="number"
-                            value={row.count}
-                            min={1}
-                            max={avail ?? 99}
-                            style={{ textAlign: "center" }}
-                            onChange={(e) =>
-                              setBCatRows((prev) =>
-                                prev.map((r, i) => i === idx ? { ...r, count: parseInt(e.target.value) || 1 } : r)
-                              )
-                            }
-                          />
-                        </td>
-                        <td style={{ textAlign: "center" }}>
-                          {bCatRows.length > 1 && (
-                            <button
-                              className="btn btn-ghost btn-xs"
-                              style={{ color: "var(--red)" }}
-                              onClick={() => setBCatRows((prev) => prev.filter((_, i) => i !== idx))}
-                            >
-                              ×
-                            </button>
-                          )}
-                        </td>
+            {/* Bulk Rooms accordion */}
+            <div style={{ marginTop: 14, border: "1px solid var(--bd)", borderRadius: "var(--r2)", overflow: "hidden" }}>
+              <button
+                type="button"
+                style={{
+                  width: "100%", display: "flex", alignItems: "center", gap: 10,
+                  padding: "10px 14px", background: uBulkOpen ? "var(--surf2)" : "var(--surf)",
+                  border: "none", cursor: "pointer", textAlign: "left",
+                }}
+                onClick={() => setUBulkOpen((v) => !v)}
+              >
+                <span style={{ fontSize: 13, fontWeight: 600, color: "var(--t1)", flex: 1 }}>Bulk Rooms</span>
+                {uBulkOpen && uCatRows.some((r) => r.catId) && (
+                  <span className="badge" style={{ background: "var(--grn-bg)", color: "var(--grn)" }}>
+                    {uCatRows.filter((r) => r.catId).length} {uCatRows.filter((r) => r.catId).length === 1 ? "category" : "categories"}
+                  </span>
+                )}
+                <span style={{ fontSize: 16, color: "var(--t3)", display: "inline-block", transform: uBulkOpen ? "rotate(180deg)" : "none", transition: "transform .15s" }}>&#8964;</span>
+              </button>
+
+              {uBulkOpen && (
+                <div style={{ padding: "12px 14px", borderTop: "1px solid var(--bd)" }}>
+                  <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
+                    <span style={{ fontSize: 12, color: "var(--t3)" }}>Select room categories and quantity to block</span>
+                    <button className="btn btn-ghost btn-xs" style={{ marginLeft: "auto" }} onClick={() => setUCatRows((p) => [...p, { catId: "", count: 1 }])}>
+                      + Add Row
+                    </button>
+                  </div>
+                  <table className="pricing-tbl">
+                    <thead>
+                      <tr>
+                        <th>Room Category</th>
+                        <th style={{ width: 110, textAlign: "center" }}>Available</th>
+                        <th style={{ width: 110, textAlign: "center" }}>Rooms Needed</th>
+                        <th style={{ width: 50 }}></th>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                    </thead>
+                    <tbody>
+                      {uCatRows.map((row, idx) => {
+                        const avail = row.catId ? (bulkAvailability[row.catId] ?? 0) : null;
+                        return (
+                          <tr key={idx}>
+                            <td>
+                              <select value={row.catId} onChange={(e) => setUCatRows((p) => p.map((r, i) => i === idx ? { ...r, catId: e.target.value } : r))}>
+                                <option value="">— Category —</option>
+                                {rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                              </select>
+                            </td>
+                            <td style={{ textAlign: "center", fontSize: 13 }}>
+                              {avail === null ? "—" : (
+                                <span style={{ color: avail === 0 ? "var(--red)" : avail <= 2 ? "var(--amb)" : "var(--grn)", fontWeight: 600 }}>
+                                  {avail}
+                                </span>
+                              )}
+                            </td>
+                            <td>
+                              <input type="number" value={row.count} min={1} max={avail ?? 99} style={{ textAlign: "center" }}
+                                onChange={(e) => setUCatRows((p) => p.map((r, i) => i === idx ? { ...r, count: parseInt(e.target.value) || 1 } : r))} />
+                            </td>
+                            <td style={{ textAlign: "center" }}>
+                              {uCatRows.length > 1 && (
+                                <button className="btn btn-ghost btn-xs" style={{ color: "var(--red)" }} onClick={() => setUCatRows((p) => p.filter((_, i) => i !== idx))}>×</button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
 
-            <div className="modal-actions" style={{ marginTop: 16 }}>
-              <button className="btn btn-ghost" onClick={closeBulkModal}>Cancel</button>
-              <button className="btn btn-ghost" onClick={() => saveBulkBlock("Tentative")}>Tentatively Book</button>
-              <button className="btn btn-primary" onClick={() => saveBulkBlock("Confirmed")}>Confirm Book</button>
+            {/* Venue accordion */}
+            <div style={{ marginTop: 10, border: "1px solid var(--bd)", borderRadius: "var(--r2)", overflow: "hidden" }}>
+              <button
+                type="button"
+                style={{
+                  width: "100%", display: "flex", alignItems: "center", gap: 10,
+                  padding: "10px 14px", background: uVenueOpen ? "var(--surf2)" : "var(--surf)",
+                  border: "none", cursor: "pointer", textAlign: "left",
+                }}
+                onClick={() => {
+                  if (!uVenueOpen && venues.filter((v) => v.active).length === 0) {
+                    showNotif("No venues defined. Add venues in Master Setup first.", "error");
+                    return;
+                  }
+                  setUVenueOpen((v) => !v);
+                }}
+              >
+                <span style={{ fontSize: 13, fontWeight: 600, color: "var(--t1)", flex: 1 }}>Venue</span>
+                {uVenueOpen && uVenueId && (
+                  <span className="badge" style={{ background: "#ede9fe", color: "#5b21b6" }}>
+                    {venueById[uVenueId]?.name || "Selected"}
+                  </span>
+                )}
+                <span style={{ fontSize: 16, color: "var(--t3)", display: "inline-block", transform: uVenueOpen ? "rotate(180deg)" : "none", transition: "transform .15s" }}>&#8964;</span>
+              </button>
+
+              {uVenueOpen && (
+                <div style={{ padding: "12px 14px", borderTop: "1px solid var(--bd)" }}>
+                  <div className="field" style={{ marginBottom: 0 }}>
+                    <label>Venue *</label>
+                    <select value={uVenueId} onChange={(e) => setUVenueId(e.target.value)}>
+                      <option value="">— Select venue —</option>
+                      {VENUE_TYPE_ORDER.map((type) => {
+                        const items = venues.filter((v) => v.type === type && v.active);
+                        if (items.length === 0) return null;
+                        return (
+                          <optgroup key={type} label={type}>
+                            {items.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+                          </optgroup>
+                        );
+                      })}
+                    </select>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="modal-actions" style={{ marginTop: 16, display: "flex", justifyContent: "space-between" }}>
+              <div>
+                {(unifiedModal.editingBulkId || unifiedModal.editingVenueId) && (
+                  <button
+                    className="btn btn-danger"
+                    onClick={() => {
+                      if (unifiedModal.editingBulkId) removeBulkRoomBlock(unifiedModal.editingBulkId);
+                      if (unifiedModal.editingVenueId) removeVenueBlock(unifiedModal.editingVenueId);
+                      showNotif("Block removed", "success");
+                      closeUnifiedModal();
+                    }}
+                  >
+                    Delete
+                  </button>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn btn-ghost" onClick={closeUnifiedModal}>Cancel</button>
+                <button className="btn btn-ghost" onClick={() => saveUnified("Tentative")}>Tentatively Book</button>
+                <button className="btn btn-primary" onClick={() => saveUnified("Confirmed")}>Confirm Book</button>
+              </div>
             </div>
           </div>
         </div>
@@ -1313,109 +1280,6 @@ export default function RoomChartPage() {
               <button className="btn btn-primary" onClick={() => openBulkEdit(bulkDetail)}>
                 Edit
               </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {blockModal.open && (
-        <div
-          className="modal-overlay"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) closeBlockModal();
-          }}
-        >
-          <div className="modal modal-sm">
-            <h3>{blockModal.editingId ? "Edit Venue Booking" : "Book Venue"}</h3>
-            <p className="modal-desc">
-              Reserve a venue for an event. The block will appear on the Room
-              Chart for the selected dates.
-            </p>
-            <div className="fg" style={{ marginTop: 8 }}>
-              <div className="field" style={{ gridColumn: "span 2" }}>
-                <label>Category / Venue *</label>
-                <select
-                  value={fVenueId}
-                  onChange={(e) => setFVenueId(e.target.value)}
-                >
-                  <option value="">— Select venue —</option>
-                  {VENUE_TYPE_ORDER.map((type) => {
-                    const items = venues.filter(
-                      (v) => v.type === type && v.active
-                    );
-                    if (items.length === 0) return null;
-                    return (
-                      <optgroup key={type} label={type}>
-                        {items.map((v) => (
-                          <option key={v.id} value={v.id}>
-                            {v.name}
-                          </option>
-                        ))}
-                      </optgroup>
-                    );
-                  })}
-                </select>
-              </div>
-              <div className="field">
-                <label>Check-in *</label>
-                <input
-                  type="date"
-                  value={fCheckin}
-                  onChange={(e) => setFCheckin(e.target.value)}
-                />
-              </div>
-              <div className="field">
-                <label>Check-out *</label>
-                <input
-                  type="date"
-                  value={fCheckout}
-                  onChange={(e) => setFCheckout(e.target.value)}
-                />
-              </div>
-              <div className="field" style={{ gridColumn: "span 2" }}>
-                <label>Name *</label>
-                <input
-                  type="text"
-                  value={fName}
-                  onChange={(e) => setFName(e.target.value)}
-                  placeholder="Guest or event name"
-                />
-              </div>
-              <div className="field">
-                <label>Pax</label>
-                <input
-                  type="number"
-                  value={fPax}
-                  onChange={(e) => setFPax(e.target.value)}
-                  min={0}
-                  placeholder="0"
-                />
-              </div>
-              <div className="field">
-                <label>Amount (₹)</label>
-                <input
-                  type="number"
-                  value={fAmount}
-                  onChange={(e) => setFAmount(e.target.value)}
-                  min={0}
-                  placeholder="0"
-                />
-              </div>
-            </div>
-            <div
-              className="modal-actions"
-              style={{ display: "flex", justifyContent: "space-between", marginTop: 16 }}
-            >
-              <div>
-                {blockModal.editingId && (
-                  <button className="btn btn-danger" onClick={deleteBlock}>Delete</button>
-                )}
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button className="btn btn-ghost" onClick={closeBlockModal}>Cancel</button>
-                <button className="btn btn-ghost" onClick={() => saveBlock("Tentative")}>Tentatively Book</button>
-                <button className="btn btn-primary" onClick={() => saveBlock("Confirmed")}>Confirm Book</button>
-              </div>
             </div>
           </div>
         </div>

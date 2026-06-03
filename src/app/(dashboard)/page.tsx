@@ -9,7 +9,8 @@ type RevFilter = "today" | "week" | "month";
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { bookings, revenueEntries, currentUser, rooms, roomInventory } = useApp();
+  const { bookings, revenueEntries, currentUser, currentRole, rooms, roomInventory } = useApp();
+  const isFrontOffice = currentRole === "Front Office";
 
   const roomCategories = useMemo(() => {
     return rooms.map((r) => {
@@ -98,6 +99,257 @@ export default function DashboardPage() {
       return { ...cat, cells };
     });
   }, [bookings, roomDates, roomCategories]);
+
+  // ───── Front Office: Room Summary for today ─────
+  const roomSummaryToday = useMemo(() => {
+    if (!today) return [];
+    const getRoomCount = (b: (typeof bookings)[0], catId: string): number => {
+      const qty = new Map<string, number>();
+      b.pricingRows.forEach((r) => {
+        if (r.roomId !== catId) return;
+        qty.set(r.roomId, Math.max(qty.get(r.roomId) ?? 0, r.numRooms));
+      });
+      return Array.from(qty.values()).reduce((s, n) => s + n, 0);
+    };
+    return rooms
+      .map((r) => {
+        let rollOver = 0;
+        let newCheckin = 0;
+        bookings.forEach((b) => {
+          if (b.status !== "Confirmed" && b.status !== "Completed") return;
+          const qty = getRoomCount(b, r.id);
+          if (qty === 0) return;
+          if (b.checkin < today && b.checkout > today) rollOver += qty;
+          else if (b.checkin === today && b.checkout > today) newCheckin += qty;
+        });
+        return { category: r.name, rollOver, newCheckin, total: rollOver + newCheckin };
+      })
+      .filter((row) => row.total > 0);
+  }, [rooms, bookings, today]);
+
+  // ───── Front Office: Guest Pax Count for today ─────
+  const guestPaxToday = useMemo(() => {
+    if (!today) return [];
+    const isActive = (b: (typeof bookings)[0]) =>
+      (b.status === "Confirmed" || b.status === "Completed") &&
+      b.checkin <= today && b.checkout > today;
+    const isRollOver = (b: (typeof bookings)[0]) => b.checkin < today;
+    const isNew = (b: (typeof bookings)[0]) => b.checkin === today;
+    const sum = (arr: (typeof bookings), fn: (b: (typeof bookings)[0]) => number) =>
+      arr.reduce((s, b) => s + fn(b), 0);
+
+    const active = bookings.filter(isActive);
+    const rollOverBkgs = active.filter(isRollOver);
+    const newBkgs = active.filter(isNew);
+    const mealBkgs = active.filter((b) => b.mealOn);
+    const driverMealBkgs = active.filter((b) => b.driverMealOn);
+
+    return [
+      {
+        label: "Adults",
+        rollOver: sum(rollOverBkgs, (b) => b.adults),
+        newGuests: sum(newBkgs, (b) => b.adults),
+        meals: sum(mealBkgs, (b) => b.adults),
+        total: sum(active, (b) => b.adults),
+      },
+      {
+        label: "Sr. Citizens",
+        rollOver: sum(rollOverBkgs, (b) => b.seniors),
+        newGuests: sum(newBkgs, (b) => b.seniors),
+        meals: sum(mealBkgs, (b) => b.seniors),
+        total: sum(active, (b) => b.seniors),
+      },
+      {
+        label: "Kids",
+        rollOver: sum(rollOverBkgs, (b) => b.kidsAbove10 + b.kids6to10 + b.kids2to6 + b.infantsBelow2),
+        newGuests: sum(newBkgs, (b) => b.kidsAbove10 + b.kids6to10 + b.kids2to6 + b.infantsBelow2),
+        meals: sum(mealBkgs, (b) => b.kidsAbove10 + b.kids6to10 + b.kids2to6 + b.infantsBelow2),
+        total: sum(active, (b) => b.kidsAbove10 + b.kids6to10 + b.kids2to6 + b.infantsBelow2),
+      },
+      {
+        label: "Pets",
+        rollOver: sum(rollOverBkgs, (b) => b.pets),
+        newGuests: sum(newBkgs, (b) => b.pets),
+        meals: 0,
+        total: sum(active, (b) => b.pets),
+      },
+      {
+        label: "Driver",
+        rollOver: sum(rollOverBkgs, (b) => b.driverCount ?? 0),
+        newGuests: sum(newBkgs, (b) => b.driverCount ?? 0),
+        meals: sum(driverMealBkgs, (b) => b.driverCount ?? 0),
+        total: sum(active, (b) => b.driverCount ?? 0),
+      },
+    ].filter((row) => row.total > 0);
+  }, [bookings, today]);
+
+  // ───── Front Office View ─────
+  if (isFrontOffice) {
+    const todayLabel = today
+      ? new Date(today + "T00:00:00").toLocaleDateString("en-IN", {
+          weekday: "long",
+          day: "numeric",
+          month: "long",
+          year: "numeric",
+        })
+      : "";
+
+    return (
+      <div className="view">
+        <div className="pg-hd">
+          <div>
+            <h2>Hello, {currentUser}</h2>
+            <p>Today&apos;s occupancy and guest pax overview &mdash; {todayLabel}</p>
+          </div>
+        </div>
+
+        {/* Room Summary */}
+        <div className="tbl-wrap" style={{ marginBottom: 16 }}>
+          <div className="tbl-hd">
+            <h3>Room Summary &mdash; Today</h3>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Room Category</th>
+                <th style={{ textAlign: "center" }}>Roll Over Rooms</th>
+                <th style={{ textAlign: "center" }}>New Check-ins</th>
+                <th style={{ textAlign: "center" }}>Total Occupancy</th>
+              </tr>
+            </thead>
+            <tbody>
+              {roomSummaryToday.length === 0 ? (
+                <tr>
+                  <td colSpan={4}>
+                    <div className="empty-state">
+                      <h3>No occupied rooms today</h3>
+                      <p>No confirmed or completed bookings are active today</p>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                <>
+                  {roomSummaryToday.map((row) => (
+                    <tr key={row.category}>
+                      <td style={{ fontWeight: 500, color: "var(--t1)" }}>{row.category}</td>
+                      <td style={{ textAlign: "center" }}>
+                        {row.rollOver > 0 ? (
+                          <span style={{ fontWeight: 600, color: "var(--t1)" }}>{row.rollOver}</span>
+                        ) : (
+                          <span style={{ color: "var(--t4)" }}>—</span>
+                        )}
+                      </td>
+                      <td style={{ textAlign: "center" }}>
+                        {row.newCheckin > 0 ? (
+                          <span style={{ fontWeight: 600, color: "var(--grn)" }}>{row.newCheckin}</span>
+                        ) : (
+                          <span style={{ color: "var(--t4)" }}>—</span>
+                        )}
+                      </td>
+                      <td style={{ textAlign: "center" }}>
+                        <span style={{ fontWeight: 700, color: "var(--t1)" }}>{row.total}</span>
+                      </td>
+                    </tr>
+                  ))}
+                  <tr style={{ background: "var(--surf2)", fontWeight: 700 }}>
+                    <td style={{ color: "var(--t1)" }}>Total</td>
+                    <td style={{ textAlign: "center", color: "var(--t1)" }}>
+                      {roomSummaryToday.reduce((s, r) => s + r.rollOver, 0)}
+                    </td>
+                    <td style={{ textAlign: "center", color: "var(--grn)" }}>
+                      {roomSummaryToday.reduce((s, r) => s + r.newCheckin, 0)}
+                    </td>
+                    <td style={{ textAlign: "center", color: "var(--t1)" }}>
+                      {roomSummaryToday.reduce((s, r) => s + r.total, 0)}
+                    </td>
+                  </tr>
+                </>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Guest Pax Count */}
+        <div className="tbl-wrap">
+          <div className="tbl-hd">
+            <h3>Guest Pax Count &mdash; Today</h3>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Guest Category</th>
+                <th style={{ textAlign: "center" }}>Roll Over Guests</th>
+                <th style={{ textAlign: "center" }}>New Guests</th>
+                <th style={{ textAlign: "center" }}>Meals</th>
+                <th style={{ textAlign: "center" }}>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {guestPaxToday.length === 0 ? (
+                <tr>
+                  <td colSpan={5}>
+                    <div className="empty-state">
+                      <h3>No guests today</h3>
+                      <p>No confirmed or completed bookings are active today</p>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                <>
+                  {guestPaxToday.map((row) => (
+                    <tr key={row.label}>
+                      <td style={{ fontWeight: 500, color: "var(--t1)" }}>{row.label}</td>
+                      <td style={{ textAlign: "center" }}>
+                        {row.rollOver > 0 ? (
+                          <span style={{ fontWeight: 600, color: "var(--t1)" }}>{row.rollOver}</span>
+                        ) : (
+                          <span style={{ color: "var(--t4)" }}>—</span>
+                        )}
+                      </td>
+                      <td style={{ textAlign: "center" }}>
+                        {row.newGuests > 0 ? (
+                          <span style={{ fontWeight: 600, color: "var(--grn)" }}>{row.newGuests}</span>
+                        ) : (
+                          <span style={{ color: "var(--t4)" }}>—</span>
+                        )}
+                      </td>
+                      <td style={{ textAlign: "center" }}>
+                        {row.label === "Pets" ? (
+                          <span style={{ color: "var(--t4)" }}>—</span>
+                        ) : row.meals > 0 ? (
+                          <span style={{ fontWeight: 600, color: "var(--amb)" }}>{row.meals}</span>
+                        ) : (
+                          <span style={{ color: "var(--t4)" }}>0</span>
+                        )}
+                      </td>
+                      <td style={{ textAlign: "center" }}>
+                        <span style={{ fontWeight: 700, color: "var(--t1)" }}>{row.total}</span>
+                      </td>
+                    </tr>
+                  ))}
+                  <tr style={{ background: "var(--surf2)", fontWeight: 700 }}>
+                    <td style={{ color: "var(--t1)" }}>Total</td>
+                    <td style={{ textAlign: "center", color: "var(--t1)" }}>
+                      {guestPaxToday.reduce((s, r) => s + r.rollOver, 0)}
+                    </td>
+                    <td style={{ textAlign: "center", color: "var(--grn)" }}>
+                      {guestPaxToday.reduce((s, r) => s + r.newGuests, 0)}
+                    </td>
+                    <td style={{ textAlign: "center", color: "var(--amb)" }}>
+                      {guestPaxToday.reduce((s, r) => s + r.meals, 0)}
+                    </td>
+                    <td style={{ textAlign: "center", color: "var(--t1)" }}>
+                      {guestPaxToday.reduce((s, r) => s + r.total, 0)}
+                    </td>
+                  </tr>
+                </>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="view">
