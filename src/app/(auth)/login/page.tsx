@@ -76,14 +76,11 @@ export default function LoginPage() {
     <div id="login-screen">
       <div className="login-box">
         <div className="login-logo">
-          <div className="login-mark">VR</div>
           <div>
             <div className="login-title">Vama Retreats</div>
-            <div className="login-sub">Back Office · Internal Tool</div>
+            <div className="login-sub">Reservation Management System</div>
           </div>
         </div>
-
-        <div className="login-section-label">Select your role to continue</div>
 
         {loadingUsers ? (
           <div style={{ textAlign: "center", padding: "24px 0", fontSize: 13, color: "var(--t3)" }}>
@@ -181,7 +178,7 @@ export default function LoginPage() {
             cursor: selected === null || !password || submitting ? "not-allowed" : "pointer",
           }}
         >
-          {submitting ? "Signing in..." : "Enter Back Office"}
+          {submitting ? "Signing in..." : "Enter"}
         </button>
       </div>
     </div>

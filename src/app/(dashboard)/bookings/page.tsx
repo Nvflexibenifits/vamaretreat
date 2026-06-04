@@ -65,8 +65,7 @@ export default function BookingsPage() {
     <div className="view">
       <div className="pg-hd">
         <div>
-          <h2>All Bookings</h2>
-          <p>Full enquiry register — all statuses</p>
+          <h2>Booking List</h2>
         </div>
         <div className="pg-hd-actions">
           <button

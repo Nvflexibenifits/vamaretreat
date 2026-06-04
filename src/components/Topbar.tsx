@@ -8,7 +8,7 @@ import { formatLongDate } from "@/lib/utils";
 
 const TITLES: Record<string, string> = {
   "/": "Home",
-  "/bookings": "All Bookings",
+  "/bookings": "Booking List",
   "/bookings/new": "New Booking — B2C",
   "/room-chart": "Room Chart",
   "/revenue": "Revenue",

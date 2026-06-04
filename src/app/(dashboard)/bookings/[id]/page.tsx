@@ -25,20 +25,14 @@ export default function BookingDetailPage() {
   const canConfirm = !isFrontOffice && (b.status === "Enquiry" || b.status === "Tentative");
   const canLost = !isFrontOffice && (b.status === "Enquiry" || b.status === "Tentative" || b.status === "Confirmed");
   const canPay = !isFrontOffice && b.status === "Confirmed" && b.balance > 0;
-  const canComplete = !isFrontOffice && b.status === "Confirmed";
   const canEdit = !isFrontOffice && (b.status === "Enquiry" || b.status === "Tentative" || b.status === "Confirmed" || b.status === "Completed");
   const editLabel = "Edit";
-
-  const totalCollected =
-    b.payments.reduce((s, p) => s + p.amount, 0) +
-    b.extras.reduce((s, e) => s + (e.totalPaid ?? e.amount + (e.gst ?? 0)), 0);
 
   const totalKids = b.kidsAbove10 + b.kids6to10 + b.kids2to6;
   const totalRoomBaseCharges = b.pricingRows.reduce((s, r) => s + r.roomCharges, 0);
   const totalDiscount = b.pricingRows.reduce((s, r) => s + r.discountAmt, 0);
   const totalNet = b.pricingRows.reduce((s, r) => s + r.netCharges, 0);
   const totalRoomGst = b.pricingRows.reduce((s, r) => s + r.gstAmt, 0);
-  const totalMealPet = b.mealTotal + b.mealGst + b.petTotal + b.petGst + (b.driverMealTotal ?? 0) + (b.driverMealGst ?? 0);
   const totalGstAll = totalRoomGst + b.mealGst + b.petGst + (b.driverMealGst ?? 0);
 
   const roomsSummary = (() => {
@@ -61,7 +55,7 @@ export default function BookingDetailPage() {
             {b.id} · {fmtIN(b.checkin)} to {fmtIN(b.checkout)} · {b.nights} night{b.nights !== 1 ? "s" : ""}
           </p>
         </div>
-        <Link href="/bookings" className="btn btn-ghost btn-sm">Back to All Bookings</Link>
+        <Link href="/bookings" className="btn btn-ghost btn-sm">Back to Booking List</Link>
       </div>
 
       <div>
@@ -92,14 +86,6 @@ export default function BookingDetailPage() {
                 Record Payment
               </button>
             )}
-            {canComplete && (
-              <button
-                className="btn btn-primary btn-sm"
-                onClick={() => openModal({ kind: "complete", bookingId: b.id })}
-              >
-                Checkout &amp; Complete
-              </button>
-            )}
             {canLost && (
               <button
                 className="btn btn-danger btn-sm"
@@ -124,10 +110,10 @@ export default function BookingDetailPage() {
           </div>
         </div>
 
-        <div className="detail-layout">
+        <div>
           <div>
             <div className="detail-panel">
-              <div className="detail-panel-hd"><h3>Guest &amp; Booking</h3></div>
+              <div className="detail-panel-hd"><h3>Booking Data</h3></div>
               <div className="detail-panel-body">
                 <div className="detail-row"><span className="detail-key">Guest Name</span><span className="detail-val">{b.guest}</span></div>
                 <div className="detail-row"><span className="detail-key">Mobile</span><span className="detail-val">{b.mobile}</span></div>
@@ -147,10 +133,9 @@ export default function BookingDetailPage() {
                     {b.pets > 0 ? `, ${b.pets} Pets` : ""}
                   </span>
                 </div>
-                <div className="detail-row"><span className="detail-key">Rooms</span><span className="detail-val">{roomsSummary || "—"}</span></div>
+                <div className="detail-row"><span className="detail-key">Room Category</span><span className="detail-val">{roomsSummary || "—"}</span></div>
                 <div className="detail-row"><span className="detail-key">Meal Package</span><span className="detail-val">{b.mealOn ? "Included" : "Not included"}</span></div>
-                <div className="detail-row"><span className="detail-key">Notes</span><span className="detail-val" style={{ color: "var(--t2)" }}>{b.notes || "—"}</span></div>
-                <div className="detail-row"><span className="detail-key">Booking by</span><span className="detail-val">{b.rex}</span></div>
+                <div className="detail-row"><span className="detail-key">Special Request</span><span className="detail-val" style={{ color: "var(--t2)" }}>{b.notes || "—"}</span></div>
               </div>
             </div>
 
@@ -367,85 +352,6 @@ export default function BookingDetailPage() {
             </div>
           </div>
 
-          <div>
-            <div className="trail">
-              <div className="trail-hd">
-                <div className="trail-hd-title">Audit Trail</div>
-                <div className="trail-hd-id">{b.id}</div>
-              </div>
-              {b.payments.map((p, i) => (
-                <div key={i} className="trail-item">
-                  <div className="t-dot t-grn"></div>
-                  <div className="t-time">{fmtIN(p.date)}</div>
-                  <div className="t-lbl"><strong>{p.type}</strong> — {p.mode}</div>
-                  {p.amount > 0 && <div className="t-amt">{fmt(p.amount)}</div>}
-                  <div className="t-by">{p.by}</div>
-                </div>
-              ))}
-              {b.extras.map((e, i) => (
-                <div key={`e-${i}`} className="trail-item">
-                  <div className="t-dot t-amb"></div>
-                  <div className="t-time">{fmtIN(e.date || b.checkout)}</div>
-                  <div className="t-lbl">
-                    <strong>Extra: {e.name}</strong>
-                    {e.gst ? <span style={{ fontSize: 11, color: "var(--t3)", marginLeft: 6 }}>+{fmt(e.gst)} GST</span> : null}
-                  </div>
-                  <div className="t-amt">{fmt(e.totalPaid ?? e.amount + (e.gst ?? 0))}</div>
-                  <div className="t-by">{e.by || b.rex}</div>
-                </div>
-              ))}
-              {(b.nightOverrides || [])
-                .filter((o) => o.upgrade && o.upgrade.kind === "complimentary")
-                .sort((a, b2) => (a.date < b2.date ? -1 : 1))
-                .map((o) => (
-                  <div
-                    key={`up-${o.date}-${o.fromRoomId}`}
-                    className="trail-item"
-                  >
-                    <div className="t-dot t-grn"></div>
-                    <div className="t-time">{fmtIN(o.upgrade!.upgradeDate)}</div>
-                    <div className="t-lbl">
-                      <strong>
-                        Room Upgrade ({fmtIN(o.date)}, Complimentary):{" "}
-                        {o.upgrade!.fromCategoryName} → {o.upgrade!.toCategoryName}
-                      </strong>
-                      {o.upgrade!.reason ? ` — ${o.upgrade!.reason}` : ""}
-                    </div>
-                    <div className="t-by">{o.upgrade!.by}</div>
-                  </div>
-                ))}
-              {b.allocatedRooms.length > 0 && (
-                <div className="trail-item">
-                  <div className="t-dot t-blu"></div>
-                  <div className="t-time">—</div>
-                  <div className="t-lbl"><strong>Room Allocated</strong> — {b.allocatedRooms.join(", ")}</div>
-                  <div className="t-by">Rahul</div>
-                </div>
-              )}
-              {b.status === "Lost" && (
-                <div className="trail-item">
-                  <div className="t-dot t-red"></div>
-                  <div className="t-time">—</div>
-                  <div className="t-lbl"><strong>Marked Lost</strong>{b.lostReason ? ` — ${b.lostReason}` : ""}</div>
-                  <div className="t-by">{b.rex}</div>
-                </div>
-              )}
-              <div className="trail-total">
-                <div className="trail-total-lbl">Total Collected</div>
-                <div className="trail-total-val">{fmt(totalCollected)}</div>
-              </div>
-              <div className="trail-total" style={{ borderTop: "1px solid rgba(255,255,255,.04)" }}>
-                <div className="trail-total-lbl">Total Booking Value</div>
-                <div className="trail-total-val">{fmt(b.grandTotal)}</div>
-              </div>
-              {totalMealPet > 0 && (
-                <div className="trail-total" style={{ borderTop: "1px solid rgba(255,255,255,.04)" }}>
-                  <div className="trail-total-lbl">Meal &amp; Pet Total</div>
-                  <div className="trail-total-val">{fmt(totalMealPet)}</div>
-                </div>
-              )}
-            </div>
-          </div>
         </div>
       </div>
     </div>
