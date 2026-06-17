@@ -356,8 +356,8 @@ export default function DashboardPage() {
       <div className="pg-hd">
         <div>
           <h2>Hello, {currentUser}</h2>
-          <p>Quick overview of revenue, payments and room availability</p>
         </div>
+        <a href="/bookings/new" className="btn btn-accent btn-sm">New Booking</a>
       </div>
 
       {/* ───────── Top summary cards ───────── */}
@@ -506,6 +506,13 @@ export default function DashboardPage() {
       <div className="tbl-wrap">
         <div className="tbl-hd">
           <h3>Weekly Room Status</h3>
+          <div style={{ fontSize: 11, color: "var(--t3)", display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
+            <strong style={{ color: "var(--amb)" }}>Booked</strong>
+            {" / "}
+            <strong style={{ color: "var(--t3)" }}>Tentative</strong>
+            {" / "}
+            <strong style={{ color: "var(--grn)" }}>Available</strong>
+          </div>
         </div>
         <table>
           <thead>
@@ -546,21 +553,6 @@ export default function DashboardPage() {
             ))}
           </tbody>
         </table>
-        <div
-          style={{
-            padding: "10px 16px",
-            borderTop: "1px solid var(--bd)",
-            background: "var(--surf2)",
-            fontSize: 11,
-            color: "var(--t3)",
-          }}
-        >
-          <strong style={{ color: "var(--amb)" }}>Booked</strong>
-          {" / "}
-          <strong style={{ color: "var(--t3)" }}>Tentative</strong>
-          {" / "}
-          <strong style={{ color: "var(--grn)" }}>Available</strong>
-        </div>
       </div>
     </div>
   );
