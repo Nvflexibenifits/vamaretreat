@@ -135,9 +135,9 @@ export default function BookingsPage() {
               <th>Nights</th>
               <th>No. of Rooms</th>
               <th>Room Categ.</th>
-              <th>Total</th>
-              <th>Paid</th>
-              <th>Balance</th>
+              <th>Amount Due</th>
+              <th>Amount Received</th>
+              <th>Balance Amount</th>
               <th>Status</th>
               <th>REX</th>
               <th style={{ textAlign: "right" }}>Actions</th>

@@ -3,7 +3,7 @@
 import { useParams } from "next/navigation";
 import { useApp } from "@/lib/store";
 import { fmt } from "@/lib/utils";
-import type { PricingRow } from "@/types";
+import type { PricingRow, PricingRowType } from "@/types";
 
 function formatLongPretty(dateStr: string): string {
   if (!dateStr) return "—";
@@ -14,6 +14,14 @@ function formatLongPretty(dateStr: string): string {
     month: "long",
     year: "numeric",
   });
+}
+
+function dayTypeLabel(rt: PricingRowType): string {
+  if (rt === "sun-thu") return "Sun–Thu";
+  if (rt === "fri") return "Friday";
+  if (rt === "sat") return "Saturday";
+  if (rt === "fri-sat") return "Fri–Sat";
+  return "Custom";
 }
 
 const TH: React.CSSProperties = {
@@ -56,6 +64,15 @@ const REX_TAG: React.CSSProperties = {
   fontWeight: 700,
   fontSize: 11,
 };
+const DAY_BADGE: React.CSSProperties = {
+  display: "inline-block",
+  padding: "2px 7px",
+  borderRadius: 4,
+  fontSize: 10,
+  fontWeight: 700,
+  background: "#fde8c8",
+  color: "#7c4a00",
+};
 
 export default function ConfirmationPage() {
   const params = useParams<{ id: string }>();
@@ -80,7 +97,6 @@ export default function ConfirmationPage() {
     );
   }
 
-  // Aggregates from pricingRows
   const totalRoomBaseCharges = b.pricingRows.reduce((s, r) => s + r.roomCharges, 0);
   const totalDiscount = b.pricingRows.reduce((s, r) => s + r.discountAmt, 0);
   const totalNet = b.pricingRows.reduce((s, r) => s + r.netCharges, 0);
@@ -89,8 +105,7 @@ export default function ConfirmationPage() {
   const totalRooms = (() => {
     const m = new Map<string, number>();
     b.pricingRows.forEach((r) => {
-      const prev = m.get(r.roomId) || 0;
-      m.set(r.roomId, Math.max(prev, r.numRooms));
+      m.set(r.roomId, Math.max(m.get(r.roomId) ?? 0, r.numRooms));
     });
     return Array.from(m.values()).reduce((s, n) => s + n, 0);
   })();
@@ -120,7 +135,7 @@ export default function ConfirmationPage() {
 
   return (
     <div className="confirmation-root" style={{ background: "#fff", minHeight: "100vh" }}>
-      {/* Print header */}
+      {/* Print controls */}
       <div
         className="no-print"
         style={{
@@ -181,7 +196,8 @@ export default function ConfirmationPage() {
         }}
       >
         {/* Letterhead */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", alignItems: "center", marginBottom: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", alignItems: "center", marginBottom: 16 }}>
+          {/* Logo + address */}
           <div>
             <div
               style={{
@@ -203,11 +219,18 @@ export default function ConfirmationPage() {
                 color: "#0f2318",
                 letterSpacing: 4,
                 marginTop: 2,
+                marginBottom: 6,
               }}
             >
               RETREATS
             </div>
+            <div style={{ fontSize: 10, color: "#52524a", lineHeight: 1.4 }}>
+              Survey Number 27-1, Canterbury Castles Layout,<br />
+              Oodanahalli, near Nandi Hills
+            </div>
           </div>
+
+          {/* Title */}
           <div style={{ textAlign: "center" }}>
             <div
               style={{
@@ -221,24 +244,11 @@ export default function ConfirmationPage() {
             </div>
             <div style={{ fontSize: 11, color: "#52524a", marginTop: 3 }}>{b.id}</div>
           </div>
+
+          {/* REX */}
           <div style={{ textAlign: "right", fontSize: 12, color: "#52524a" }}>
             REX: <span style={REX_TAG}>{b.rex}</span>
           </div>
-        </div>
-
-        <div style={{ textAlign: "center", fontSize: 11, color: "#52524a", marginBottom: 4 }}>
-          Survey Number 27-1, Canterbury Castles Layout, Oodanahalli, near Nandi Hills
-        </div>
-        <div
-          style={{
-            textAlign: "center",
-            fontSize: 11,
-            fontWeight: 700,
-            color: "#1a1a16",
-            marginBottom: 16,
-          }}
-        >
-          Resort Contact - Please contact 80881 75568 for any assistance to reach the site.
         </div>
 
         {/* Guest info block */}
@@ -281,7 +291,6 @@ export default function ConfirmationPage() {
             color: "#fff",
             padding: "8px 12px",
             display: "flex",
-            justifyContent: "space-between",
             alignItems: "center",
             fontFamily: "Outfit, sans-serif",
             fontWeight: 700,
@@ -291,41 +300,44 @@ export default function ConfirmationPage() {
           }}
         >
           <span>Accomodation Charges</span>
-          <span style={{ fontSize: 11 }}>
-            REX: <span style={REX_TAG}>{b.rex}</span>
-          </span>
         </div>
 
         <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 4 }}>
           <thead>
             <tr>
+              <th style={TH}>Day Type</th>
               <th style={TH}>Room Category</th>
-              <th style={{ ...TH, textAlign: "right" }}>Room Tariff</th>
-              <th style={{ ...TH, textAlign: "right" }}>No. of Nights</th>
-              <th style={{ ...TH, textAlign: "right" }}>No. of Rooms</th>
-              <th style={{ ...TH, textAlign: "right" }}>Room Chgs</th>
-              <th style={{ ...TH, textAlign: "right" }}>Discount Amt</th>
-              <th style={{ ...TH, textAlign: "right" }}>Net Charges</th>
-              <th style={{ ...TH, textAlign: "right" }}>GST Rate</th>
+              <th style={{ ...TH, textAlign: "right" }}>Tariff</th>
+              <th style={{ ...TH, textAlign: "right" }}>Nights</th>
+              <th style={{ ...TH, textAlign: "right" }}>Rooms</th>
+              <th style={{ ...TH, textAlign: "right" }}>Charges</th>
+              <th style={{ ...TH, textAlign: "right" }}>Disc %</th>
+              <th style={{ ...TH, textAlign: "right" }}>Disc Amt</th>
+              <th style={{ ...TH, textAlign: "right" }}>Net</th>
+              <th style={{ ...TH, textAlign: "right" }}>GST %</th>
               <th style={{ ...TH, textAlign: "right" }}>GST Amt</th>
-              <th style={{ ...TH, textAlign: "right" }}>Total Amt</th>
+              <th style={{ ...TH, textAlign: "right" }}>Total</th>
             </tr>
           </thead>
           <tbody>
             {b.pricingRows.length === 0 ? (
               <tr>
-                <td style={{ ...TD, textAlign: "center" }} colSpan={10}>
+                <td style={{ ...TD, textAlign: "center" }} colSpan={12}>
                   No pricing rows
                 </td>
               </tr>
             ) : (
               b.pricingRows.map((r: PricingRow, i: number) => (
                 <tr key={i}>
+                  <td style={TD}>
+                    <span style={DAY_BADGE}>{dayTypeLabel(r.rowType)}</span>
+                  </td>
                   <td style={TD}>{r.roomName}</td>
                   <td style={TD_NUM}>{fmt(r.tariff)}</td>
                   <td style={TD_NUM}>{r.nights}</td>
                   <td style={TD_NUM}>{r.numRooms}</td>
                   <td style={TD_NUM}>{fmt(r.roomCharges)}</td>
+                  <td style={TD_NUM}>{r.discountPct > 0 ? `${r.discountPct}%` : "—"}</td>
                   <td style={TD_NUM}>{r.discountAmt > 0 ? `− ${fmt(r.discountAmt)}` : "—"}</td>
                   <td style={TD_NUM}>{fmt(r.netCharges)}</td>
                   <td style={TD_NUM}>{r.gstRate}%</td>
@@ -335,11 +347,12 @@ export default function ConfirmationPage() {
               ))
             )}
             <tr>
-              <td style={TD_HEAD}>Total Room Charges (A)</td>
+              <td style={TD_HEAD} colSpan={2}>Total Room Charges (A)</td>
               <td style={TD_HEAD}></td>
               <td style={TD_HEAD}></td>
               <td style={TD_HEAD_NUM}>{totalRooms}</td>
               <td style={TD_HEAD_NUM}>{fmt(totalRoomBaseCharges)}</td>
+              <td style={TD_HEAD}></td>
               <td style={TD_HEAD_NUM}>{totalDiscount > 0 ? `− ${fmt(totalDiscount)}` : "—"}</td>
               <td style={TD_HEAD_NUM}>{fmt(totalNet)}</td>
               <td style={TD_HEAD}></td>
@@ -354,13 +367,12 @@ export default function ConfirmationPage() {
           <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 4 }}>
             <thead>
               <tr>
-                <th style={TH}>Meal Charges</th>
+                <th style={TH} colSpan={2}>Meal Charges</th>
                 <th style={{ ...TH, textAlign: "right" }}>Meal Tariff</th>
                 <th style={{ ...TH, textAlign: "right" }}>No. of Nights</th>
                 <th style={{ ...TH, textAlign: "right" }}>No. of Pax</th>
                 <th style={{ ...TH, textAlign: "right" }}>Meal Chgs</th>
-                <th style={TH}></th>
-                <th style={TH}></th>
+                <th style={TH} colSpan={3}></th>
                 <th style={{ ...TH, textAlign: "right" }}>GST Rate</th>
                 <th style={{ ...TH, textAlign: "right" }}>GST Amt</th>
                 <th style={{ ...TH, textAlign: "right" }}>Total Amt</th>
@@ -369,13 +381,12 @@ export default function ConfirmationPage() {
             <tbody>
               {b.mealOn && (
                 <tr>
-                  <td style={TD}>Meal &amp; Activity Package</td>
+                  <td style={TD} colSpan={2}>Meal &amp; Activity Package</td>
                   <td style={TD_NUM}>{b.adults && b.nights ? fmt(mealCharges / b.nights / b.adults) : "—"}</td>
                   <td style={TD_NUM}>{b.nights}</td>
                   <td style={TD_NUM}>{b.adults}</td>
                   <td style={TD_NUM}>{fmt(mealCharges)}</td>
-                  <td style={TD}></td>
-                  <td style={TD}></td>
+                  <td style={TD} colSpan={3}></td>
                   <td style={TD_NUM}>18%</td>
                   <td style={TD_NUM}>{fmt(mealGst)}</td>
                   <td style={TD_NUM}>{fmt(totalMealAmt)}</td>
@@ -383,13 +394,12 @@ export default function ConfirmationPage() {
               )}
               {(b.pets || 0) > 0 && (
                 <tr>
-                  <td style={TD}>Pet Package</td>
+                  <td style={TD} colSpan={2}>Pet Package</td>
                   <td style={TD_NUM}>{b.pets && b.nights ? fmt(petCharges / b.nights / b.pets) : "—"}</td>
                   <td style={TD_NUM}>{b.nights}</td>
                   <td style={TD_NUM}>{b.pets}</td>
                   <td style={TD_NUM}>{fmt(petCharges)}</td>
-                  <td style={TD}></td>
-                  <td style={TD}></td>
+                  <td style={TD} colSpan={3}></td>
                   <td style={TD_NUM}>18%</td>
                   <td style={TD_NUM}>{fmt(petGstAmt)}</td>
                   <td style={TD_NUM}>{fmt(totalPetAmt)}</td>
@@ -397,26 +407,24 @@ export default function ConfirmationPage() {
               )}
               {(b.driverMealOn ?? false) && (b.driverCount ?? 0) > 0 && (
                 <tr>
-                  <td style={TD}>Driver / Attendant Meal</td>
+                  <td style={TD} colSpan={2}>Driver / Attendant Meal</td>
                   <td style={TD_NUM}>{b.driverCount && b.nights ? fmt(driverMealCharges / b.nights / b.driverCount) : "—"}</td>
                   <td style={TD_NUM}>{b.nights}</td>
                   <td style={TD_NUM}>{b.driverCount}</td>
                   <td style={TD_NUM}>{fmt(driverMealCharges)}</td>
-                  <td style={TD}></td>
-                  <td style={TD}></td>
+                  <td style={TD} colSpan={3}></td>
                   <td style={TD_NUM}>18%</td>
                   <td style={TD_NUM}>{fmt(driverMealGstAmt)}</td>
                   <td style={TD_NUM}>{fmt(totalDriverMealAmt)}</td>
                 </tr>
               )}
               <tr>
-                <td style={TD_HEAD}>Total Meal Charges (B)</td>
+                <td style={TD_HEAD} colSpan={2}>Total Meal Charges (B)</td>
                 <td style={TD_HEAD}></td>
                 <td style={TD_HEAD}></td>
                 <td style={TD_HEAD}></td>
                 <td style={TD_HEAD_NUM}>{fmt(totalMealPetCharges)}</td>
-                <td style={TD_HEAD}></td>
-                <td style={TD_HEAD}></td>
+                <td style={TD_HEAD} colSpan={3}></td>
                 <td style={TD_HEAD}></td>
                 <td style={TD_HEAD_NUM}>{fmt(totalMealPetGst)}</td>
                 <td style={TD_HEAD_NUM}>{fmt(totalMealPet)}</td>
@@ -429,21 +437,19 @@ export default function ConfirmationPage() {
         <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 14 }}>
           <tbody>
             <tr>
-              <td style={TD_GRAND}>Total Amt Payable (A + B)</td>
-              <td style={TD_GRAND_NUM}>{fmt(grandRaw)}</td>
-              <td style={TD_GRAND}></td>
+              <td style={TD_GRAND} colSpan={9}>Total Amt Payable (A + B)</td>
               <td style={TD_GRAND}></td>
               <td style={TD_GRAND_NUM}>{fmt(grandGst)}</td>
               <td style={TD_GRAND_NUM}>{fmt(grandTotal)}</td>
             </tr>
             <tr>
-              <td style={TD} colSpan={5}>
-                <strong>Advance Amount Paid</strong>
+              <td style={TD} colSpan={11}>
+                <strong>Amount Received</strong>
               </td>
               <td style={TD_YELLOW}>{fmt(b.advance)}</td>
             </tr>
             <tr>
-              <td style={TD} colSpan={5}>
+              <td style={TD} colSpan={11}>
                 <strong>Balance Amount Payable at the time of Check-In</strong>
               </td>
               <td style={TD_YELLOW}>{fmt(b.balance)}</td>
@@ -484,134 +490,6 @@ export default function ConfirmationPage() {
               Special Request
             </div>
             <div style={{ fontSize: 12, color: "#1a1a16" }}>{b.notes || "—"}</div>
-          </div>
-        </div>
-
-        {/* Policies */}
-        <div
-          style={{
-            background: "#0f2318",
-            color: "#fff",
-            padding: "8px 12px",
-            fontFamily: "Outfit, sans-serif",
-            fontWeight: 800,
-            fontSize: 13,
-            letterSpacing: ".5px",
-            textTransform: "uppercase",
-            marginBottom: 8,
-          }}
-        >
-          Policies
-        </div>
-
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: 18,
-            fontSize: 10.5,
-            color: "#1a1a16",
-            lineHeight: 1.5,
-          }}
-        >
-          <div>
-            <PolicyHeading>Check-in &amp; Check-out Timings</PolicyHeading>
-            <PolicyList
-              items={[
-                "Standard check-in time is 2 PM & check-out time is 11 AM.",
-                "Early check-in & late check-out is subject to availability. No early check-in & late check-out on Saturdays.",
-                "Guests can arrive at 1 PM & have lunch, but room allocation will be done at 2 PM.",
-                "In case guests are staying for lunch on the day of check-out, rooms will have to be vacated at 11AM.",
-              ]}
-            />
-
-            <PolicyHeading>Meal Package</PolicyHeading>
-            <PolicyList
-              items={[
-                "Meal package includes buffet lunch, high tea, BBQ, dinner on the day of check-in and morning tea & breakfast on the day of check-out.",
-                "We do not serve a-la-carte menu.",
-                "We do not provide room service / table service.",
-                "We provide only chicken in non-veg, we do not provide fish or mutton.",
-                "Buffet lunch counter closes at 3PM. Limited lunch menu items can be provided between 3-4 PM.",
-                "We do not provide liquor. Soft drinks & soda is provided.",
-              ]}
-            />
-
-            <PolicyHeading>Activities Included in the Package</PolicyHeading>
-            <PolicyList
-              items={[
-                "Adventure Course | Air Rifle Firing | Morning Trek | Nature walk | Swimming Pool",
-                "Cycling, Volleyball, Cricket, Indoor Games (Table Tennis, Foosball, Snooker, Carrom & Board Games)",
-                "Activities are subject to weather conditions.",
-                "Transportation to trek starting point should be arranged by guests themselves. We do not provide the same.",
-                "VAMA is absolved from any risk of injury in outdoor activities.",
-              ]}
-            />
-
-            <PolicyHeading>Driver / Attendant Policies</PolicyHeading>
-            <PolicyList
-              items={[
-                "Accommodation & bedding is provided free of cost for drivers/attendants. They must carry their own towels / toiletries.",
-                "Meal charges of Rs.1500 will apply in case drivers/attendants want to have guest food.",
-                "Driver/attendants are not permitted for activities.",
-              ]}
-            />
-
-            <PolicyHeading>Parking</PolicyHeading>
-            <PolicyList
-              items={["Surface parking is available. However, the same is at the owner's risk."]}
-            />
-          </div>
-
-          <div>
-            <PolicyHeading>Items to Carry</PolicyHeading>
-            <PolicyList
-              items={[
-                "Pls carry Swimwear, sport shoes, track pants, sun cap, warm / rain jacket, umbrella.",
-                "Pls carry your own Toothbrush, toothpaste and shaving kit. Bath gel, shampoo & Bath towel is provided by VAMA.",
-                "Sports shoes / sneakers is mandatory to participate in adventure course & trekking.",
-              ]}
-            />
-
-            <PolicyHeading>Pet Policy</PolicyHeading>
-            <PolicyList
-              items={[
-                "Pet Meal Package includes Rice, Curd, Boiled Vegetables, Boiled Eggs, Boiled Chicken and Chicken Broth. We do not provide Mutton, Fish & Dry Pet Food.",
-                "Pet should be kept on leash in common areas.",
-                "Pet owners should carry their own Pet Food Bowls & Poop Sticks.",
-                "A maximum of 2 pets are allowed in each Villa.",
-              ]}
-            />
-
-            <PolicyHeading>Swimming Pool | Timing 8 AM - 8 PM</PolicyHeading>
-            <PolicyList
-              items={[
-                "Usage of Swimming Pool is strictly in swimwear only. No T-Shirts, Dry Fits, Track Pants, Salwar Kameez, Sarees etc.",
-                "We DO NOT provide head cap. Ladies should carry their own head caps.",
-              ]}
-            />
-
-            <PolicyHeading>Payment Policies</PolicyHeading>
-            <PolicyList
-              items={[
-                "Balance Amount must be paid at the time of check-in, since we do not take credit card guarantee.",
-                "All adult guests will need to share mobile no. / photo ID at the time of check-in.",
-                "GST Invoice will be provided on request within 2 working days of check-out date. Pls note that GST is paid by us on all payments received.",
-              ]}
-            />
-
-            <PolicyHeading>General Rules</PolicyHeading>
-            <PolicyList
-              items={[
-                "Pls note that there is 200 meters distance between our villas and dining area.",
-                "1 BHK Garden Villas have a common garden between 2 villas.",
-                "Guests should refrain from playing own music in common areas.",
-                "In case of disturbance to other guests, music volume will need to be lowered.",
-                "Firecrackers and Confetti are not allowed.",
-                "Decoration inside and outside the villas is not allowed.",
-                "Drones are not allowed over swimming pool & pool villa.",
-              ]}
-            />
           </div>
         </div>
       </div>
@@ -665,36 +543,5 @@ function GuestRow({ label, value, last }: { label: string; value: string; last?:
         {value}
       </div>
     </div>
-  );
-}
-
-function PolicyHeading({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        fontFamily: "Outfit, sans-serif",
-        fontSize: 11,
-        fontWeight: 800,
-        color: "#0f2318",
-        textTransform: "uppercase",
-        letterSpacing: ".4px",
-        marginTop: 10,
-        marginBottom: 4,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function PolicyList({ items }: { items: string[] }) {
-  return (
-    <ol style={{ paddingLeft: 18, margin: 0 }}>
-      {items.map((t, i) => (
-        <li key={i} style={{ marginBottom: 2 }}>
-          {t}
-        </li>
-      ))}
-    </ol>
   );
 }

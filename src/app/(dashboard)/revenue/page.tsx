@@ -54,7 +54,7 @@ export default function RevenuePage() {
           <div className="rev-card-sub">{entries.length} payment events</div>
         </div>
         <div className="rev-card">
-          <div className="rev-card-lbl">Balance Pending</div>
+          <div className="rev-card-lbl">Balance Amount</div>
           <div className="rev-card-val" style={{ color: "var(--amb)" }}>{fmt(pending)}</div>
           <div className="rev-card-sub">Across confirmed bookings</div>
         </div>

@@ -269,7 +269,8 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   const adultsN = parseInt(adults) || 0;
   const petsN = parseInt(pets) || 0;
   const driversN = parseInt(drivers) || 0;
-  const advN = isEdit ? initialAdvance : parseInt(advance) || 0;
+  const createAdvance = newPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+  const advN = isEdit ? initialAdvance : createAdvance;
 
   const mealCharges = mealOn ? packageRates.mealPerAdultPerNight * totalNights * adultsN : 0;
   const mealGstAmt = mealCharges * 0.18;
@@ -365,25 +366,22 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       totalMealCharges: totalMealPet,
       grandTotal,
 
-      advance: parseInt(advance) || 0,
+      advance: createAdvance,
       balance,
 
       status,
       allocatedRooms,
 
-      payments:
-        (parseInt(advance) || 0) > 0
-          ? [
-              {
-                date: todayStr(),
-                time: nowTime(),
-                type: "Advance",
-                amount: parseInt(advance) || 0,
-                mode: paymode,
-                by: currentUser,
-              },
-            ]
-          : [],
+      payments: newPaymentRows
+        .filter((p) => p.date && (parseFloat(p.amount) || 0) > 0)
+        .map((p) => ({
+          date: p.date,
+          time: nowTime(),
+          type: "Advance",
+          amount: parseFloat(p.amount) || 0,
+          mode: p.mode,
+          by: currentUser,
+        })),
       extras: [],
     };
   };
@@ -527,7 +525,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     else router.push("/bookings");
   };
 
-  const confirmDisabled = (parseInt(advance) || 0) <= 0;
+  const confirmDisabled = createAdvance <= 0;
 
   return (
     <div className="view">
@@ -1293,26 +1291,81 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                   </button>
                 </div>
               ) : (
-                <div className="fg">
-                  <div className="field">
-                    <label>Advance Amount Paid</label>
-                    <input
-                      type="number"
-                      value={advance}
-                      onChange={(e) => setAdvance(e.target.value)}
-                      min={0}
-                      placeholder="0"
-                    />
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--t1)", marginBottom: 10 }}>
+                    Record Payments
                   </div>
-                  <div className="field">
-                    <label>Payment Mode</label>
-                    <select value={paymode} onChange={(e) => setPaymode(e.target.value)}>
-                      <option>Bank Transfer</option>
-                      <option>Cash</option>
-                      <option>Credit Card</option>
-                      <option>Credit Note</option>
-                    </select>
-                  </div>
+                  <table className="pricing-tbl" style={{ marginBottom: 8 }}>
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Amount (₹)</th>
+                        <th>Mode</th>
+                        <th style={{ width: 32 }}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {newPaymentRows.map((row) => (
+                        <tr key={row.uid}>
+                          <td>
+                            <input
+                              type="date"
+                              value={row.date}
+                              onChange={(e) => setNewPaymentRows((prev) =>
+                                prev.map((r) => r.uid === row.uid ? { ...r, date: e.target.value } : r)
+                              )}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              min={0}
+                              placeholder="0"
+                              value={row.amount}
+                              onChange={(e) => setNewPaymentRows((prev) =>
+                                prev.map((r) => r.uid === row.uid ? { ...r, amount: e.target.value } : r)
+                              )}
+                            />
+                          </td>
+                          <td>
+                            <select
+                              value={row.mode}
+                              onChange={(e) => setNewPaymentRows((prev) =>
+                                prev.map((r) => r.uid === row.uid ? { ...r, mode: e.target.value } : r)
+                              )}
+                            >
+                              <option>Bank Transfer</option>
+                              <option>Cash</option>
+                              <option>Credit Card</option>
+                              <option>Credit Note</option>
+                            </select>
+                          </td>
+                          <td style={{ textAlign: "center" }}>
+                            {newPaymentRows.length > 1 && (
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-xs"
+                                style={{ color: "var(--red)" }}
+                                onClick={() => setNewPaymentRows((prev) => prev.filter((r) => r.uid !== row.uid))}
+                              >
+                                ×
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-xs"
+                    onClick={() => setNewPaymentRows((prev) => [
+                      ...prev,
+                      { uid: newUid(), date: todayDate, amount: "", mode: "Bank Transfer" },
+                    ])}
+                  >
+                    + Add Row
+                  </button>
                 </div>
               )}
               <div
@@ -1325,7 +1378,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                 }}
               >
                 <span className="detail-key" style={{ fontWeight: 600 }}>
-                  Balance Due
+                  Balance Amount
                 </span>
                 <span
                   className="detail-val"

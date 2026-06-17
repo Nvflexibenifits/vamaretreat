@@ -11,8 +11,11 @@ import {
 } from "react";
 import type {
   Booking,
+  BookingStatus,
   BulkRoomBlock,
+  CancellationDetails,
   CancellationPolicy,
+  CreditNote,
   CreditNoteSettings,
   DiscountCaps,
   Extra,
@@ -66,6 +69,7 @@ type PersistedState = {
   packageRates?: PackageRates;
   specialDays?: SpecialDay[];
   creditNoteSettings?: CreditNoteSettings;
+  creditNotes?: CreditNote[];
   gstSettings?: GstSettings;
   cancellationPolicy?: CancellationPolicy;
   users?: User[];
@@ -137,6 +141,8 @@ type AppContextValue = {
   updatePackageRates: (rates: PackageRates) => void;
   addSpecialDay: (sd: SpecialDay) => void;
   removeSpecialDay: (id: string) => void;
+  creditNotes: CreditNote[];
+  cancelBooking: (bookingId: string, details: CancellationDetails) => void;
   updateCreditNoteSettings: (s: CreditNoteSettings) => void;
   updateGstSettings: (s: GstSettings) => void;
   updateCancellationPolicy: (p: CancellationPolicy) => void;
@@ -198,6 +204,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [specialDays, setSpecialDays] = useState<SpecialDay[]>(SEED_SPECIAL_DAYS);
   const [creditNoteSettings, setCreditNoteSettings] =
     useState<CreditNoteSettings>(SEED_CREDIT_NOTE_SETTINGS);
+  const [creditNotes, setCreditNotes] = useState<CreditNote[]>([]);
   const [gstSettings, setGstSettings] =
     useState<GstSettings>(SEED_GST_SETTINGS);
   const [cancellationPolicy, setCancellationPolicy] =
@@ -251,6 +258,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (parsed.packageRates) setPackageRatesState({ ...SEED_PACKAGE_RATES, ...parsed.packageRates });
         if (Array.isArray(parsed.specialDays)) setSpecialDays(parsed.specialDays);
         if (parsed.creditNoteSettings) setCreditNoteSettings(parsed.creditNoteSettings);
+        if (Array.isArray(parsed.creditNotes)) setCreditNotes(parsed.creditNotes);
         if (parsed.gstSettings) setGstSettings(parsed.gstSettings);
         if (parsed.cancellationPolicy && "standardThreshold" in parsed.cancellationPolicy) setCancellationPolicy(parsed.cancellationPolicy);
         if (Array.isArray(parsed.users) && parsed.users.length > 0) {
@@ -299,6 +307,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         packageRates,
         specialDays,
         creditNoteSettings,
+        creditNotes,
         gstSettings,
         cancellationPolicy,
         users,
@@ -352,6 +361,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (parsed.packageRates) setPackageRatesState({ ...SEED_PACKAGE_RATES, ...parsed.packageRates });
         if (Array.isArray(parsed.specialDays)) setSpecialDays(parsed.specialDays);
         if (parsed.creditNoteSettings) setCreditNoteSettings(parsed.creditNoteSettings);
+        if (Array.isArray(parsed.creditNotes)) setCreditNotes(parsed.creditNotes);
         if (parsed.gstSettings) setGstSettings(parsed.gstSettings);
         if (parsed.cancellationPolicy && "standardThreshold" in parsed.cancellationPolicy) setCancellationPolicy(parsed.cancellationPolicy);
         if (Array.isArray(parsed.users) && parsed.users.length > 0) {
@@ -405,6 +415,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
       prev.map((b) => (b.id === bookingId ? { ...b, ...patch } : b))
     );
   }, []);
+
+  const cancelBooking = useCallback(
+    (bookingId: string, details: CancellationDetails) => {
+      let guestName = "";
+      let guestMobile = "";
+      setBookings((prev) => {
+        const found = prev.find((b) => b.id === bookingId);
+        if (found) { guestName = found.guest; guestMobile = found.mobile; }
+        return prev.map((b) =>
+          b.id !== bookingId
+            ? b
+            : { ...b, status: "Cancelled" as BookingStatus, cancellationDetails: details }
+        );
+      });
+      if (details.creditNoteAmount > 0 && details.creditNoteCode) {
+        const cn: CreditNote = {
+          code: details.creditNoteCode,
+          guestName,
+          guestMobile,
+          originalBookingId: bookingId,
+          cancellationDate: details.cancellationDate,
+          totalAmount: details.creditNoteAmount,
+          usedAmount: 0,
+          remainingAmount: details.creditNoteAmount,
+          status: "Available",
+          transactions: [],
+        };
+        setCreditNotes((prev) => [...prev, cn]);
+        setCreditNoteSettings((prev) => ({ ...prev, nextNumber: prev.nextNumber + 1 }));
+      }
+    },
+    []
+  );
 
   const addExtras = useCallback((bookingId: string, newExtras: Extra[]) => {
     setBookings((prev) =>
@@ -747,6 +790,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setGuestNote,
       createBooking,
       updateBooking,
+      cancelBooking,
       addExtras,
       markLost,
       recordPayment,
@@ -760,6 +804,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       packageRates,
       specialDays,
       creditNoteSettings,
+      creditNotes,
       gstSettings,
       cancellationPolicy,
       users,
@@ -821,6 +866,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       packageRates,
       specialDays,
       creditNoteSettings,
+      creditNotes,
+      cancelBooking,
       gstSettings,
       cancellationPolicy,
       users,
