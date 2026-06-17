@@ -221,6 +221,13 @@ export type DiscountCaps = {
   admin: number | null; // null = Unlimited
 };
 
+export type MealCustomRow = {
+  id: string;
+  label: string;
+  price: number;
+  perLabel: string;
+};
+
 export type PackageRates = {
   mealPerAdultPerNight: number;
   petPerPetPerNight: number;
@@ -229,6 +236,8 @@ export type PackageRates = {
   individualLunchHighTea: number;
   individualOnlyDinner: number;
   individualBbqEveningDinner: number;
+  customPackages?: MealCustomRow[];
+  customIndividualMeals?: MealCustomRow[];
 };
 
 export type User = {

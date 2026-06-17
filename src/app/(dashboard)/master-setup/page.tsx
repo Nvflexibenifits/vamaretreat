@@ -15,6 +15,7 @@ import type {
   CreditNoteSettings,
   DiscountCaps,
   GstSettings,
+  MealCustomRow,
   PackageRates,
   RoomInventoryItem,
   RoomMaster,
@@ -36,8 +37,8 @@ type Tab =
 const TABS: { id: Tab; label: string }[] = [
   { id: "rooms-pricing", label: "Room Pricing" },
   { id: "rooms-inventory", label: "Room Inventory" },
-  { id: "venues", label: "Venue Master" },
-  { id: "meal", label: "Meal Package" },
+  { id: "venues", label: "Venue & Services" },
+  { id: "meal", label: "Meal Charges" },
   { id: "special", label: "Special Days" },
   { id: "cancellation", label: "Cancellation Setup" },
   { id: "users", label: "Users" },
@@ -126,15 +127,11 @@ function VenueMasterTab() {
   const [venueTypes, setVenueTypes] = useState<string[]>(VENUE_TYPES);
   const [addOpen, setAddOpen] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
-  const [newCap, setNewCap] = useState("");
-  const [newNotes, setNewNotes] = useState("");
   const [newCatName, setNewCatName] = useState("");
   const [addCatOpen, setAddCatOpen] = useState(false);
   const [editing, setEditing] = useState<{
     id: string;
     name: string;
-    capacity: string;
-    notes: string;
   } | null>(null);
 
   const grouped = useMemo(() => {
@@ -146,8 +143,6 @@ function VenueMasterTab() {
 
   const resetAddForm = () => {
     setNewName("");
-    setNewCap("");
-    setNewNotes("");
   };
 
   const onAdd = (type: string) => {
@@ -164,13 +159,10 @@ function VenueMasterTab() {
       showNotif(`${name} already exists under ${type}`, "error");
       return;
     }
-    const cap = parseInt(newCap);
     addVenue({
       id: uid(),
       name,
       type: type as VenueType,
-      capacity: !isNaN(cap) && cap > 0 ? cap : undefined,
-      notes: newNotes.trim() || undefined,
       active: true,
     });
     showNotif(`${name} added`, "success");
@@ -185,12 +177,7 @@ function VenueMasterTab() {
       showNotif("Name is required", "error");
       return;
     }
-    const cap = parseInt(editing.capacity);
-    updateVenue(editing.id, {
-      name,
-      capacity: !isNaN(cap) && cap > 0 ? cap : undefined,
-      notes: editing.notes.trim() || undefined,
-    });
+    updateVenue(editing.id, { name });
     showNotif("Venue updated", "success");
     setEditing(null);
   };
@@ -198,7 +185,7 @@ function VenueMasterTab() {
   return (
     <div className="settings-panel">
       <div className="sp-hd">
-        <h3>Venue Master</h3>
+        <h3>Venue &amp; Services</h3>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 12, color: "var(--t3)" }}>
             {venues.length} venue{venues.length === 1 ? "" : "s"} across{" "}
@@ -213,11 +200,6 @@ function VenueMasterTab() {
         </div>
       </div>
       <div className="sp-body">
-        <p style={{ fontSize: 12, color: "var(--t3)", marginBottom: 14 }}>
-          Catalog of non-room spaces available for B2B bookings. Pricing will
-          be added in Phase 2 — for now, list all conference rooms, seminar
-          rooms, garden venues and event places at the resort.
-        </p>
 
         {addCatOpen && (
           <div
@@ -331,7 +313,7 @@ function VenueMasterTab() {
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "1.4fr 100px 1.4fr auto auto",
+                  gridTemplateColumns: "1fr auto auto",
                   gap: 8,
                   alignItems: "end",
                   padding: 10,
@@ -348,42 +330,12 @@ function VenueMasterTab() {
                     value={newName}
                     onChange={(e) => setNewName(e.target.value)}
                     placeholder={`e.g. ${type} 1`}
+                    onKeyDown={(e) => { if (e.key === "Enter") onAdd(type); }}
+                    autoFocus
                   />
                 </div>
-                <div className="field">
-                  <label>Capacity</label>
-                  <input
-                    type="number"
-                    value={newCap}
-                    onChange={(e) => setNewCap(e.target.value)}
-                    min={0}
-                    placeholder="pax"
-                  />
-                </div>
-                <div className="field">
-                  <label>Notes (optional)</label>
-                  <input
-                    type="text"
-                    value={newNotes}
-                    onChange={(e) => setNewNotes(e.target.value)}
-                    placeholder="Location, equipment, etc."
-                  />
-                </div>
-                <button
-                  className="btn btn-primary btn-sm"
-                  onClick={() => onAdd(type)}
-                >
-                  Add
-                </button>
-                <button
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => {
-                    setAddOpen(null);
-                    resetAddForm();
-                  }}
-                >
-                  Cancel
-                </button>
+                <button className="btn btn-primary btn-sm" onClick={() => onAdd(type)}>Add</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => { setAddOpen(null); resetAddForm(); }}>Cancel</button>
               </div>
             )}
 
@@ -404,8 +356,6 @@ function VenueMasterTab() {
                 <thead>
                   <tr>
                     <th>Name</th>
-                    <th style={{ width: 110, textAlign: "right" }}>Capacity</th>
-                    <th>Notes</th>
                     <th style={{ width: 180, textAlign: "right" }}>Actions</th>
                   </tr>
                 </thead>
@@ -430,41 +380,6 @@ function VenueMasterTab() {
                             v.name
                           )}
                         </td>
-                        <td style={{ textAlign: "right" }}>
-                          {isEdit ? (
-                            <input
-                              type="number"
-                              value={editing!.capacity}
-                              onChange={(e) =>
-                                setEditing((prev) =>
-                                  prev
-                                    ? { ...prev, capacity: e.target.value }
-                                    : prev
-                                )
-                              }
-                              min={0}
-                            />
-                          ) : v.capacity ? (
-                            `${v.capacity} pax`
-                          ) : (
-                            "—"
-                          )}
-                        </td>
-                        <td style={{ fontSize: 12, color: "var(--t3)" }}>
-                          {isEdit ? (
-                            <input
-                              type="text"
-                              value={editing!.notes}
-                              onChange={(e) =>
-                                setEditing((prev) =>
-                                  prev ? { ...prev, notes: e.target.value } : prev
-                                )
-                              }
-                            />
-                          ) : (
-                            v.notes || "—"
-                          )}
-                        </td>
                         <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                           {isEdit ? (
                             <>
@@ -487,16 +402,7 @@ function VenueMasterTab() {
                               <button
                                 className="btn btn-ghost btn-xs"
                                 style={{ marginRight: 6 }}
-                                onClick={() =>
-                                  setEditing({
-                                    id: v.id,
-                                    name: v.name,
-                                    capacity: v.capacity
-                                      ? String(v.capacity)
-                                      : "",
-                                    notes: v.notes || "",
-                                  })
-                                }
+                                onClick={() => setEditing({ id: v.id, name: v.name })}
                               >
                                 Edit
                               </button>
@@ -526,26 +432,32 @@ function VenueMasterTab() {
   );
 }
 
-// ─────────── Meal Package ───────────
+// ─────────── Meal Charges ───────────
 function MealPackageTab() {
   const { packageRates, updatePackageRates, showNotif } = useApp();
   const [draft, setDraft] = useState<PackageRates>(packageRates);
+
+  // Add-row form state for each table
+  const [addPkg, setAddPkg] = useState(false);
+  const [pkgLabel, setPkgLabel] = useState("");
+  const [pkgPrice, setPkgPrice] = useState("");
+  const [pkgPer, setPkgPer] = useState("person / night");
+
+  const [addMeal, setAddMeal] = useState(false);
+  const [mealLabel, setMealLabel] = useState("");
+  const [mealPrice, setMealPrice] = useState("");
 
   useEffect(() => setDraft(packageRates), [packageRates]);
 
   const save = () => {
     updatePackageRates(draft);
-    showNotif("Meal package saved", "success");
+    showNotif("Meal charges saved", "success");
   };
 
   const gst18 = (base: number) => Math.round(base * 0.18);
   const total = (base: number) => base + gst18(base);
 
-  const rateRow = (
-    label: string,
-    field: keyof PackageRates,
-    perLabel: string
-  ) => {
+  const rateRow = (label: string, field: keyof PackageRates, perLabel: string) => {
     const base = draft[field] as number;
     return (
       <tr key={field}>
@@ -555,24 +467,83 @@ function MealPackageTab() {
             type="number"
             value={base}
             min={0}
-            onChange={(e) =>
-              setDraft((prev) => ({ ...prev, [field]: parseInt(e.target.value) || 0 }))
-            }
+            onChange={(e) => setDraft((prev) => ({ ...prev, [field]: parseInt(e.target.value) || 0 }))}
           />
         </td>
         <td style={{ textAlign: "right" }}>₹{gst18(base).toLocaleString("en-IN")}</td>
         <td style={{ textAlign: "right", fontWeight: 600 }}>₹{total(base).toLocaleString("en-IN")}</td>
         <td style={{ fontSize: 12, color: "var(--t3)" }}>{perLabel}</td>
+        <td></td>
       </tr>
     );
+  };
+
+  const customRow = (row: MealCustomRow, tableKey: "customPackages" | "customIndividualMeals") => (
+    <tr key={row.id}>
+      <td style={{ fontWeight: 500 }}>{row.label}</td>
+      <td>
+        <input
+          type="number"
+          value={row.price}
+          min={0}
+          onChange={(e) =>
+            setDraft((prev) => ({
+              ...prev,
+              [tableKey]: (prev[tableKey] ?? []).map((r) =>
+                r.id === row.id ? { ...r, price: parseInt(e.target.value) || 0 } : r
+              ),
+            }))
+          }
+        />
+      </td>
+      <td style={{ textAlign: "right" }}>₹{gst18(row.price).toLocaleString("en-IN")}</td>
+      <td style={{ textAlign: "right", fontWeight: 600 }}>₹{total(row.price).toLocaleString("en-IN")}</td>
+      <td style={{ fontSize: 12, color: "var(--t3)" }}>{row.perLabel}</td>
+      <td style={{ textAlign: "right" }}>
+        <button
+          className="btn btn-ghost btn-xs"
+          style={{ color: "var(--red)" }}
+          onClick={() =>
+            setDraft((prev) => ({
+              ...prev,
+              [tableKey]: (prev[tableKey] ?? []).filter((r) => r.id !== row.id),
+            }))
+          }
+        >
+          Remove
+        </button>
+      </td>
+    </tr>
+  );
+
+  const onAddPackage = () => {
+    const label = pkgLabel.trim();
+    const price = parseInt(pkgPrice) || 0;
+    if (!label) { showNotif("Enter a package name", "error"); return; }
+    setDraft((prev) => ({
+      ...prev,
+      customPackages: [...(prev.customPackages ?? []), { id: uid(), label, price, perLabel: pkgPer }],
+    }));
+    setPkgLabel(""); setPkgPrice(""); setPkgPer("person / night"); setAddPkg(false);
+  };
+
+  const onAddMeal = () => {
+    const label = mealLabel.trim();
+    const price = parseInt(mealPrice) || 0;
+    if (!label) { showNotif("Enter a meal name", "error"); return; }
+    setDraft((prev) => ({
+      ...prev,
+      customIndividualMeals: [...(prev.customIndividualMeals ?? []), { id: uid(), label, price, perLabel: "per adult" }],
+    }));
+    setMealLabel(""); setMealPrice(""); setAddMeal(false);
   };
 
   return (
     <div className="settings-panel">
       <div className="sp-hd">
-        <h3>Meal Package</h3>
+        <h3>Meal Charges</h3>
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn btn-ghost btn-sm" onClick={() => setDraft(SEED_PACKAGE_RATES)}>
+          <button className="btn btn-ghost btn-sm" onClick={() => { setDraft(SEED_PACKAGE_RATES); setAddPkg(false); setAddMeal(false); }}>
             Reset to defaults
           </button>
           <button className="btn btn-primary btn-sm" onClick={save}>
@@ -581,12 +552,38 @@ function MealPackageTab() {
         </div>
       </div>
       <div className="sp-body">
-        <div style={{ fontFamily: "var(--font-outfit), Outfit, sans-serif", fontSize: 13, fontWeight: 700, color: "var(--t1)", marginBottom: 8 }}>
-          Meal &amp; Activity Package — FY 2026-27
+        <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
+          <div style={{ fontFamily: "var(--font-outfit), Outfit, sans-serif", fontSize: 13, fontWeight: 700, color: "var(--t1)" }}>
+            Meal &amp; Activity Package — FY 2026-27
+          </div>
+          <button
+            className="btn btn-ghost btn-xs"
+            style={{ marginLeft: "auto" }}
+            onClick={() => { setAddPkg((v) => !v); setPkgLabel(""); setPkgPrice(""); setPkgPer("person / night"); }}
+          >
+            {addPkg ? "Close" : "Add Package"}
+          </button>
         </div>
-        <p style={{ fontSize: 12, color: "var(--t3)", marginBottom: 12 }}>
-          Applied per person / per pet per night. 18% GST included. All amounts editable.
-        </p>
+
+        {addPkg && (
+          <div style={{ display: "grid", gridTemplateColumns: "1.5fr 110px 140px auto auto", gap: 8, alignItems: "end", padding: 10, background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r2)", marginBottom: 8 }}>
+            <div className="field">
+              <label>Package Name</label>
+              <input type="text" value={pkgLabel} onChange={(e) => setPkgLabel(e.target.value)} placeholder="e.g. Kids Package" autoFocus onKeyDown={(e) => { if (e.key === "Enter") onAddPackage(); }} />
+            </div>
+            <div className="field">
+              <label>Base Price (₹)</label>
+              <input type="number" value={pkgPrice} onChange={(e) => setPkgPrice(e.target.value)} min={0} placeholder="0" />
+            </div>
+            <div className="field">
+              <label>Per</label>
+              <input type="text" value={pkgPer} onChange={(e) => setPkgPer(e.target.value)} placeholder="person / night" />
+            </div>
+            <button className="btn btn-primary btn-sm" onClick={onAddPackage}>Add</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => setAddPkg(false)}>Cancel</button>
+          </div>
+        )}
+
         <table className="pricing-tbl">
           <thead>
             <tr>
@@ -595,12 +592,14 @@ function MealPackageTab() {
               <th style={{ textAlign: "right" }}>18% GST</th>
               <th style={{ textAlign: "right" }}>Total Price</th>
               <th>Per</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
             {rateRow("Per Adult / Child > 10 Yrs", "mealPerAdultPerNight", "person / night")}
             {rateRow("Per Pet Package", "petPerPetPerNight", "pet / night")}
             {rateRow("Per Driver / Attendant", "driverPerNight", "person / night")}
+            {(draft.customPackages ?? []).map((r) => customRow(r, "customPackages"))}
           </tbody>
         </table>
 
@@ -610,12 +609,34 @@ function MealPackageTab() {
           3. Drivers/attendants not permitted for activities &amp; pool.
         </div>
 
-        <div style={{ fontFamily: "var(--font-outfit), Outfit, sans-serif", fontSize: 13, fontWeight: 700, color: "var(--t1)", marginTop: 24, marginBottom: 8 }}>
-          Individual Meal Charges — OTA / Visitors (per adult)
+        <div style={{ display: "flex", alignItems: "center", marginTop: 24, marginBottom: 8 }}>
+          <div style={{ fontFamily: "var(--font-outfit), Outfit, sans-serif", fontSize: 13, fontWeight: 700, color: "var(--t1)" }}>
+            Individual Meal Charges — OTA / Visitors (per adult)
+          </div>
+          <button
+            className="btn btn-ghost btn-xs"
+            style={{ marginLeft: "auto" }}
+            onClick={() => { setAddMeal((v) => !v); setMealLabel(""); setMealPrice(""); }}
+          >
+            {addMeal ? "Close" : "Add Package"}
+          </button>
         </div>
-        <p style={{ fontSize: 12, color: "var(--t3)", marginBottom: 12 }}>
-          For walk-in guests, OTA bookings, or visitors not on the package.
-        </p>
+
+        {addMeal && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 110px auto auto", gap: 8, alignItems: "end", padding: 10, background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r2)", marginBottom: 8 }}>
+            <div className="field">
+              <label>Meal Name</label>
+              <input type="text" value={mealLabel} onChange={(e) => setMealLabel(e.target.value)} placeholder="e.g. Full Day Meals" autoFocus onKeyDown={(e) => { if (e.key === "Enter") onAddMeal(); }} />
+            </div>
+            <div className="field">
+              <label>Base Price (₹)</label>
+              <input type="number" value={mealPrice} onChange={(e) => setMealPrice(e.target.value)} min={0} placeholder="0" />
+            </div>
+            <button className="btn btn-primary btn-sm" onClick={onAddMeal}>Add</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => setAddMeal(false)}>Cancel</button>
+          </div>
+        )}
+
         <table className="pricing-tbl">
           <thead>
             <tr>
@@ -624,6 +645,7 @@ function MealPackageTab() {
               <th style={{ textAlign: "right" }}>18% GST</th>
               <th style={{ textAlign: "right" }}>Total Price</th>
               <th></th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -631,8 +653,9 @@ function MealPackageTab() {
             {rateRow("Lunch & High Tea", "individualLunchHighTea", "per adult")}
             {rateRow("Only Dinner", "individualOnlyDinner", "per adult")}
             {rateRow("BBQ + Evening Snacks & Dinner", "individualBbqEveningDinner", "per adult")}
+            {(draft.customIndividualMeals ?? []).map((r) => customRow(r, "customIndividualMeals"))}
             <tr>
-              <td style={{ fontStyle: "italic", color: "var(--t3)" }} colSpan={5}>
+              <td style={{ fontStyle: "italic", color: "var(--t3)" }} colSpan={6}>
                 Morning Tea — No charge
               </td>
             </tr>
@@ -664,8 +687,6 @@ function RoomPricingSection() {
     showNotif("Room pricing saved", "success");
   };
 
-  const gstPreviewLow = `${draftGst.belowRate}% GST on tariffs ≤ ₹${draftGst.threshold.toLocaleString("en-IN")}`;
-  const gstPreviewHigh = `${draftGst.aboveRate}% GST on tariffs > ₹${draftGst.threshold.toLocaleString("en-IN")}`;
 
   return (
     <div className="settings-panel">
@@ -684,10 +705,6 @@ function RoomPricingSection() {
         </div>
       </div>
       <div className="sp-body">
-        <p style={{ fontSize: 12, color: "var(--t3)", marginBottom: 14 }}>
-          Standard rates w.e.f. 22.09.25. Four discount tiers auto-apply on the booking form:
-          Sun–Thu, Friday, Saturday, and Special Days. GST is computed per the rule below — not stored per room.
-        </p>
         <table className="pricing-tbl">
           <thead>
             <tr>
@@ -764,12 +781,8 @@ function RoomPricingSection() {
 
         <div style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid var(--bd)" }}>
           <div style={{ fontFamily: "var(--font-outfit), Outfit, sans-serif", fontSize: 13, fontWeight: 700, color: "var(--t1)", marginBottom: 10 }}>
-            GST Rule
+            GST Rate
           </div>
-          <p style={{ fontSize: 12, color: "var(--t3)", marginBottom: 14 }}>
-            GST slab is determined by the room tariff per night. Applies to the net room charges
-            after discount. Both rates and the threshold are editable.
-          </p>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14, maxWidth: 520 }}>
             <div className="field">
               <label>Threshold (₹)</label>
@@ -813,23 +826,6 @@ function RoomPricingSection() {
               </div>
             </div>
           </div>
-          <div
-            style={{
-              marginTop: 12,
-              padding: "10px 14px",
-              background: "var(--surf2)",
-              border: "1px solid var(--bd)",
-              borderRadius: "var(--r2)",
-              fontSize: 12,
-              color: "var(--t2)",
-              display: "flex",
-              gap: 18,
-            }}
-          >
-            <span>{gstPreviewLow}</span>
-            <span style={{ color: "var(--t3)" }}>·</span>
-            <span>{gstPreviewHigh}</span>
-          </div>
         </div>
       </div>
     </div>
@@ -851,10 +847,12 @@ function RoomInventorySection() {
 
   const [editingLabel, setEditingLabel] = useState<{ id: string; value: string } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<RoomInventoryItem | null>(null);
-  const [addOpen, setAddOpen] = useState<string | null>(null); // cat id when open
+  const [addOpen, setAddOpen] = useState<string | null>(null);
   const [addLabel, setAddLabel] = useState("");
   const [addCatOpen, setAddCatOpen] = useState(false);
   const [newCatName, setNewCatName] = useState("");
+  const [renamingCat, setRenamingCat] = useState<{ id: string; value: string } | null>(null);
+  const [removeCatConfirm, setRemoveCatConfirm] = useState<string | null>(null);
 
   // Group inventory by category, preserve master ROOMS order.
   const grouped = useMemo(() => {
@@ -956,6 +954,19 @@ function RoomInventorySection() {
   const onRemoveCategory = (catId: string) => {
     updateRooms(rooms.filter((r) => r.id !== catId));
     showNotif("Category removed", "success");
+    setRemoveCatConfirm(null);
+  };
+
+  const onRenameCategory = () => {
+    if (!renamingCat) return;
+    const name = renamingCat.value.trim();
+    if (!name) { showNotif("Enter a category name", "error"); return; }
+    if (rooms.some((r) => r.id !== renamingCat.id && r.name.toLowerCase() === name.toLowerCase())) {
+      showNotif(`${name} already exists`, "error"); return;
+    }
+    updateRooms(rooms.map((r) => r.id === renamingCat.id ? { ...r, name } : r));
+    showNotif("Category renamed", "success");
+    setRenamingCat(null);
   };
 
   const onLabelSave = () => {
@@ -1004,10 +1015,6 @@ function RoomInventorySection() {
         </div>
       </div>
       <div className="sp-body">
-        <p style={{ fontSize: 12, color: "var(--t3)", marginBottom: 14 }}>
-          Edit physical room labels, add new rooms when commissioned, or delete a decommissioned
-          room. Blocked rooms are skipped by the auto-allocator and shaded out in the Room Chart.
-        </p>
 
         {addCatOpen && (
           <div
@@ -1041,51 +1048,58 @@ function RoomInventorySection() {
 
         {grouped.map(({ cat, items, active, total }) => (
           <div key={cat.id} style={{ marginBottom: 22 }}>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                marginBottom: 8,
-              }}
-            >
-              <div
-                style={{
-                  fontFamily: "var(--font-outfit), Outfit, sans-serif",
-                  fontSize: 13,
-                  fontWeight: 700,
-                  color: "var(--t1)",
-                  textTransform: "uppercase",
-                  letterSpacing: ".4px",
-                }}
-              >
-                {cat.name}
-              </div>
-              <span
-                className="badge"
-                style={{ background: "var(--surf3)", color: "var(--t2)" }}
-              >
-                {active} active{active !== total ? ` / ${total} total` : ""}
-              </span>
-              {items.length === 0 && (
-                <button
-                  className="btn btn-ghost btn-xs"
-                  style={{ color: "var(--red)" }}
-                  onClick={() => onRemoveCategory(cat.id)}
-                >
-                  Remove Category
-                </button>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+              {renamingCat?.id === cat.id ? (
+                <>
+                  <input
+                    type="text"
+                    value={renamingCat.value}
+                    onChange={(e) => setRenamingCat({ id: cat.id, value: e.target.value })}
+                    onKeyDown={(e) => { if (e.key === "Enter") onRenameCategory(); if (e.key === "Escape") setRenamingCat(null); }}
+                    autoFocus
+                    style={{ fontWeight: 700, fontSize: 13, width: 180 }}
+                  />
+                  <button className="btn btn-primary btn-xs" onClick={onRenameCategory}>Save</button>
+                  <button className="btn btn-ghost btn-xs" onClick={() => setRenamingCat(null)}>Cancel</button>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontFamily: "var(--font-outfit), Outfit, sans-serif", fontSize: 13, fontWeight: 700, color: "var(--t1)", textTransform: "uppercase", letterSpacing: ".4px" }}>
+                    {cat.name}
+                  </div>
+                  <span className="badge" style={{ background: "var(--surf3)", color: "var(--t2)" }}>
+                    {active} active{active !== total ? ` / ${total} total` : ""}
+                  </span>
+                  <button
+                    className="btn btn-ghost btn-xs"
+                    onClick={() => { setRenamingCat({ id: cat.id, value: cat.name }); setAddOpen(null); }}
+                  >
+                    Rename
+                  </button>
+                  {removeCatConfirm === cat.id ? (
+                    <>
+                      <span style={{ fontSize: 11, color: "var(--t2)" }}>Remove all {total} room{total !== 1 ? "s" : ""} too?</span>
+                      <button className="btn btn-danger btn-xs" onClick={() => onRemoveCategory(cat.id)}>Yes, Remove</button>
+                      <button className="btn btn-ghost btn-xs" onClick={() => setRemoveCatConfirm(null)}>Cancel</button>
+                    </>
+                  ) : (
+                    <button
+                      className="btn btn-ghost btn-xs"
+                      style={{ color: "var(--red)" }}
+                      onClick={() => items.length === 0 ? onRemoveCategory(cat.id) : setRemoveCatConfirm(cat.id)}
+                    >
+                      Remove
+                    </button>
+                  )}
+                  <button
+                    className="btn btn-ghost btn-xs"
+                    style={{ marginLeft: "auto" }}
+                    onClick={() => { setAddOpen(addOpen === cat.id ? null : cat.id); setAddLabel(nextLabelFor(cat.id)); }}
+                  >
+                    {addOpen === cat.id ? "Close" : "Add Room"}
+                  </button>
+                </>
               )}
-              <button
-                className="btn btn-ghost btn-xs"
-                style={{ marginLeft: items.length === 0 ? 0 : "auto" }}
-                onClick={() => {
-                  setAddOpen(addOpen === cat.id ? null : cat.id);
-                  setAddLabel(nextLabelFor(cat.id));
-                }}
-              >
-                {addOpen === cat.id ? "Close" : "Add Room"}
-              </button>
             </div>
 
             {addOpen === cat.id && (
@@ -1314,9 +1328,6 @@ function SpecialDaysTab() {
         </button>
       </div>
       <div className="sp-body">
-        <p style={{ fontSize: 12, color: "var(--t3)", marginBottom: 14 }}>
-          Used by the Cancel Booking flow to determine refund vs credit-note rules.
-        </p>
 
         {addOpen && (
           <div
@@ -1834,10 +1845,6 @@ function CreditNoteSection() {
         </button>
       </div>
       <div className="sp-body">
-        <p style={{ fontSize: 12, color: "var(--t3)", marginBottom: 14 }}>
-          Credit notes are auto-generated when a confirmed booking is cancelled under a
-          credit-note resolution. Numbers increment automatically; only edit on first setup.
-        </p>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, maxWidth: 520 }}>
           <div className="field">

@@ -446,10 +446,10 @@ export default function DashboardPage() {
                 <th>Guest Name</th>
                 <th>Check-in</th>
                 <th>Check-out</th>
-                <th style={{ textAlign: "right" }}>Total</th>
-                <th style={{ textAlign: "right" }}>Received</th>
-                <th style={{ textAlign: "right" }}>Pending</th>
-                <th style={{ textAlign: "right" }}>Actions</th>
+                <th style={{ textAlign: "right", width: 130, whiteSpace: "nowrap" }}>Amount Due</th>
+                <th style={{ textAlign: "right", width: 140, whiteSpace: "nowrap" }}>Amount Received</th>
+                <th style={{ textAlign: "right", width: 140, whiteSpace: "nowrap" }}>Balance Amount</th>
+                <th style={{ textAlign: "right", width: 100, whiteSpace: "nowrap" }}>Actions</th>
               </tr>
             </thead>
             <tbody>
