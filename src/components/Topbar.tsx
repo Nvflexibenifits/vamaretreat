@@ -1,7 +1,6 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useApp } from "@/lib/store";
 import { formatLongDate } from "@/lib/utils";
@@ -24,25 +23,27 @@ function getTitle(pathname: string): string {
 
 export function Topbar() {
   const pathname = usePathname();
-  const { currentRole } = useApp();
+  const router = useRouter();
+  const { logout } = useApp();
   const [dateStr, setDateStr] = useState<string>("");
 
   useEffect(() => {
     setDateStr(formatLongDate());
   }, []);
 
-  const showNewBtn = currentRole === "Sales" || currentRole === "Admin";
+  const onLogout = () => {
+    logout();
+    router.push("/login");
+  };
 
   return (
     <div id="topbar">
       <div className="topbar-title">{getTitle(pathname)}</div>
       <div className="topbar-right">
         <div className="topbar-date">{dateStr}</div>
-        {showNewBtn && (
-          <Link href="/bookings/new" className="btn btn-accent btn-sm">
-            New Booking
-          </Link>
-        )}
+        <button className="btn btn-ghost btn-sm" onClick={onLogout}>
+          Logout
+        </button>
       </div>
     </div>
   );

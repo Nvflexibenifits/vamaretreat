@@ -16,7 +16,6 @@ import type {
   DiscountCaps,
   GstSettings,
   PackageRates,
-  Role,
   RoomInventoryItem,
   RoomMaster,
   SpecialDay,
@@ -50,8 +49,6 @@ const VENUE_TYPES: string[] = [
   "Garden Venue",
   "Event Place",
 ];
-
-const ROLE_OPTIONS: Role[] = ["Sales", "Front Office", "Admin"];
 
 const COLOR_PALETTE = [
   "#172f24",
@@ -1918,25 +1915,14 @@ function CreditNoteSection() {
   );
 }
 
-// ─────────── Users (API-driven, syncs with Clerk) ───────────
+// ─────────── Users ───────────
 type ApiUser = {
   id: string;
-  clerkId?: string | null;
   name: string;
-  role: Role;
+  role: string;
   email: string;
   color: string;
   active: boolean;
-};
-
-type DraftUser = {
-  id: string;
-  name: string;
-  role: Role;
-  email: string;
-  color: string;
-  active: boolean;
-  password: string;
 };
 
 function UsersTab() {
@@ -1944,15 +1930,34 @@ function UsersTab() {
   const [apiUsers, setApiUsers] = useState<ApiUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [editing, setEditing] = useState<DraftUser | null>(null);
-  const [isNew, setIsNew] = useState(false);
+
+  // Role management
+  const [roles, setRoles] = useState<string[]>(["Admin", "Front Office", "Sales"]);
+  const [addRoleOpen, setAddRoleOpen] = useState(false);
+  const [newRoleName, setNewRoleName] = useState("");
+
+  // Inline add user per role
+  const [addForRole, setAddForRole] = useState<string | null>(null);
+  const [addDraft, setAddDraft] = useState({ name: "", password: "" });
+
+  // Inline edit
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState({ name: "", password: "" });
+
+  // Delete
   const [deleteConfirm, setDeleteConfirm] = useState<ApiUser | null>(null);
 
   const fetchUsers = async () => {
     try {
       const res = await fetch("/api/users");
       const data = await res.json();
-      if (Array.isArray(data)) setApiUsers(data);
+      if (Array.isArray(data)) {
+        setApiUsers(data);
+        setRoles((prev) => {
+          const fromApi = (data as ApiUser[]).map((u) => u.role);
+          return [...new Set([...prev, ...fromApi])];
+        });
+      }
     } catch {
       showNotif("Failed to load users", "error");
     } finally {
@@ -1962,78 +1967,46 @@ function UsersTab() {
 
   useEffect(() => { fetchUsers(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const openNew = () => {
-    setEditing({
-      id: uid(),
-      name: "",
-      role: "Sales",
-      email: "",
-      color: colorFor("New User"),
-      active: true,
-      password: "test@123",
-    });
-    setIsNew(true);
+  const byRole = useMemo(() => {
+    const map: Record<string, ApiUser[]> = {};
+    for (const r of roles) map[r] = [];
+    for (const u of apiUsers) {
+      if (!map[u.role]) map[u.role] = [];
+      map[u.role].push(u);
+    }
+    return map;
+  }, [apiUsers, roles]);
+
+  const onAddRole = () => {
+    const name = newRoleName.trim();
+    if (!name) { showNotif("Enter a role name", "error"); return; }
+    if (roles.some((r) => r.toLowerCase() === name.toLowerCase())) {
+      showNotif(`${name} already exists`, "error"); return;
+    }
+    setRoles((prev) => [...prev, name]);
+    setNewRoleName("");
+    setAddRoleOpen(false);
+    showNotif(`${name} role created`, "success");
   };
 
-  const openEdit = (u: ApiUser) => {
-    setEditing({ ...u, password: "" });
-    setIsNew(false);
-  };
-
-  const close = () => { setEditing(null); setIsNew(false); };
-
-  const save = async () => {
-    if (!editing) return;
-    if (!editing.name.trim()) { showNotif("Name is required", "error"); return; }
-    if (!editing.email.trim()) { showNotif("Email is required", "error"); return; }
-    if (isNew && !editing.password.trim()) { showNotif("Password is required", "error"); return; }
-
-    // Auto-suggest email format if empty
-    const email = editing.email.trim() ||
-      `${editing.name.toLowerCase().replace(/\s+/g, ".")}@vamaretreats.com`;
-
+  const onAddUser = async (role: string) => {
+    const name = addDraft.name.trim();
+    const password = addDraft.password.trim();
+    if (!name) { showNotif("Name is required", "error"); return; }
+    if (!password) { showNotif("Password is required", "error"); return; }
+    const email = `${name.toLowerCase().replace(/\s+/g, ".")}@vamaretreats.com`;
     setSaving(true);
     try {
-      if (isNew) {
-        const res = await fetch("/api/users", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: editing.name.trim(),
-            email,
-            password: editing.password.trim(),
-            role: editing.role,
-            color: editing.color || colorFor(editing.name),
-          }),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          showNotif(data.error || "Failed to create user", "error");
-          return;
-        }
-        showNotif(`${editing.name} added`, "success");
-      } else {
-        const body: Record<string, unknown> = {
-          name: editing.name.trim(),
-          email,
-          role: editing.role,
-          color: editing.color || colorFor(editing.name),
-          active: editing.active,
-          ...(editing.password.trim() && { password: editing.password.trim() }),
-        };
-        const res = await fetch(`/api/users/${editing.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          showNotif(data.error || "Failed to update user", "error");
-          return;
-        }
-        showNotif("User updated", "success");
-      }
-      close();
+      const res = await fetch("/api/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, email, password, role, color: colorFor(name) }),
+      });
+      const data = await res.json();
+      if (!res.ok) { showNotif(data.error || "Failed to create user", "error"); return; }
+      showNotif(`${name} added`, "success");
+      setAddForRole(null);
+      setAddDraft({ name: "", password: "" });
       await fetchUsers();
     } catch {
       showNotif("Network error", "error");
@@ -2042,16 +2015,43 @@ function UsersTab() {
     }
   };
 
-  const confirmDelete = async () => {
+  const onSaveEdit = async (u: ApiUser) => {
+    const name = editDraft.name.trim();
+    if (!name) { showNotif("Name is required", "error"); return; }
+    setSaving(true);
+    try {
+      const body: Record<string, unknown> = {
+        name,
+        email: u.email,
+        role: u.role,
+        color: colorFor(name),
+        active: u.active,
+        ...(editDraft.password.trim() && { password: editDraft.password.trim() }),
+      };
+      const res = await fetch(`/api/users/${u.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) { showNotif(data.error || "Failed to update user", "error"); return; }
+      showNotif("User updated", "success");
+      setEditingId(null);
+      await fetchUsers();
+    } catch {
+      showNotif("Network error", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onDelete = async () => {
     if (!deleteConfirm) return;
     setSaving(true);
     try {
       const res = await fetch(`/api/users/${deleteConfirm.id}`, { method: "DELETE" });
       const data = await res.json();
-      if (!res.ok) {
-        showNotif(data.error || "Failed to delete user", "error");
-        return;
-      }
+      if (!res.ok) { showNotif(data.error || "Failed to delete user", "error"); return; }
       showNotif(`${deleteConfirm.name} removed`, "success");
       setDeleteConfirm(null);
       await fetchUsers();
@@ -2062,121 +2062,234 @@ function UsersTab() {
     }
   };
 
+  if (loading) {
+    return (
+      <div className="settings-panel">
+        <div className="sp-hd"><h3>User List</h3></div>
+        <div className="sp-body">
+          <div style={{ padding: 24, fontSize: 13, color: "var(--t3)" }}>Loading users…</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="settings-panel">
       <div className="sp-hd">
-        <h3>User Management</h3>
-        <button className="btn btn-primary btn-sm" onClick={openNew}>
-          Add User
+        <h3>User List</h3>
+        <button
+          className="btn btn-primary btn-sm"
+          onClick={() => { setAddRoleOpen((v) => !v); setNewRoleName(""); }}
+        >
+          {addRoleOpen ? "Close" : "Add User Role"}
         </button>
       </div>
-      <div className="sp-body">
-        {loading ? (
-          <div style={{ padding: 24, fontSize: 13, color: "var(--t3)" }}>Loading users…</div>
-        ) : apiUsers.length === 0 ? (
-          <div className="empty-state" style={{ padding: 24 }}>
-            <p>No users yet</p>
-          </div>
-        ) : (
-          apiUsers.map((u) => (
-            <div key={u.id} className="user-item">
-              <div className="user-av" style={{ background: u.color }}>
-                {u.name[0] || "?"}
-              </div>
-              <div style={{ flex: 1 }}>
-                <div className="user-name">{u.name}</div>
-                <div className="user-email">{u.email || "—"}</div>
-              </div>
-              <div className="user-role-tag">{u.role}</div>
-              <button className="btn btn-ghost btn-xs" onClick={() => openEdit(u)}>Edit</button>
-              <button
-                className="btn btn-ghost btn-xs"
-                style={{ color: "var(--red)" }}
-                onClick={() => setDeleteConfirm(u)}
-              >
-                Delete
-              </button>
-            </div>
-          ))
-        )}
-      </div>
 
-      {/* Add / Edit modal */}
-      {editing && (
-        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
-          <div className="modal modal-sm">
-            <h3>{isNew ? "Add User" : `Edit ${editing.name || "User"}`}</h3>
-            <div className="fg" style={{ marginTop: 12 }}>
-              <div className="field">
-                <label>Name *</label>
-                <input
-                  type="text"
-                  value={editing.name}
-                  onChange={(e) =>
-                    setEditing((prev) => prev ? {
-                      ...prev,
-                      name: e.target.value,
-                      color: colorFor(e.target.value),
-                      email: prev.email || `${e.target.value.toLowerCase().replace(/\s+/g, ".")}@vamaretreats.com`,
-                    } : prev)
-                  }
-                />
-              </div>
-              <div className="field">
-                <label>Role</label>
-                <select
-                  value={editing.role}
-                  onChange={(e) => setEditing((prev) => prev ? { ...prev, role: e.target.value as Role } : prev)}
-                >
-                  {ROLE_OPTIONS.map((r) => (
-                    <option key={r} value={r}>{r}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="field" style={{ gridColumn: "span 2" }}>
-                <label>Email *</label>
-                <input
-                  type="email"
-                  value={editing.email}
-                  onChange={(e) => setEditing((prev) => prev ? { ...prev, email: e.target.value } : prev)}
-                  placeholder="name@vamaretreats.com"
-                />
-              </div>
-              <div className="field" style={{ gridColumn: "span 2" }}>
-                <label>{isNew ? "Password *" : "Password"}</label>
-                <input
-                  type="password"
-                  value={editing.password}
-                  onChange={(e) => setEditing((prev) => prev ? { ...prev, password: e.target.value } : prev)}
-                  placeholder={isNew ? "Set a password" : "Leave blank to keep existing"}
-                  autoComplete="new-password"
-                />
-              </div>
+      {addRoleOpen && (
+        <div style={{ padding: "0 0 16px 0" }}>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "1fr auto auto",
+            gap: 8,
+            alignItems: "end",
+            padding: 12,
+            background: "var(--surf2)",
+            border: "1px solid var(--bd)",
+            borderRadius: "var(--r2)",
+          }}>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label>Role Name</label>
+              <input
+                type="text"
+                value={newRoleName}
+                onChange={(e) => setNewRoleName(e.target.value)}
+                placeholder="e.g. Housekeeping"
+                autoFocus
+                onKeyDown={(e) => { if (e.key === "Enter") onAddRole(); if (e.key === "Escape") setAddRoleOpen(false); }}
+              />
             </div>
-            <div className="modal-actions">
-              <button className="btn btn-ghost" onClick={close} disabled={saving}>Cancel</button>
-              <button className="btn btn-primary" onClick={save} disabled={saving}>
-                {saving ? "Saving…" : isNew ? "Add User" : "Save Changes"}
-              </button>
-            </div>
+            <button className="btn btn-primary btn-sm" onClick={onAddRole}>Add Role</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => { setAddRoleOpen(false); setNewRoleName(""); }}>Cancel</button>
           </div>
         </div>
       )}
 
-      {/* Delete confirmation */}
+      <div className="sp-body">
+        {roles.map((role) => {
+          const users = byRole[role] ?? [];
+          return (
+            <div key={role} style={{ marginBottom: 28 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                <div style={{
+                  fontFamily: "var(--font-outfit), Outfit, sans-serif",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: "var(--t1)",
+                  textTransform: "uppercase",
+                  letterSpacing: ".4px",
+                }}>
+                  {role}
+                </div>
+                <span className="badge" style={{ background: "var(--surf3)", color: "var(--t2)" }}>
+                  {users.length} user{users.length !== 1 ? "s" : ""}
+                </span>
+              </div>
+
+              <table className="pricing-tbl">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th style={{ width: 200 }}>Password</th>
+                    <th style={{ width: 180, textAlign: "right" }}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map((u) => {
+                    const isEditing = editingId === u.id;
+                    return (
+                      <tr key={u.id}>
+                        <td style={{ fontWeight: 500 }}>
+                          {isEditing ? (
+                            <input
+                              type="text"
+                              value={editDraft.name}
+                              onChange={(e) => setEditDraft((p) => ({ ...p, name: e.target.value }))}
+                              autoFocus
+                            />
+                          ) : u.name}
+                        </td>
+                        <td>
+                          {isEditing ? (
+                            <input
+                              type="password"
+                              value={editDraft.password}
+                              onChange={(e) => setEditDraft((p) => ({ ...p, password: e.target.value }))}
+                              placeholder="Leave blank to keep"
+                              autoComplete="new-password"
+                            />
+                          ) : (
+                            <span style={{ color: "var(--t3)", letterSpacing: 2, fontSize: 13 }}>••••••••</span>
+                          )}
+                        </td>
+                        <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                          {isEditing ? (
+                            <>
+                              <button
+                                className="btn btn-primary btn-xs"
+                                style={{ marginRight: 6 }}
+                                onClick={() => onSaveEdit(u)}
+                                disabled={saving}
+                              >
+                                {saving ? "Saving…" : "Save"}
+                              </button>
+                              <button className="btn btn-ghost btn-xs" onClick={() => setEditingId(null)}>
+                                Cancel
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                className="btn btn-ghost btn-xs"
+                                style={{ marginRight: 6 }}
+                                onClick={() => {
+                                  setEditingId(u.id);
+                                  setEditDraft({ name: u.name, password: "" });
+                                  setAddForRole(null);
+                                }}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                className="btn btn-ghost btn-xs"
+                                style={{ color: "var(--red)" }}
+                                onClick={() => setDeleteConfirm(u)}
+                              >
+                                Delete
+                              </button>
+                            </>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+
+                  {addForRole === role && (
+                    <tr>
+                      <td>
+                        <input
+                          type="text"
+                          value={addDraft.name}
+                          onChange={(e) => setAddDraft((p) => ({ ...p, name: e.target.value }))}
+                          placeholder="Name"
+                          autoFocus
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="password"
+                          value={addDraft.password}
+                          onChange={(e) => setAddDraft((p) => ({ ...p, password: e.target.value }))}
+                          placeholder="Password"
+                          autoComplete="new-password"
+                        />
+                      </td>
+                      <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                        <button
+                          className="btn btn-primary btn-xs"
+                          style={{ marginRight: 6 }}
+                          onClick={() => onAddUser(role)}
+                          disabled={saving}
+                        >
+                          {saving ? "Adding…" : "Add"}
+                        </button>
+                        <button
+                          className="btn btn-ghost btn-xs"
+                          onClick={() => { setAddForRole(null); setAddDraft({ name: "", password: "" }); }}
+                        >
+                          Cancel
+                        </button>
+                      </td>
+                    </tr>
+                  )}
+
+                  {users.length === 0 && addForRole !== role && (
+                    <tr>
+                      <td colSpan={3} style={{ color: "var(--t3)", fontSize: 12 }}>
+                        No users in this role yet.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+
+              {addForRole !== role && (
+                <button
+                  className="btn btn-ghost btn-xs"
+                  style={{ marginTop: 8 }}
+                  onClick={() => {
+                    setAddForRole(role);
+                    setAddDraft({ name: "", password: "" });
+                    setEditingId(null);
+                  }}
+                >
+                  + Add User
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
       {deleteConfirm && (
         <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setDeleteConfirm(null); }}>
           <div className="modal modal-sm">
             <h3>Delete {deleteConfirm.name}?</h3>
             <p className="modal-desc">
-              Are you sure you want to delete <strong>{deleteConfirm.name}</strong>?
-              They will no longer be able to log in.
+              This user will no longer be able to log in.
             </p>
             <div className="modal-actions">
-              <button className="btn btn-ghost" onClick={() => setDeleteConfirm(null)} disabled={saving}>
-                Cancel
-              </button>
-              <button className="btn btn-danger" onClick={confirmDelete} disabled={saving}>
+              <button className="btn btn-ghost" onClick={() => setDeleteConfirm(null)} disabled={saving}>Cancel</button>
+              <button className="btn btn-danger" onClick={onDelete} disabled={saving}>
                 {saving ? "Deleting…" : "Yes, Delete"}
               </button>
             </div>
