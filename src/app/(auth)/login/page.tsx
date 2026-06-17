@@ -13,13 +13,16 @@ type ApiUser = {
   active: boolean;
 };
 
+const ROLE_ORDER = ["Admin", "Front Office", "Sales"];
+
 export default function LoginPage() {
   const router = useRouter();
   const { login } = useApp();
 
   const [users, setUsers] = useState<ApiUser[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
-  const [selected, setSelected] = useState<number | null>(null);
+  const [selectedRole, setSelectedRole] = useState<string | null>(null);
+  const [selectedUser, setSelectedUser] = useState<ApiUser | null>(null);
   const [password, setPassword] = useState("");
   const [showPwd, setShowPwd] = useState(false);
   const [error, setError] = useState("");
@@ -34,17 +37,45 @@ export default function LoginPage() {
       .finally(() => setLoadingUsers(false));
   }, []);
 
-  const onSelect = (i: number) => {
-    setSelected(i);
+  const byRole = users.reduce<Record<string, ApiUser[]>>((acc, u) => {
+    if (!acc[u.role]) acc[u.role] = [];
+    acc[u.role].push(u);
+    return acc;
+  }, {});
+
+  const availableRoles = ROLE_ORDER.filter((r) => (byRole[r]?.length ?? 0) > 0);
+
+  const onSelectRole = (role: string) => {
+    if (selectedRole === role) {
+      setSelectedRole(null);
+      setSelectedUser(null);
+      setPassword("");
+      setError("");
+      setForgotMsg(false);
+      return;
+    }
+    setSelectedRole(role);
+    setSelectedUser(null);
+    setPassword("");
+    setError("");
+    setForgotMsg(false);
+    const usersInRole = byRole[role] ?? [];
+    if (usersInRole.length === 1) {
+      setSelectedUser(usersInRole[0]);
+    }
+  };
+
+  const onPickUserInRole = (role: string, userId: string) => {
+    setSelectedRole(role);
+    const u = users.find((x) => x.id === userId) ?? null;
+    setSelectedUser(u);
     setPassword("");
     setError("");
     setForgotMsg(false);
   };
 
   const onLogin = async () => {
-    if (selected === null) return;
-    const u = users[selected];
-    if (!u) return;
+    if (!selectedUser) return;
 
     setSubmitting(true);
     setError("");
@@ -53,7 +84,7 @@ export default function LoginPage() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: u.email, password }),
+        body: JSON.stringify({ email: selectedUser.email, password }),
       });
 
       const data = await res.json();
@@ -86,27 +117,67 @@ export default function LoginPage() {
           <div style={{ textAlign: "center", padding: "24px 0", fontSize: 13, color: "var(--t3)" }}>
             Loading users...
           </div>
-        ) : users.length === 0 ? (
+        ) : availableRoles.length === 0 ? (
           <div style={{ textAlign: "center", padding: "24px 0", fontSize: 13, color: "var(--t3)" }}>
             No users found. Contact your administrator.
           </div>
         ) : (
           <div className="role-grid">
-            {users.map((u, i) => (
-              <button
-                key={u.id}
-                type="button"
-                className={`role-btn${selected === i ? " selected" : ""}`}
-                onClick={() => onSelect(i)}
-              >
-                <div className="role-btn-name">{u.role}</div>
-                <div className="role-btn-desc">{u.name}</div>
-              </button>
-            ))}
+            {availableRoles.map((role) => {
+              const usersInRole = byRole[role] ?? [];
+              const isSelected = selectedRole === role;
+              const hasMultiple = usersInRole.length > 1;
+
+              if (hasMultiple) {
+                const picked = selectedRole === role && selectedUser ? selectedUser : null;
+                return (
+                  <div
+                    key={role}
+                    className={`role-btn${picked ? " selected" : ""}`}
+                    style={{ cursor: "default" }}
+                  >
+                    <div className="role-btn-name">{role}</div>
+                    <select
+                      value={picked?.id ?? ""}
+                      onChange={(e) => onPickUserInRole(role, e.target.value)}
+                      style={{
+                        marginTop: 6,
+                        width: "100%",
+                        fontSize: 12,
+                        padding: "4px 6px",
+                        borderRadius: 6,
+                        border: picked ? "1px solid rgba(255,255,255,0.25)" : "1px solid var(--bd)",
+                        background: picked ? "rgba(255,255,255,0.12)" : "var(--surf)",
+                        color: picked ? "#fff" : "var(--t1)",
+                        cursor: "pointer",
+                        outline: "none",
+                      }}
+                    >
+                      <option value="" disabled>Select user...</option>
+                      {usersInRole.map((u) => (
+                        <option key={u.id} value={u.id} style={{ color: "var(--t1)", background: "var(--surf)" }}>{u.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              }
+
+              return (
+                <button
+                  key={role}
+                  type="button"
+                  className={`role-btn${isSelected ? " selected" : ""}`}
+                  onClick={() => onSelectRole(role)}
+                >
+                  <div className="role-btn-name">{role}</div>
+                  <div className="role-btn-desc">{usersInRole[0]?.name}</div>
+                </button>
+              );
+            })}
           </div>
         )}
 
-        {selected !== null && (
+        {selectedUser && (
           <div style={{ marginBottom: 16 }}>
             <div className="login-section-label">Enter Password</div>
             <div style={{ position: "relative" }}>
@@ -172,10 +243,10 @@ export default function LoginPage() {
         <button
           className="btn-login"
           onClick={onLogin}
-          disabled={selected === null || !password || submitting}
+          disabled={!selectedUser || !password || submitting}
           style={{
-            opacity: selected === null || !password || submitting ? 0.5 : 1,
-            cursor: selected === null || !password || submitting ? "not-allowed" : "pointer",
+            opacity: !selectedUser || !password || submitting ? 0.5 : 1,
+            cursor: !selectedUser || !password || submitting ? "not-allowed" : "pointer",
           }}
         >
           {submitting ? "Signing in..." : "Enter"}
