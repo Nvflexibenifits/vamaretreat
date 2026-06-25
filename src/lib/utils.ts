@@ -7,6 +7,7 @@ import type {
   PricingRow,
   Role,
   RoomInventoryItem,
+  RoomMaster,
 } from "@/types";
 import { ROOM_INVENTORY, ROOMS, SEED_GST_SETTINGS } from "@/lib/data";
 
@@ -147,9 +148,10 @@ export function calcPricingRow(
   nights: number,
   numRooms: number,
   discountPct: number,
-  gstSettings: GstSettings = SEED_GST_SETTINGS
+  gstSettings: GstSettings = SEED_GST_SETTINGS,
+  roomMaster: RoomMaster[] = ROOMS
 ): PricingRow {
-  const room = ROOMS.find((r) => r.id === roomId);
+  const room = roomMaster.find((r) => r.id === roomId);
   const gstRate = tariff > gstSettings.threshold ? gstSettings.aboveRate : gstSettings.belowRate;
   const roomCharges = tariff * nights * numRooms;
   const discountAmt = roomCharges * (discountPct / 100);
@@ -218,7 +220,8 @@ export function tryAssignRooms(
   bookings: Booking[],
   inventory: RoomInventoryItem[] = ROOM_INVENTORY,
   ignoreBookingId?: string,
-  bulkBlocks: BulkRoomBlock[] = []
+  bulkBlocks: BulkRoomBlock[] = [],
+  roomMaster: RoomMaster[] = ROOMS
 ): AssignmentResult {
   const need = new Map<string, number>();
   pricingRows
@@ -232,7 +235,7 @@ export function tryAssignRooms(
     if (count <= 0) continue;
     const free = findAvailableRoomIds(cat, checkin, checkout, bookings, inventory, ignoreBookingId, bulkBlocks);
     if (free.length < count) {
-      const room = ROOMS.find((r) => r.id === cat);
+      const room = roomMaster.find((r) => r.id === cat);
       return { ok: false, missingCategoryName: room?.name ?? cat };
     }
     assigned.push(...free.slice(0, count));

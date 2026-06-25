@@ -953,6 +953,9 @@ function RoomInventorySection() {
 
   const onRemoveCategory = (catId: string) => {
     updateRooms(rooms.filter((r) => r.id !== catId));
+    roomInventory
+      .filter((r) => r.cat === catId)
+      .forEach((r) => removeRoomInventoryItem(r.id));
     showNotif("Category removed", "success");
     setRemoveCatConfirm(null);
   };
@@ -965,6 +968,10 @@ function RoomInventorySection() {
       showNotif(`${name} already exists`, "error"); return;
     }
     updateRooms(rooms.map((r) => r.id === renamingCat.id ? { ...r, name } : r));
+    // Sync the type label on every inventory room in this category
+    roomInventory
+      .filter((r) => r.cat === renamingCat.id)
+      .forEach((r) => updateRoomInventoryItem(r.id, { type: name }));
     showNotif("Category renamed", "success");
     setRenamingCat(null);
   };

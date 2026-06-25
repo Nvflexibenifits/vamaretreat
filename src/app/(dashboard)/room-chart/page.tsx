@@ -8,6 +8,7 @@ import type {
   Booking,
   BulkRoomBlock,
   BulkRoomBlockRow,
+  RoomMaster,
   RoomNightUpgrade,
   Venue,
   VenueBlock,
@@ -1053,7 +1054,7 @@ export default function RoomChartPage() {
         <VenueHoverCard block={hover.block} venue={hover.venue} rect={hover.rect} />
       )}
       {hover?.kind === "bulk" && (
-        <BulkHoverCard block={hover.block} rect={hover.rect} />
+        <BulkHoverCard block={hover.block} rect={hover.rect} rooms={rooms} />
       )}
 
       {/* Unified block modal */}
@@ -1257,7 +1258,7 @@ export default function RoomChartPage() {
             <div style={{ marginTop: 10 }}>
               {bulkDetail.rows.map((row) => (
                 <div key={row.catId} style={{ fontSize: 12, color: "var(--t3)", marginTop: 4 }}>
-                  {row.catName}: {row.roomIds.join(", ")} ({row.roomIds.length} room{row.roomIds.length !== 1 ? "s" : ""})
+                  {rooms.find((r) => r.id === row.catId)?.name ?? row.catName}: {row.roomIds.join(", ")} ({row.roomIds.length} room{row.roomIds.length !== 1 ? "s" : ""})
                 </div>
               ))}
             </div>
@@ -1620,7 +1621,7 @@ function VenueHoverCard({
   );
 }
 
-function BulkHoverCard({ block, rect }: { block: BulkRoomBlock; rect: DOMRect }) {
+function BulkHoverCard({ block, rect, rooms }: { block: BulkRoomBlock; rect: DOMRect; rooms: RoomMaster[] }) {
   const cardW = 260;
   const { top, left, placeAbove } = positionForCard(rect, cardW);
   const nights = nightsBetween(block.checkin, block.checkout);
@@ -1647,7 +1648,7 @@ function BulkHoverCard({ block, rect }: { block: BulkRoomBlock; rect: DOMRect })
         {fmtIN(block.checkin)} to {fmtIN(block.checkout)} · {nights} {nights === 1 ? "night" : "nights"}
       </div>
       <div style={{ fontSize: 11, color: "var(--t3)", marginBottom: 6 }}>
-        {totalRooms} room{totalRooms !== 1 ? "s" : ""} · {block.rows.map((r) => `${r.roomIds.length} ${r.catName}`).join(", ")}
+        {totalRooms} room{totalRooms !== 1 ? "s" : ""} · {block.rows.map((r) => `${r.roomIds.length} ${rooms.find((rm) => rm.id === r.catId)?.name ?? r.catName}`).join(", ")}
       </div>
       <div style={{ marginTop: 8, fontSize: 10, color: "var(--t3)", textAlign: "right" }}>Click to view / edit / delete</div>
     </div>

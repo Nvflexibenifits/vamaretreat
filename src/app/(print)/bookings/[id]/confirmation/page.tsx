@@ -3,7 +3,8 @@
 import { useParams } from "next/navigation";
 import { useApp } from "@/lib/store";
 import { fmt } from "@/lib/utils";
-import type { PricingRow, PricingRowType } from "@/types";
+import type { PricingRow } from "@/types";
+import { fmtIN } from "@/lib/utils";
 
 function formatLongPretty(dateStr: string): string {
   if (!dateStr) return "—";
@@ -14,14 +15,6 @@ function formatLongPretty(dateStr: string): string {
     month: "long",
     year: "numeric",
   });
-}
-
-function dayTypeLabel(rt: PricingRowType): string {
-  if (rt === "sun-thu") return "Sun–Thu";
-  if (rt === "fri") return "Friday";
-  if (rt === "sat") return "Saturday";
-  if (rt === "fri-sat") return "Fri–Sat";
-  return "Custom";
 }
 
 const TH: React.CSSProperties = {
@@ -63,15 +56,6 @@ const REX_TAG: React.CSSProperties = {
   borderRadius: 3,
   fontWeight: 700,
   fontSize: 11,
-};
-const DAY_BADGE: React.CSSProperties = {
-  display: "inline-block",
-  padding: "2px 7px",
-  borderRadius: 4,
-  fontSize: 10,
-  fontWeight: 700,
-  background: "#fde8c8",
-  color: "#7c4a00",
 };
 
 export default function ConfirmationPage() {
@@ -305,18 +289,18 @@ export default function ConfirmationPage() {
         <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 4 }}>
           <thead>
             <tr>
-              <th style={TH}>Day Type</th>
               <th style={TH}>Room Category</th>
-              <th style={{ ...TH, textAlign: "right" }}>Tariff</th>
-              <th style={{ ...TH, textAlign: "right" }}>Nights</th>
-              <th style={{ ...TH, textAlign: "right" }}>Rooms</th>
-              <th style={{ ...TH, textAlign: "right" }}>Charges</th>
+              <th style={{ ...TH, textAlign: "right" }}>Check-in Date</th>
+              <th style={{ ...TH, textAlign: "right" }}>Check-out Date</th>
+              <th style={{ ...TH, textAlign: "right" }}>No. of Nights</th>
+              <th style={{ ...TH, textAlign: "right" }}>Room Rate</th>
               <th style={{ ...TH, textAlign: "right" }}>Disc %</th>
-              <th style={{ ...TH, textAlign: "right" }}>Disc Amt</th>
-              <th style={{ ...TH, textAlign: "right" }}>Net</th>
+              <th style={{ ...TH, textAlign: "right" }}>Net Room Rate</th>
+              <th style={{ ...TH, textAlign: "right" }}>No. of Rooms</th>
+              <th style={{ ...TH, textAlign: "right" }}>Room Charges</th>
               <th style={{ ...TH, textAlign: "right" }}>GST %</th>
               <th style={{ ...TH, textAlign: "right" }}>GST Amt</th>
-              <th style={{ ...TH, textAlign: "right" }}>Total</th>
+              <th style={{ ...TH, textAlign: "right" }}>Total Amt</th>
             </tr>
           </thead>
           <tbody>
@@ -327,33 +311,31 @@ export default function ConfirmationPage() {
                 </td>
               </tr>
             ) : (
-              b.pricingRows.map((r: PricingRow, i: number) => (
-                <tr key={i}>
-                  <td style={TD}>
-                    <span style={DAY_BADGE}>{dayTypeLabel(r.rowType)}</span>
-                  </td>
-                  <td style={TD}>{r.roomName}</td>
-                  <td style={TD_NUM}>{fmt(r.tariff)}</td>
-                  <td style={TD_NUM}>{r.nights}</td>
-                  <td style={TD_NUM}>{r.numRooms}</td>
-                  <td style={TD_NUM}>{fmt(r.roomCharges)}</td>
-                  <td style={TD_NUM}>{r.discountPct > 0 ? `${r.discountPct}%` : "—"}</td>
-                  <td style={TD_NUM}>{r.discountAmt > 0 ? `− ${fmt(r.discountAmt)}` : "—"}</td>
-                  <td style={TD_NUM}>{fmt(r.netCharges)}</td>
-                  <td style={TD_NUM}>{r.gstRate}%</td>
-                  <td style={TD_NUM}>{fmt(r.gstAmt)}</td>
-                  <td style={TD_NUM}>{fmt(r.totalAmt)}</td>
-                </tr>
-              ))
+              b.pricingRows.map((r: PricingRow, i: number) => {
+                const netRatePerNight = r.nights > 0 && r.numRooms > 0
+                  ? Math.round(r.netCharges / r.nights / r.numRooms)
+                  : r.tariff;
+                return (
+                  <tr key={i}>
+                    <td style={TD}>{r.roomName}</td>
+                    <td style={TD_NUM}>{fmtIN(b.checkin)}</td>
+                    <td style={TD_NUM}>{fmtIN(b.checkout)}</td>
+                    <td style={TD_NUM}>{r.nights}</td>
+                    <td style={TD_NUM}>{fmt(r.tariff)}</td>
+                    <td style={TD_NUM}>{r.discountPct > 0 ? `${r.discountPct}%` : "—"}</td>
+                    <td style={TD_NUM}>{fmt(netRatePerNight)}</td>
+                    <td style={TD_NUM}>{r.numRooms}</td>
+                    <td style={TD_NUM}>{fmt(r.netCharges)}</td>
+                    <td style={TD_NUM}>{r.gstRate}%</td>
+                    <td style={TD_NUM}>{fmt(r.gstAmt)}</td>
+                    <td style={TD_NUM}>{fmt(r.totalAmt)}</td>
+                  </tr>
+                );
+              })
             )}
             <tr>
-              <td style={TD_HEAD} colSpan={2}>Total Room Charges (A)</td>
-              <td style={TD_HEAD}></td>
-              <td style={TD_HEAD}></td>
-              <td style={TD_HEAD_NUM}>{totalRooms}</td>
-              <td style={TD_HEAD_NUM}>{fmt(totalRoomBaseCharges)}</td>
-              <td style={TD_HEAD}></td>
-              <td style={TD_HEAD_NUM}>{totalDiscount > 0 ? `− ${fmt(totalDiscount)}` : "—"}</td>
+              <td style={TD_HEAD}>Total Room Charges (A)</td>
+              <td style={TD_HEAD} colSpan={7}></td>
               <td style={TD_HEAD_NUM}>{fmt(totalNet)}</td>
               <td style={TD_HEAD}></td>
               <td style={TD_HEAD_NUM}>{fmt(totalRoomGst)}</td>
@@ -367,12 +349,15 @@ export default function ConfirmationPage() {
           <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 4 }}>
             <thead>
               <tr>
-                <th style={TH} colSpan={2}>Meal Charges</th>
+                <th style={TH}>Meal / Charge Type</th>
                 <th style={{ ...TH, textAlign: "right" }}>Meal Tariff</th>
                 <th style={{ ...TH, textAlign: "right" }}>No. of Nights</th>
                 <th style={{ ...TH, textAlign: "right" }}>No. of Pax</th>
                 <th style={{ ...TH, textAlign: "right" }}>Meal Chgs</th>
-                <th style={TH} colSpan={3}></th>
+                <th style={TH}></th>
+                <th style={TH}></th>
+                <th style={TH}></th>
+                <th style={TH}></th>
                 <th style={{ ...TH, textAlign: "right" }}>GST Rate</th>
                 <th style={{ ...TH, textAlign: "right" }}>GST Amt</th>
                 <th style={{ ...TH, textAlign: "right" }}>Total Amt</th>
@@ -381,12 +366,12 @@ export default function ConfirmationPage() {
             <tbody>
               {b.mealOn && (
                 <tr>
-                  <td style={TD} colSpan={2}>Meal &amp; Activity Package</td>
-                  <td style={TD_NUM}>{b.adults && b.nights ? fmt(mealCharges / b.nights / b.adults) : "—"}</td>
+                  <td style={TD}>Meal &amp; Activity Package</td>
+                  <td style={TD_NUM}>{b.adults && b.nights ? fmt(Math.round(mealCharges / b.nights / b.adults)) : "—"}</td>
                   <td style={TD_NUM}>{b.nights}</td>
                   <td style={TD_NUM}>{b.adults}</td>
                   <td style={TD_NUM}>{fmt(mealCharges)}</td>
-                  <td style={TD} colSpan={3}></td>
+                  <td style={TD}></td><td style={TD}></td><td style={TD}></td><td style={TD}></td>
                   <td style={TD_NUM}>18%</td>
                   <td style={TD_NUM}>{fmt(mealGst)}</td>
                   <td style={TD_NUM}>{fmt(totalMealAmt)}</td>
@@ -394,12 +379,12 @@ export default function ConfirmationPage() {
               )}
               {(b.pets || 0) > 0 && (
                 <tr>
-                  <td style={TD} colSpan={2}>Pet Package</td>
-                  <td style={TD_NUM}>{b.pets && b.nights ? fmt(petCharges / b.nights / b.pets) : "—"}</td>
+                  <td style={TD}>Pet Package</td>
+                  <td style={TD_NUM}>{b.pets && b.nights ? fmt(Math.round(petCharges / b.nights / b.pets)) : "—"}</td>
                   <td style={TD_NUM}>{b.nights}</td>
                   <td style={TD_NUM}>{b.pets}</td>
                   <td style={TD_NUM}>{fmt(petCharges)}</td>
-                  <td style={TD} colSpan={3}></td>
+                  <td style={TD}></td><td style={TD}></td><td style={TD}></td><td style={TD}></td>
                   <td style={TD_NUM}>18%</td>
                   <td style={TD_NUM}>{fmt(petGstAmt)}</td>
                   <td style={TD_NUM}>{fmt(totalPetAmt)}</td>
@@ -407,24 +392,21 @@ export default function ConfirmationPage() {
               )}
               {(b.driverMealOn ?? false) && (b.driverCount ?? 0) > 0 && (
                 <tr>
-                  <td style={TD} colSpan={2}>Driver / Attendant Meal</td>
-                  <td style={TD_NUM}>{b.driverCount && b.nights ? fmt(driverMealCharges / b.nights / b.driverCount) : "—"}</td>
+                  <td style={TD}>Driver / Attendant Meal</td>
+                  <td style={TD_NUM}>{b.driverCount && b.nights ? fmt(Math.round(driverMealCharges / b.nights / b.driverCount)) : "—"}</td>
                   <td style={TD_NUM}>{b.nights}</td>
                   <td style={TD_NUM}>{b.driverCount}</td>
                   <td style={TD_NUM}>{fmt(driverMealCharges)}</td>
-                  <td style={TD} colSpan={3}></td>
+                  <td style={TD}></td><td style={TD}></td><td style={TD}></td><td style={TD}></td>
                   <td style={TD_NUM}>18%</td>
                   <td style={TD_NUM}>{fmt(driverMealGstAmt)}</td>
                   <td style={TD_NUM}>{fmt(totalDriverMealAmt)}</td>
                 </tr>
               )}
               <tr>
-                <td style={TD_HEAD} colSpan={2}>Total Meal Charges (B)</td>
-                <td style={TD_HEAD}></td>
-                <td style={TD_HEAD}></td>
-                <td style={TD_HEAD}></td>
+                <td style={TD_HEAD} colSpan={4}>Total Meal Charges (B)</td>
                 <td style={TD_HEAD_NUM}>{fmt(totalMealPetCharges)}</td>
-                <td style={TD_HEAD} colSpan={3}></td>
+                <td style={TD_HEAD}></td><td style={TD_HEAD}></td><td style={TD_HEAD}></td><td style={TD_HEAD}></td>
                 <td style={TD_HEAD}></td>
                 <td style={TD_HEAD_NUM}>{fmt(totalMealPetGst)}</td>
                 <td style={TD_HEAD_NUM}>{fmt(totalMealPet)}</td>

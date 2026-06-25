@@ -41,7 +41,7 @@ export function Topbar() {
       <div className="topbar-title">{getTitle(pathname)}</div>
       <div className="topbar-right">
         <div className="topbar-date">{dateStr}</div>
-        <button className="btn btn-ghost btn-sm" onClick={onLogout}>
+        <button className="btn btn-accent btn-sm" onClick={onLogout}>
           Logout
         </button>
       </div>

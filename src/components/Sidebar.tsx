@@ -129,12 +129,9 @@ export function Sidebar() {
         )}
       </nav>
       <div className="sb-ft">
-        <div style={{ fontSize: 11, color: "var(--t3)", marginBottom: 8, paddingLeft: 12 }}>
+        <div style={{ fontSize: 11, color: "var(--t3)", paddingLeft: 12 }}>
           {currentUser} · {currentRole}
         </div>
-        <button type="button" className="sb-logout-btn" onClick={onLogout}>
-          Logout
-        </button>
       </div>
     </div>
   );

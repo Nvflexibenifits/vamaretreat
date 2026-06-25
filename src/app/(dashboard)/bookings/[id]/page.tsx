@@ -369,123 +369,223 @@ export default function BookingDetailPage() {
           </div>
         )}
 
-        {/* Two-column: Booking Data | Price Breakdown */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16, alignItems: "start" }}>
-          <div className="detail-panel">
-            <div className="detail-panel-hd"><h3>Booking Data</h3></div>
-            <div className="detail-panel-body">
-              <div className="detail-row"><span className="detail-key">Guest Name</span><span className="detail-val">{b.guest}</span></div>
-              <div className="detail-row"><span className="detail-key">Mobile</span><span className="detail-val">{b.mobile}</span></div>
-              {b.email && (
-                <div className="detail-row"><span className="detail-key">Email</span><span className="detail-val">{b.email}</span></div>
-              )}
-              <div className="detail-row"><span className="detail-key">Source</span><span className="detail-val">{b.source || "—"}</span></div>
-              <div className="detail-row"><span className="detail-key">Check-in</span><span className="detail-val">{fmtIN(b.checkin)}</span></div>
-              <div className="detail-row"><span className="detail-key">Check-out</span><span className="detail-val">{fmtIN(b.checkout)}</span></div>
-              <div className="detail-row"><span className="detail-key">Nights</span><span className="detail-val">{b.nights}</span></div>
-              <div className="detail-row">
-                <span className="detail-key">Guests</span>
-                <span className="detail-val">
-                  {b.adults} Adults
-                  {totalKids > 0 ? `, ${totalKids} Kids` : ""}
-                  {b.seniors > 0 ? `, ${b.seniors} Seniors` : ""}
-                  {b.pets > 0 ? `, ${b.pets} Pets` : ""}
-                </span>
-              </div>
-              <div className="detail-row"><span className="detail-key">Meal Package</span><span className="detail-val">{b.mealOn ? "Included" : "Not included"}</span></div>
-              <div className="detail-row">
-                <span className="detail-key">Special Request</span>
-                <span className="detail-val" style={{ color: "var(--t2)" }}>{b.notes || "—"}</span>
-              </div>
+        {/* ── Booking Confirmation Layout ── */}
+        <div className="detail-panel" style={{ marginTop: 16 }}>
+
+          {/* Guest & Stay Info — two-column grid matching Excel layout */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
+            <div>
+              <BkgRow label="Guest Name" value={b.guest} />
+              <BkgRow label="Mobile No." value={b.mobile} />
+              {b.email && <BkgRow label="Email" value={b.email} />}
+              <BkgRow label="Source" value={b.source || "—"} />
+              <BkgRow label="Check-in Date" value={fmtIN(b.checkin)} />
+              <BkgRow label="Check-out Date" value={fmtIN(b.checkout)} />
+              <BkgRow label="No. of Nights" value={String(b.nights)} last />
+            </div>
+            <div style={{ borderLeft: "1px solid var(--bd)" }}>
+              <BkgRow label="Sr. Citizens" value={String(b.seniors)} />
+              <BkgRow label="Adults" value={String(b.adults)} />
+              <BkgRow label="Kids > 10 Yrs" value={String(b.kidsAbove10)} />
+              <BkgRow label="Kids 6-10 Yrs" value={String(b.kids6to10)} />
+              <BkgRow label="Kids 2-6 Yrs" value={String(b.kids2to6)} />
+              <BkgRow label="Infants < 2 Yrs" value={String(b.infantsBelow2)} />
+              <BkgRow label="Pets" value={String(b.pets)} last />
             </div>
           </div>
 
-          <div className="detail-panel">
-            <div className="detail-panel-hd"><h3>Price Breakdown</h3></div>
-            <div className="detail-panel-body">
-              <div className="detail-row"><span className="detail-key">Room Charges</span><span className="detail-val">{fmt(totalRoomBaseCharges)}</span></div>
-              {totalDiscount > 0 && (
-                <div className="detail-row">
-                  <span className="detail-key">Discount</span>
-                  <span className="detail-val" style={{ color: "var(--amb)" }}>− {fmt(totalDiscount)}</span>
-                </div>
-              )}
-              <div className="detail-row"><span className="detail-key">Net Room Charges</span><span className="detail-val">{fmt(totalNet)}</span></div>
-              {b.mealTotal > 0 && (
-                <div className="detail-row"><span className="detail-key">Meal Package</span><span className="detail-val">{fmt(b.mealTotal)}</span></div>
-              )}
-              {b.petTotal > 0 && (
-                <div className="detail-row"><span className="detail-key">Pet Package</span><span className="detail-val">{fmt(b.petTotal)}</span></div>
-              )}
-              {(b.driverMealTotal ?? 0) > 0 && (
-                <div className="detail-row"><span className="detail-key">Driver / Attendant Meal</span><span className="detail-val">{fmt(b.driverMealTotal!)}</span></div>
-              )}
-              <div className="detail-row"><span className="detail-key">GST</span><span className="detail-val">{fmt(totalGstAll)}</span></div>
-              {(() => {
-                const upgradeTotal = (b.nightOverrides || [])
-                  .filter((o) => o.upgrade && o.upgrade.kind === "paid")
-                  .reduce((s, o) => s + (o.upgrade?.extraAmount || 0), 0);
-                if (upgradeTotal <= 0) return null;
-                return (
-                  <div className="detail-row">
-                    <span className="detail-key">Room Upgrade Charges</span>
-                    <span className="detail-val" style={{ fontWeight: 600, color: "var(--amb)" }}>{fmt(upgradeTotal)}</span>
-                  </div>
-                );
-              })()}
-              {(() => {
-                const nonUpgradeExtras = b.extras.filter((e) => !e.name.startsWith("Room Upgrade"));
-                if (nonUpgradeExtras.length === 0) return null;
-                return (
-                  <div className="detail-row">
-                    <span className="detail-key">Extras</span>
-                    <span className="detail-val">{fmt(nonUpgradeExtras.reduce((s, e) => s + e.amount, 0))}</span>
-                  </div>
-                );
-              })()}
-              <div className="detail-row" style={{ background: "var(--surf2)" }}>
-                <span className="detail-key" style={{ fontWeight: 700, color: "var(--t1)" }}>Total Payable</span>
-                <span className="detail-val" style={{ fontFamily: "var(--font-outfit), Outfit, sans-serif", fontSize: 16, fontWeight: 800 }}>{fmt(b.grandTotal)}</span>
+          {/* Accommodation Charges — exact Excel column order */}
+          <SectionHeader>Accommodation Charges</SectionHeader>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1000 }}>
+              <thead>
+                <tr style={{ background: "var(--surf2)", borderBottom: "2px solid var(--bd)" }}>
+                  {[
+                    { h: "Room Category",   left: true  },
+                    { h: "Check-in Date",   left: false },
+                    { h: "Check-out Date",  left: false },
+                    { h: "No. of Nights",   left: false },
+                    { h: "Room Rate",       left: false },
+                    { h: "Disc %",          left: false },
+                    { h: "Net Room Rate",   left: false },
+                    { h: "No. of Rooms",    left: false },
+                    { h: "Room Charges",    left: false },
+                    { h: "GST %",           left: false },
+                    { h: "GST Amt",         left: false },
+                    { h: "Total Amt",       left: false },
+                  ].map(({ h, left }) => (
+                    <th key={h} style={{ padding: "8px 10px", fontSize: 11, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".3px", textAlign: left ? "left" : "right", whiteSpace: "nowrap" }}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {b.pricingRows.length === 0 ? (
+                  <tr><td colSpan={12} style={{ padding: "14px 10px", color: "var(--t3)", fontSize: 12, textAlign: "center" }}>No pricing rows</td></tr>
+                ) : (
+                  b.pricingRows.map((r, i) => {
+                    const netRatePerNight = r.nights > 0 && r.numRooms > 0
+                      ? Math.round(r.netCharges / r.nights / r.numRooms)
+                      : r.tariff;
+                    return (
+                      <tr key={i} style={{ borderBottom: "1px solid var(--bd)" }}>
+                        <td style={{ padding: "8px 10px", fontSize: 12, color: "var(--t1)", fontWeight: 500 }}>{r.roomName}</td>
+                        <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right", whiteSpace: "nowrap" }}>{fmtIN(b.checkin)}</td>
+                        <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right", whiteSpace: "nowrap" }}>{fmtIN(b.checkout)}</td>
+                        <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right" }}>{r.nights}</td>
+                        <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right" }}>{fmt(r.tariff)}</td>
+                        <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right" }}>{r.discountPct > 0 ? `${r.discountPct}%` : "—"}</td>
+                        <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right" }}>{fmt(netRatePerNight)}</td>
+                        <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right" }}>{r.numRooms}</td>
+                        <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right" }}>{fmt(r.netCharges)}</td>
+                        <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right" }}>{r.gstRate}%</td>
+                        <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right" }}>{fmt(r.gstAmt)}</td>
+                        <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right", fontWeight: 700, color: "var(--t1)" }}>{fmt(r.totalAmt)}</td>
+                      </tr>
+                    );
+                  })
+                )}
+                <tr style={{ background: "var(--surf2)", fontWeight: 700, borderTop: "2px solid var(--bd)" }}>
+                  <td style={{ padding: "9px 10px", fontSize: 12, color: "var(--t1)" }}>Total Room Charges (A)</td>
+                  <td colSpan={7} style={{ padding: "9px 10px" }}></td>
+                  <td style={{ padding: "9px 10px", fontSize: 12, textAlign: "right" }}>{fmt(totalNet)}</td>
+                  <td style={{ padding: "9px 10px" }}></td>
+                  <td style={{ padding: "9px 10px", fontSize: 12, textAlign: "right" }}>{fmt(totalRoomGst)}</td>
+                  <td style={{ padding: "9px 10px", fontSize: 12, textAlign: "right", color: "var(--t1)" }}>{fmt(b.pricingRows.reduce((s, r) => s + r.totalAmt, 0))}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          {/* Meal / Pet Charges — same 12-col structure as Excel row 19 */}
+          {(b.mealOn || (b.pets||0)>0 || (b.driverMealOn??false)) && (
+            <>
+              <SectionHeader>Meal &amp; Other Charges</SectionHeader>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1000 }}>
+                  <thead>
+                    <tr style={{ background: "var(--surf2)", borderBottom: "2px solid var(--bd)" }}>
+                      {[
+                        { h: "Meal / Charge Type", left: true  },
+                        { h: "Meal Tariff",         left: false },
+                        { h: "No. of Nights",       left: false },
+                        { h: "No. of Pax",          left: false },
+                        { h: "Meal Chgs",           left: false },
+                        { h: "",                    left: false },
+                        { h: "",                    left: false },
+                        { h: "",                    left: false },
+                        { h: "",                    left: false },
+                        { h: "GST Rate",            left: false },
+                        { h: "GST Amt",             left: false },
+                        { h: "Total Amt",           left: false },
+                      ].map(({ h }, i) => (
+                        <th key={i} style={{ padding: "8px 10px", fontSize: 11, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".3px", textAlign: i === 0 ? "left" : "right", whiteSpace: "nowrap" }}>
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {b.mealOn && (() => {
+                      const chg = b.mealTotal; const gst = b.mealGst;
+                      return (
+                        <tr style={{ borderBottom: "1px solid var(--bd)" }}>
+                          <td style={{ padding:"8px 10px",fontSize:12,color:"var(--t1)",fontWeight:500 }}>Meal &amp; Activity Package</td>
+                          <td style={{ padding:"8px 10px",fontSize:12,textAlign:"right" }}>{b.adults&&b.nights?fmt(Math.round(chg/b.nights/b.adults)):"—"}</td>
+                          <td style={{ padding:"8px 10px",fontSize:12,textAlign:"right" }}>{b.nights}</td>
+                          <td style={{ padding:"8px 10px",fontSize:12,textAlign:"right" }}>{b.adults}</td>
+                          <td style={{ padding:"8px 10px",fontSize:12,textAlign:"right" }}>{fmt(chg)}</td>
+                          <td></td><td></td><td></td><td></td>
+                          <td style={{ padding:"8px 10px",fontSize:12,textAlign:"right" }}>18%</td>
+                          <td style={{ padding:"8px 10px",fontSize:12,textAlign:"right" }}>{fmt(gst)}</td>
+                          <td style={{ padding:"8px 10px",fontSize:12,textAlign:"right",fontWeight:700 }}>{fmt(chg+gst)}</td>
+                        </tr>
+                      );
+                    })()}
+                    {(b.pets||0)>0 && (() => {
+                      const chg = b.petTotal||0; const gst = b.petGst||0;
+                      return (
+                        <tr style={{ borderBottom: "1px solid var(--bd)" }}>
+                          <td style={{ padding:"8px 10px",fontSize:12,color:"var(--t1)",fontWeight:500 }}>Pet Package</td>
+                          <td style={{ padding:"8px 10px",fontSize:12,textAlign:"right" }}>{b.pets&&b.nights?fmt(Math.round(chg/b.nights/b.pets)):"—"}</td>
+                          <td style={{ padding:"8px 10px",fontSize:12,textAlign:"right" }}>{b.nights}</td>
+                          <td style={{ padding:"8px 10px",fontSize:12,textAlign:"right" }}>{b.pets}</td>
+                          <td style={{ padding:"8px 10px",fontSize:12,textAlign:"right" }}>{fmt(chg)}</td>
+                          <td></td><td></td><td></td><td></td>
+                          <td style={{ padding:"8px 10px",fontSize:12,textAlign:"right" }}>18%</td>
+                          <td style={{ padding:"8px 10px",fontSize:12,textAlign:"right" }}>{fmt(gst)}</td>
+                          <td style={{ padding:"8px 10px",fontSize:12,textAlign:"right",fontWeight:700 }}>{fmt(chg+gst)}</td>
+                        </tr>
+                      );
+                    })()}
+                    {(b.driverMealOn??false)&&(b.driverCount??0)>0 && (() => {
+                      const chg = b.driverMealTotal??0; const gst = b.driverMealGst??0;
+                      return (
+                        <tr style={{ borderBottom: "1px solid var(--bd)" }}>
+                          <td style={{ padding:"8px 10px",fontSize:12,color:"var(--t1)",fontWeight:500 }}>Driver / Attendant Meal</td>
+                          <td style={{ padding:"8px 10px",fontSize:12,textAlign:"right" }}>{b.driverCount&&b.nights?fmt(Math.round(chg/b.nights/b.driverCount)):"—"}</td>
+                          <td style={{ padding:"8px 10px",fontSize:12,textAlign:"right" }}>{b.nights}</td>
+                          <td style={{ padding:"8px 10px",fontSize:12,textAlign:"right" }}>{b.driverCount}</td>
+                          <td style={{ padding:"8px 10px",fontSize:12,textAlign:"right" }}>{fmt(chg)}</td>
+                          <td></td><td></td><td></td><td></td>
+                          <td style={{ padding:"8px 10px",fontSize:12,textAlign:"right" }}>18%</td>
+                          <td style={{ padding:"8px 10px",fontSize:12,textAlign:"right" }}>{fmt(gst)}</td>
+                          <td style={{ padding:"8px 10px",fontSize:12,textAlign:"right",fontWeight:700 }}>{fmt(chg+gst)}</td>
+                        </tr>
+                      );
+                    })()}
+                    <tr style={{ background: "var(--surf2)", fontWeight: 700, borderTop: "2px solid var(--bd)" }}>
+                      <td colSpan={4} style={{ padding:"9px 10px",fontSize:12,color:"var(--t1)" }}>Total Meal Charges (B)</td>
+                      <td style={{ padding:"9px 10px",fontSize:12,textAlign:"right" }}>{fmt((b.mealOn?b.mealTotal:0)+(b.petTotal||0)+(b.driverMealTotal??0))}</td>
+                      <td></td><td></td><td></td><td></td>
+                      <td></td>
+                      <td style={{ padding:"9px 10px",fontSize:12,textAlign:"right" }}>{fmt((b.mealOn?b.mealGst:0)+(b.petGst||0)+(b.driverMealGst??0))}</td>
+                      <td style={{ padding:"9px 10px",fontSize:12,textAlign:"right",color:"var(--t1)" }}>{fmt((b.mealOn?b.mealTotal+b.mealGst:0)+((b.petTotal||0)+(b.petGst||0))+((b.driverMealTotal??0)+(b.driverMealGst??0)))}</td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
-              <div className="detail-row">
-                <span className="detail-key">Amount Received</span>
-                <span className="detail-val" style={{ color: "var(--grn)" }}>{fmt(b.advance)}</span>
-              </div>
-              <div className="detail-row" style={{ background: b.balance > 0 ? "var(--amb-lt)" : "var(--grn-lt)" }}>
-                <span className="detail-key" style={{ fontWeight: 600 }}>{b.balance > 0 ? "Balance Amount" : "Fully Paid"}</span>
-                <span className="detail-val" style={{ fontWeight: 700, color: b.balance > 0 ? "var(--amb)" : "var(--grn)" }}>
-                  {b.balance > 0 ? fmt(b.balance) : "Paid"}
-                </span>
-              </div>
+            </>
+          )}
+
+          {/* Grand Total / Advance / Balance */}
+          <div style={{ borderTop: "2px solid var(--bd)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", background: "var(--amb-lt)", borderBottom: "1px solid var(--bd)" }}>
+              <span style={{ fontFamily: "var(--font-outfit), Outfit, sans-serif", fontWeight: 800, fontSize: 13, color: "var(--t1)" }}>
+                Total Amount Payable (A + B)
+              </span>
+              <span style={{ fontFamily: "var(--font-outfit), Outfit, sans-serif", fontWeight: 800, fontSize: 18, color: "var(--t1)" }}>
+                {fmt(b.grandTotal)}
+              </span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", borderBottom: "1px solid var(--bd)" }}>
+              <span style={{ fontSize: 12, color: "var(--t2)", fontWeight: 600 }}>Amount Received</span>
+              <span style={{ fontSize: 14, fontWeight: 700, color: "var(--grn)" }}>{fmt(b.advance)}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", background: b.balance > 0 ? "var(--amb-lt)" : "var(--grn-lt)" }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: b.balance > 0 ? "var(--amb)" : "var(--grn)" }}>
+                {b.balance > 0 ? "Balance Amount Payable at Check-In" : "Fully Paid"}
+              </span>
+              <span style={{ fontSize: 14, fontWeight: 800, color: b.balance > 0 ? "var(--amb)" : "var(--grn)" }}>
+                {b.balance > 0 ? fmt(b.balance) : "Paid"}
+              </span>
             </div>
           </div>
+
+          {/* Meal Preference + Special Request */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0, borderTop: "1px solid var(--bd)" }}>
+            <div style={{ padding: "12px 16px", borderRight: "1px solid var(--bd)" }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 4 }}>Meal Preference</div>
+              <div style={{ fontSize: 13, color: "var(--t1)" }}>{b.mealOn ? "Included" : "Not included"}</div>
+            </div>
+            <div style={{ padding: "12px 16px" }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 4 }}>Special Request</div>
+              <div style={{ fontSize: 13, color: "var(--t1)" }}>{b.notes || "—"}</div>
+            </div>
+          </div>
+
         </div>
-
-        {/* Room Category & No's */}
-        {roomCategoryMap.size > 0 && (
-          <div className="detail-panel" style={{ marginTop: 16 }}>
-            <div className="detail-panel-hd"><h3>Room Category & No's</h3></div>
-            <div className="detail-panel-body">
-              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                {Array.from(roomCategoryMap.entries()).map(([name, qty]) => (
-                  <div
-                    key={name}
-                    style={{
-                      display: "flex", alignItems: "baseline", gap: 6,
-                      padding: "8px 18px", background: "var(--surf2)",
-                      border: "1px solid var(--bd)", borderRadius: "var(--r2)",
-                    }}
-                  >
-                    <span style={{ fontWeight: 500, color: "var(--t1)", fontSize: 14 }}>{name}</span>
-                    <span style={{ fontFamily: "var(--font-outfit), Outfit, sans-serif", fontWeight: 800, fontSize: 18, color: "var(--acc)" }}>
-                      ×{qty}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Room Reassignments */}
         {b.nightOverrides && b.nightOverrides.length > 0 && (
@@ -551,6 +651,36 @@ export default function BookingDetailPage() {
             </div>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function SectionHeader({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{
+      background: "var(--sb)", color: "#fff",
+      padding: "8px 16px",
+      fontFamily: "var(--font-outfit), Outfit, sans-serif",
+      fontWeight: 700, fontSize: 12, letterSpacing: ".5px", textTransform: "uppercase",
+      borderTop: "1px solid var(--bd)",
+    }}>
+      {children}
+    </div>
+  );
+}
+
+function BkgRow({ label, value, last }: { label: string; value: string; last?: boolean }) {
+  return (
+    <div style={{
+      display: "grid", gridTemplateColumns: "150px 1fr",
+      borderBottom: last ? "none" : "1px solid var(--bd)",
+    }}>
+      <div style={{ padding: "7px 12px", background: "var(--surf2)", fontSize: 11, fontWeight: 700, color: "var(--t3)", borderRight: "1px solid var(--bd)" }}>
+        {label}
+      </div>
+      <div style={{ padding: "7px 12px", fontSize: 12, color: "var(--t1)", fontWeight: 500 }}>
+        {value}
       </div>
     </div>
   );

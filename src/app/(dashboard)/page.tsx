@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
 import { fmt, fmtIN, sevenDaysFrom, todayStr, weekRange } from "@/lib/utils";
 
-type RevFilter = "today" | "week" | "month";
+type RevFilter = "month";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -33,26 +33,14 @@ export default function DashboardPage() {
   const revData = useMemo(() => {
     if (!today) return { total: 0, count: 0, label: "" };
     const entries = revenueEntries.filter((e) => e.amount > 0);
-    let filtered = entries;
-    let label = "";
-    if (revFilter === "today") {
-      filtered = entries.filter((e) => e.date === today);
-      label = "Today";
-    } else if (revFilter === "week") {
-      const { start, end } = weekRange(today);
-      filtered = entries.filter((e) => e.date >= start && e.date <= end);
-      label = "This Week";
-    } else {
-      const month = today.slice(0, 7);
-      filtered = entries.filter((e) => e.date.startsWith(month));
-      label = "This Month";
-    }
+    const month = today.slice(0, 7);
+    const filtered = entries.filter((e) => e.date.startsWith(month));
     return {
       total: filtered.reduce((s, e) => s + e.amount, 0),
       count: filtered.length,
-      label,
+      label: "This Month",
     };
-  }, [revenueEntries, revFilter, today]);
+  }, [revenueEntries, today]);
 
   // ───── Payment Pending ─────
   const pendingBookings = useMemo(
@@ -357,7 +345,7 @@ export default function DashboardPage() {
         <div>
           <h2>Hello, {currentUser}</h2>
         </div>
-        <a href="/bookings/new" className="btn btn-accent btn-sm">New Booking</a>
+        <a href="/bookings/new" className="btn btn-primary btn-sm">New Booking</a>
       </div>
 
       {/* ───────── Top summary cards ───────── */}
@@ -369,24 +357,13 @@ export default function DashboardPage() {
             <span style={{ fontSize: 13, fontWeight: 700, color: "var(--t1)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>
               Revenue
             </span>
-            <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
-              {(["today", "week", "month"] as RevFilter[]).map((f) => (
-                <button
-                  key={f}
-                  type="button"
-                  className={`filter-btn${revFilter === f ? " on" : ""}`}
-                  style={{ fontSize: 11, padding: "3px 8px" }}
-                  onClick={() => setRevFilter(f)}
-                >
-                  {f === "today" ? "Today" : f === "week" ? "Week" : "Month"}
-                </button>
-              ))}
+            <div style={{ marginLeft: "auto" }}>
+              <span className="filter-btn on" style={{ fontSize: 11, padding: "3px 8px" }}>
+                Month
+              </span>
             </div>
           </div>
           <div className="stat-val" style={{ fontSize: 34 }}>{fmt(revData.total)}</div>
-          <div className="stat-sub" style={{ marginTop: 6 }}>
-            {revData.label} · {revData.count} payment{revData.count !== 1 ? "s" : ""}
-          </div>
         </div>
 
         {/* Payment Pending summary card */}
@@ -398,9 +375,6 @@ export default function DashboardPage() {
           </div>
           <div className="stat-val" style={{ fontSize: 34, color: "var(--amb)" }}>
             {fmt(totalPending)}
-          </div>
-          <div className="stat-sub" style={{ marginTop: 6 }}>
-            {pendingBookings.length} booking{pendingBookings.length !== 1 ? "s" : ""} with outstanding balance
           </div>
         </div>
 
@@ -482,16 +456,9 @@ export default function DashboardPage() {
                     <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                       <button
                         className="btn btn-ghost btn-xs"
-                        style={{ marginRight: 4 }}
                         onClick={() => router.push(`/bookings/${b.id}`)}
                       >
                         View
-                      </button>
-                      <button
-                        className="btn btn-ghost btn-xs"
-                        onClick={() => router.push(`/bookings/${b.id}/edit`)}
-                      >
-                        Edit
                       </button>
                     </td>
                   </tr>

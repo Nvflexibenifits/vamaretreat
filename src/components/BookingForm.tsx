@@ -258,7 +258,8 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
             parseFloat(r.discountPct) || 0,
             maxDiscountForRowAndRole(r.rowType, currentRole, discountCaps)
           ),
-          gstSettings
+          gstSettings,
+          rooms
         )
       ),
     [rows, currentRole, gstSettings]
@@ -474,7 +475,8 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
         bookings,
         roomInventory,
         undefined,
-        bulkRoomBlocks
+        bulkRoomBlocks,
+        rooms
       );
       if (!result.ok) {
         showNotif(`No ${result.missingCategoryName} available for selected dates`, "error");
@@ -502,7 +504,8 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
         bookings,
         roomInventory,
         initial.id,
-        bulkRoomBlocks
+        bulkRoomBlocks,
+        rooms
       );
       if (!result.ok) {
         showNotif(`No ${result.missingCategoryName} available for selected dates`, "error");
