@@ -2,9 +2,8 @@
 
 import { useParams } from "next/navigation";
 import { useApp } from "@/lib/store";
-import { fmt } from "@/lib/utils";
+import { fmt, fmtIN, getBookingPricingRows } from "@/lib/utils";
 import type { PricingRow } from "@/types";
-import { fmtIN } from "@/lib/utils";
 
 function formatLongPretty(dateStr: string): string {
   if (!dateStr) return "—";
@@ -81,15 +80,16 @@ export default function ConfirmationPage() {
     );
   }
 
-  const totalRoomBaseCharges = b.pricingRows.reduce((s, r) => s + r.roomCharges, 0);
-  const totalDiscount = b.pricingRows.reduce((s, r) => s + r.discountAmt, 0);
-  const totalNet = b.pricingRows.reduce((s, r) => s + r.netCharges, 0);
-  const totalRoomGst = b.pricingRows.reduce((s, r) => s + r.gstAmt, 0);
-  const totalRoomAmt = b.pricingRows.reduce((s, r) => s + r.totalAmt, 0);
+  const pricingRows = getBookingPricingRows(b);
+  const totalRoomBaseCharges = pricingRows.reduce((s, r) => s + r.roomCharges, 0);
+  const totalDiscount = pricingRows.reduce((s, r) => s + r.discountAmt, 0);
+  const totalNet = pricingRows.reduce((s, r) => s + r.netCharges, 0);
+  const totalRoomGst = pricingRows.reduce((s, r) => s + r.gstAmt, 0);
+  const totalRoomAmt = pricingRows.reduce((s, r) => s + r.totalAmt, 0);
   const totalRooms = (() => {
     const m = new Map<string, number>();
-    b.pricingRows.forEach((r) => {
-      m.set(r.roomId, Math.max(m.get(r.roomId) ?? 0, r.numRooms));
+    b.segments.forEach((seg) => {
+      seg.rooms.forEach((r) => { m.set(r.roomId, Math.max(m.get(r.roomId) ?? 0, r.numRooms)); });
     });
     return Array.from(m.values()).reduce((s, n) => s + n, 0);
   })();
@@ -304,22 +304,22 @@ export default function ConfirmationPage() {
             </tr>
           </thead>
           <tbody>
-            {b.pricingRows.length === 0 ? (
+            {pricingRows.length === 0 ? (
               <tr>
                 <td style={{ ...TD, textAlign: "center" }} colSpan={12}>
                   No pricing rows
                 </td>
               </tr>
             ) : (
-              b.pricingRows.map((r: PricingRow, i: number) => {
+              pricingRows.map((r: PricingRow, i: number) => {
                 const netRatePerNight = r.nights > 0 && r.numRooms > 0
                   ? Math.round(r.netCharges / r.nights / r.numRooms)
                   : r.tariff;
                 return (
                   <tr key={i}>
                     <td style={TD}>{r.roomName}</td>
-                    <td style={TD_NUM}>{fmtIN(b.checkin)}</td>
-                    <td style={TD_NUM}>{fmtIN(b.checkout)}</td>
+                    <td style={TD_NUM}>{fmtIN(r.checkin || b.checkin)}</td>
+                    <td style={TD_NUM}>{fmtIN(r.checkout || b.checkout)}</td>
                     <td style={TD_NUM}>{r.nights}</td>
                     <td style={TD_NUM}>{fmt(r.tariff)}</td>
                     <td style={TD_NUM}>{r.discountPct > 0 ? `${r.discountPct}%` : "—"}</td>

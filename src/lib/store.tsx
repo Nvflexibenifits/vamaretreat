@@ -11,6 +11,7 @@ import {
 } from "react";
 import type {
   Booking,
+  BookingSegment,
   BookingStatus,
   BulkRoomBlock,
   CancellationDetails,
@@ -49,9 +50,6 @@ import {
 } from "@/lib/data";
 import { addDays, nowTime, todayStr } from "@/lib/utils";
 
-const STORAGE_KEY = "vama:state:v2";
-const LEGACY_KEY = "vama:state:v1";
-
 type ModalKind = "lost" | "payment" | "complete" | "crm-note" | null;
 
 type ModalState = {
@@ -60,27 +58,10 @@ type ModalState = {
   crmKey?: { mobile: string; name: string };
 };
 
-type PersistedState = {
-  bookings: Booking[];
-  guestNotes: Record<string, string>;
-  rooms?: RoomMaster[];
-  roomInventory?: RoomInventoryItem[];
-  discountCaps?: DiscountCaps;
-  packageRates?: PackageRates;
-  specialDays?: SpecialDay[];
-  creditNoteSettings?: CreditNoteSettings;
-  creditNotes?: CreditNote[];
-  gstSettings?: GstSettings;
-  cancellationPolicy?: CancellationPolicy;
-  users?: User[];
-  venues?: Venue[];
-  venueBlocks?: VenueBlock[];
-  bulkRoomBlocks?: BulkRoomBlock[];
-};
-
 type AppContextValue = {
   // auth
   isAuthed: boolean;
+  sessionChecking: boolean;
   currentRole: Role;
   currentUser: string;
   login: (role: Role, user: string) => void;
@@ -178,7 +159,22 @@ function normalizeBooking(b: Partial<Booking>): Booking {
     allocatedRooms: Array.isArray(b.allocatedRooms) ? b.allocatedRooms : [],
     payments: Array.isArray(b.payments) ? b.payments : [],
     extras: Array.isArray(b.extras) ? b.extras : [],
-    pricingRows: Array.isArray(b.pricingRows) ? b.pricingRows : [],
+    segments: Array.isArray(b.segments) ? b.segments.map((seg: BookingSegment) => ({
+      ...seg,
+      adults: seg.adults ?? b.adults ?? 2,
+      seniors: seg.seniors ?? b.seniors ?? 0,
+      kidsAbove10: seg.kidsAbove10 ?? b.kidsAbove10 ?? 0,
+      kids6to10: seg.kids6to10 ?? b.kids6to10 ?? 0,
+      kids2to6: seg.kids2to6 ?? b.kids2to6 ?? 0,
+      infantsBelow2: seg.infantsBelow2 ?? b.infantsBelow2 ?? 0,
+      pets: seg.pets ?? b.pets ?? 0,
+      mealOn: seg.mealOn ?? b.mealOn ?? false,
+      drivers: seg.drivers ?? b.driverCount ?? 0,
+      driverMealOn: seg.driverMealOn ?? b.driverMealOn ?? false,
+      mealTotal: seg.mealTotal ?? 0,
+      mealGst: seg.mealGst ?? 0,
+      mealWithGst: seg.mealWithGst ?? 0,
+    })) : [],
     driverCount: b.driverCount ?? 0,
     driverTotal: b.driverTotal ?? 0,
     driverGst: b.driverGst ?? 0,
@@ -190,6 +186,7 @@ function normalizeBooking(b: Partial<Booking>): Booking {
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [isAuthed, setIsAuthed] = useState(false);
+  const [sessionChecking, setSessionChecking] = useState(true);
   const [currentRole, setCurrentRole] = useState<Role>("Sales");
   const [currentUser, setCurrentUser] = useState<string>("Sales User");
 
@@ -229,153 +226,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setIsAuthed(true);
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setSessionChecking(false));
   }, []);
 
-  // Hydrate from localStorage on mount.
-  // v2 key: full restore. If not present, migrate user data from v1 (bookings,
-  // users, venues) but intentionally drop all master-setup config so new seed
-  // prices and rates are applied cleanly.
+  // Hydrate from Neon DB via API on mount.
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as Partial<PersistedState>;
-        if (Array.isArray(parsed.bookings) && parsed.bookings.length > 0) {
-          setBookings((parsed.bookings as Partial<Booking>[]).map(normalizeBooking));
-        }
-        if (parsed.guestNotes && typeof parsed.guestNotes === "object") {
-          setGuestNotes(parsed.guestNotes);
-        }
-        if (Array.isArray(parsed.rooms) && parsed.rooms.length > 0) {
-          setRooms(parsed.rooms);
-        }
-        if (Array.isArray(parsed.roomInventory) && parsed.roomInventory.length > 0) {
-          setRoomInventory(parsed.roomInventory);
-        }
-        if (parsed.discountCaps) { const _dc = parsed.discountCaps as Record<string, unknown>; setDiscountCapsState({ sales: (_dc.sales as number) ?? (_dc.salesRex as number) ?? SEED_DISCOUNT_CAPS.sales, admin: (_dc.admin as number | null) ?? SEED_DISCOUNT_CAPS.admin }); }
-        if (parsed.packageRates) setPackageRatesState({ ...SEED_PACKAGE_RATES, ...parsed.packageRates });
-        if (Array.isArray(parsed.specialDays)) setSpecialDays(parsed.specialDays);
-        if (parsed.creditNoteSettings) setCreditNoteSettings(parsed.creditNoteSettings);
-        if (Array.isArray(parsed.creditNotes)) setCreditNotes(parsed.creditNotes);
-        if (parsed.gstSettings) setGstSettings(parsed.gstSettings);
-        if (parsed.cancellationPolicy && "standardThreshold" in parsed.cancellationPolicy) setCancellationPolicy(parsed.cancellationPolicy);
-        if (Array.isArray(parsed.users) && parsed.users.length > 0) {
-          { const validRoles: Role[] = ["Sales", "Front Office", "Admin"]; const vu = (parsed.users as User[]).filter((u) => validRoles.includes(u.role)); if (vu.length > 0) setUsers(vu); }
-        }
-        if (Array.isArray(parsed.venues)) setVenues(parsed.venues);
-        if (Array.isArray(parsed.venueBlocks)) setVenueBlocks(parsed.venueBlocks);
-        if (Array.isArray(parsed.bulkRoomBlocks)) setBulkRoomBlocks(parsed.bulkRoomBlocks);
-      } else {
-        // No v2 data — check for v1 and migrate user data only.
-        const legacyRaw = window.localStorage.getItem(LEGACY_KEY);
-        if (legacyRaw) {
-          const legacy = JSON.parse(legacyRaw) as Partial<PersistedState>;
-          if (Array.isArray(legacy.bookings) && legacy.bookings.length > 0) {
-            setBookings((legacy.bookings as Partial<Booking>[]).map(normalizeBooking));
-          }
-          if (legacy.guestNotes && typeof legacy.guestNotes === "object") {
-            setGuestNotes(legacy.guestNotes);
-          }
-          if (Array.isArray(legacy.users) && legacy.users.length > 0) {
-            setUsers(legacy.users);
-          }
-          if (Array.isArray(legacy.venues)) setVenues(legacy.venues);
-          if (Array.isArray(legacy.venueBlocks)) setVenueBlocks(legacy.venueBlocks);
-          // All master-setup config (rooms, rates, GST, cancellation policy, etc.)
-          // intentionally reset to new seeds — do not restore from v1.
-          window.localStorage.removeItem(LEGACY_KEY);
-        }
-      }
-    } catch {
-      // corrupt state, ignore and stay on seed
-    }
-    setHydrated(true);
-  }, []);
-
-  // Persist on change
-  useEffect(() => {
-    if (!hydrated || typeof window === "undefined") return;
-    try {
-      const payload: PersistedState = {
-        bookings,
-        guestNotes,
-        rooms,
-        roomInventory,
-        discountCaps,
-        packageRates,
-        specialDays,
-        creditNoteSettings,
-        creditNotes,
-        gstSettings,
-        cancellationPolicy,
-        users,
-        venues,
-        venueBlocks,
-        bulkRoomBlocks,
-      };
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-    } catch {
-      // quota / serialization, swallow
-    }
-  }, [
-    hydrated,
-    bookings,
-    guestNotes,
-    rooms,
-    roomInventory,
-    discountCaps,
-    packageRates,
-    specialDays,
-    creditNoteSettings,
-    gstSettings,
-    cancellationPolicy,
-    users,
-    venues,
-    venueBlocks,
-    bulkRoomBlocks,
-  ]);
-
-  // Sync from other tabs
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const handler = (e: StorageEvent) => {
-      if (e.key !== STORAGE_KEY || !e.newValue) return;
-      try {
-        const parsed = JSON.parse(e.newValue) as Partial<PersistedState>;
-        if (Array.isArray(parsed.bookings))
-          setBookings(
-            (parsed.bookings as Partial<Booking>[]).map(normalizeBooking)
-          );
-        if (parsed.guestNotes && typeof parsed.guestNotes === "object") {
-          setGuestNotes(parsed.guestNotes);
-        }
-        if (Array.isArray(parsed.rooms) && parsed.rooms.length > 0) {
-          setRooms(parsed.rooms);
-        }
-        if (Array.isArray(parsed.roomInventory) && parsed.roomInventory.length > 0) {
-          setRoomInventory(parsed.roomInventory);
-        }
-        if (parsed.discountCaps) { const _dc = parsed.discountCaps as Record<string, unknown>; setDiscountCapsState({ sales: (_dc.sales as number) ?? (_dc.salesRex as number) ?? SEED_DISCOUNT_CAPS.sales, admin: (_dc.admin as number | null) ?? SEED_DISCOUNT_CAPS.admin }); }
-        if (parsed.packageRates) setPackageRatesState({ ...SEED_PACKAGE_RATES, ...parsed.packageRates });
-        if (Array.isArray(parsed.specialDays)) setSpecialDays(parsed.specialDays);
-        if (parsed.creditNoteSettings) setCreditNoteSettings(parsed.creditNoteSettings);
-        if (Array.isArray(parsed.creditNotes)) setCreditNotes(parsed.creditNotes);
-        if (parsed.gstSettings) setGstSettings(parsed.gstSettings);
-        if (parsed.cancellationPolicy && "standardThreshold" in parsed.cancellationPolicy) setCancellationPolicy(parsed.cancellationPolicy);
-        if (Array.isArray(parsed.users) && parsed.users.length > 0) {
-          { const validRoles: Role[] = ["Sales", "Front Office", "Admin"]; const vu = (parsed.users as User[]).filter((u) => validRoles.includes(u.role)); if (vu.length > 0) setUsers(vu); }
-        }
-        if (Array.isArray(parsed.venues)) setVenues(parsed.venues);
-        if (Array.isArray(parsed.venueBlocks)) setVenueBlocks(parsed.venueBlocks);
-        if (Array.isArray(parsed.bulkRoomBlocks)) setBulkRoomBlocks(parsed.bulkRoomBlocks);
-      } catch {
-        // ignore
-      }
-    };
-    window.addEventListener("storage", handler);
-    return () => window.removeEventListener("storage", handler);
+    fetch("/api/app/state")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data) { setHydrated(true); return; }
+        if (Array.isArray(data.bookings) && data.bookings.length > 0)
+          setBookings((data.bookings as Partial<Booking>[]).map(normalizeBooking));
+        if (Array.isArray(data.rooms) && data.rooms.length > 0) setRooms(data.rooms);
+        if (Array.isArray(data.roomInventory) && data.roomInventory.length > 0) setRoomInventory(data.roomInventory);
+        if (Array.isArray(data.venues)) setVenues(data.venues);
+        if (Array.isArray(data.venueBlocks)) setVenueBlocks(data.venueBlocks);
+        if (Array.isArray(data.bulkRoomBlocks)) setBulkRoomBlocks(data.bulkRoomBlocks);
+        if (Array.isArray(data.specialDays)) setSpecialDays(data.specialDays);
+        if (Array.isArray(data.creditNotes)) setCreditNotes(data.creditNotes);
+        if (data.guestNotes && typeof data.guestNotes === "object") setGuestNotes(data.guestNotes);
+        if (data.gstSettings) setGstSettings(data.gstSettings);
+        if (data.cancellationPolicy && "standardThreshold" in data.cancellationPolicy) setCancellationPolicy(data.cancellationPolicy);
+        if (data.packageRates) setPackageRatesState({ ...SEED_PACKAGE_RATES, ...data.packageRates });
+        if (data.discountCaps) setDiscountCapsState({ sales: (data.discountCaps.sales as number) ?? SEED_DISCOUNT_CAPS.sales, admin: (data.discountCaps.admin as number | null) ?? SEED_DISCOUNT_CAPS.admin });
+        if (data.creditNoteSettings) setCreditNoteSettings(data.creditNoteSettings);
+        setHydrated(true);
+      })
+      .catch(() => setHydrated(true));
   }, []);
 
   // Notification auto-dismiss
@@ -384,6 +262,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const t = setTimeout(() => setNotif(null), 3000);
     return () => clearTimeout(t);
   }, [notif]);
+
+  // Fire-and-forget sync helper for mutations with a body.
+  const sync = (url: string, method: string, body: unknown) => {
+    fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).catch(console.error);
+  };
 
   const showNotif = useCallback((msg: string, kind: NotifKind = "success") => {
     setNotif({ msg, kind });
@@ -403,17 +290,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const closeModalCb = useCallback(() => setModal({ kind: null }), []);
 
   const setGuestNote = useCallback((mobile: string, note: string) => {
-    setGuestNotes((prev) => ({ ...prev, [mobile]: note }));
+    setGuestNotes((prev) => {
+      const next = { ...prev, [mobile]: note };
+      sync("/api/app/settings", "PUT", { guestNotes: next });
+      return next;
+    });
   }, []);
 
   const createBooking = useCallback((b: Booking) => {
     setBookings((prev) => [b, ...prev]);
+    sync("/api/app/bookings", "POST", b);
   }, []);
 
   const updateBooking = useCallback((bookingId: string, patch: Partial<Booking>) => {
     setBookings((prev) =>
       prev.map((b) => (b.id === bookingId ? { ...b, ...patch } : b))
     );
+    sync(`/api/app/bookings/${bookingId}`, "PATCH", patch);
   }, []);
 
   const cancelBooking = useCallback(
@@ -429,6 +322,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             : { ...b, status: "Cancelled" as BookingStatus, cancellationDetails: details }
         );
       });
+      sync(`/api/app/bookings/${bookingId}`, "PATCH", { status: "Cancelled", cancellationDetails: details });
       if (details.creditNoteAmount > 0 && details.creditNoteCode) {
         const cn: CreditNote = {
           code: details.creditNoteCode,
@@ -443,7 +337,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
           transactions: [],
         };
         setCreditNotes((prev) => [...prev, cn]);
-        setCreditNoteSettings((prev) => ({ ...prev, nextNumber: prev.nextNumber + 1 }));
+        sync("/api/app/credit-notes", "POST", cn);
+        setCreditNoteSettings((prev) => {
+          const next = { ...prev, nextNumber: prev.nextNumber + 1 };
+          sync("/api/app/settings", "PUT", { creditNoteSettings: next });
+          return next;
+        });
       }
     },
     []
@@ -458,96 +357,150 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const grandTotal = b.grandTotal + charge;
         const advance = b.advance + paid;
         const balance = Math.max(0, grandTotal - advance);
-        return { ...b, extras: [...b.extras, ...newExtras], grandTotal, advance, balance };
+        const updatedExtras = [...b.extras, ...newExtras];
+        sync(`/api/app/bookings/${bookingId}`, "PATCH", { extras: updatedExtras, grandTotal, advance, balance });
+        return { ...b, extras: updatedExtras, grandTotal, advance, balance };
       })
     );
   }, []);
 
   // ─── Master setup setters ───
-  const updateRooms = useCallback((next: RoomMaster[]) => setRooms(next), []);
+  const updateRooms = useCallback((next: RoomMaster[]) => {
+    setRooms(next);
+    sync("/api/app/rooms", "PUT", next);
+  }, []);
+
   const addRoomInventoryItem = useCallback((item: RoomInventoryItem) => {
     setRoomInventory((prev) => [...prev, item]);
+    sync("/api/app/room-inventory", "POST", item);
   }, []);
+
   const updateRoomInventoryItem = useCallback(
     (id: string, patch: Partial<RoomInventoryItem>) => {
       setRoomInventory((prev) =>
         prev.map((r) => (r.id === id ? { ...r, ...patch } : r))
       );
+      sync(`/api/app/room-inventory/${id}`, "PATCH", patch);
     },
     []
   );
+
   const removeRoomInventoryItem = useCallback((id: string) => {
     setRoomInventory((prev) => prev.filter((r) => r.id !== id));
+    fetch(`/api/app/room-inventory/${id}`, { method: "DELETE" }).catch(console.error);
   }, []);
+
   const updateDiscountCaps = useCallback(
-    (caps: DiscountCaps) => setDiscountCapsState(caps),
+    (caps: DiscountCaps) => {
+      setDiscountCapsState(caps);
+      sync("/api/app/settings", "PUT", { discountCaps: caps });
+    },
     []
   );
+
   const updatePackageRates = useCallback(
-    (rates: PackageRates) => setPackageRatesState(rates),
+    (rates: PackageRates) => {
+      setPackageRatesState(rates);
+      sync("/api/app/settings", "PUT", { packageRates: rates });
+    },
     []
   );
+
   const addSpecialDay = useCallback((sd: SpecialDay) => {
     setSpecialDays((prev) => [...prev, sd].sort((a, b) => (a.date < b.date ? -1 : 1)));
+    sync("/api/app/special-days", "POST", sd);
   }, []);
+
   const removeSpecialDay = useCallback((id: string) => {
     setSpecialDays((prev) => prev.filter((sd) => sd.id !== id));
+    fetch(`/api/app/special-days/${id}`, { method: "DELETE" }).catch(console.error);
   }, []);
+
   const updateCreditNoteSettings = useCallback(
-    (s: CreditNoteSettings) => setCreditNoteSettings(s),
+    (s: CreditNoteSettings) => {
+      setCreditNoteSettings(s);
+      sync("/api/app/settings", "PUT", { creditNoteSettings: s });
+    },
     []
   );
+
   const updateGstSettings = useCallback(
-    (s: GstSettings) => setGstSettings(s),
+    (s: GstSettings) => {
+      setGstSettings(s);
+      sync("/api/app/settings", "PUT", { gstSettings: s });
+    },
     []
   );
+
   const updateCancellationPolicy = useCallback(
-    (p: CancellationPolicy) => setCancellationPolicy(p),
+    (p: CancellationPolicy) => {
+      setCancellationPolicy(p);
+      sync("/api/app/settings", "PUT", { cancellationPolicy: p });
+    },
     []
   );
+
+  // Users are managed purely in local state; auth is handled by /api/auth/users separately.
   const addUser = useCallback((u: User) => {
     setUsers((prev) => [...prev, u]);
   }, []);
+
   const updateUser = useCallback((id: string, patch: Partial<User>) => {
     setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, ...patch } : u)));
   }, []);
+
   const removeUser = useCallback((id: string) => {
     setUsers((prev) => prev.filter((u) => u.id !== id));
   }, []);
 
   const addVenue = useCallback((v: Venue) => {
     setVenues((prev) => [...prev, v]);
+    sync("/api/app/venues", "POST", v);
   }, []);
+
   const updateVenue = useCallback((id: string, patch: Partial<Venue>) => {
     setVenues((prev) => prev.map((v) => (v.id === id ? { ...v, ...patch } : v)));
+    sync(`/api/app/venues/${id}`, "PATCH", patch);
   }, []);
+
   const removeVenue = useCallback((id: string) => {
     setVenues((prev) => prev.filter((v) => v.id !== id));
+    fetch(`/api/app/venues/${id}`, { method: "DELETE" }).catch(console.error);
   }, []);
 
   const addVenueBlock = useCallback((vb: VenueBlock) => {
     setVenueBlocks((prev) => [...prev, vb]);
+    sync("/api/app/venue-blocks", "POST", vb);
   }, []);
+
   const updateVenueBlock = useCallback(
     (id: string, patch: Partial<VenueBlock>) => {
       setVenueBlocks((prev) =>
         prev.map((vb) => (vb.id === id ? { ...vb, ...patch } : vb))
       );
+      sync(`/api/app/venue-blocks/${id}`, "PATCH", patch);
     },
     []
   );
+
   const removeVenueBlock = useCallback((id: string) => {
     setVenueBlocks((prev) => prev.filter((vb) => vb.id !== id));
+    fetch(`/api/app/venue-blocks/${id}`, { method: "DELETE" }).catch(console.error);
   }, []);
 
   const addBulkRoomBlock = useCallback((b: BulkRoomBlock) => {
     setBulkRoomBlocks((prev) => [...prev, b]);
+    sync("/api/app/bulk-blocks", "POST", b);
   }, []);
+
   const updateBulkRoomBlock = useCallback((id: string, patch: Partial<BulkRoomBlock>) => {
     setBulkRoomBlocks((prev) => prev.map((b) => (b.id === id ? { ...b, ...patch } : b)));
+    sync(`/api/app/bulk-blocks/${id}`, "PATCH", patch);
   }, []);
+
   const removeBulkRoomBlock = useCallback((id: string) => {
     setBulkRoomBlocks((prev) => prev.filter((b) => b.id !== id));
+    fetch(`/api/app/bulk-blocks/${id}`, { method: "DELETE" }).catch(console.error);
   }, []);
 
   const markLost = useCallback(
@@ -565,6 +518,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             : b
         )
       );
+      sync(`/api/app/bookings/${bookingId}`, "PATCH", { status: "Lost", lostReason: reason, lostNotes: notes, allocatedRooms: [] });
     },
     []
   );
@@ -587,15 +541,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
               by: currentUser,
             },
           ];
+          const newStatus =
+            b.status === "Enquiry" || b.status === "Tentative"
+              ? "Confirmed"
+              : b.status;
+          sync(`/api/app/bookings/${bookingId}`, "PATCH", {
+            advance: newAdvance,
+            balance: newBalance,
+            payments,
+            status: newStatus,
+          });
           return {
             ...b,
             advance: newAdvance,
             balance: newBalance,
             payments,
-            status:
-              b.status === "Enquiry" || b.status === "Tentative"
-                ? "Confirmed"
-                : b.status,
+            status: newStatus,
           };
         })
       );
@@ -627,6 +588,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
             nights += extraNights;
             checkout = addDays(checkout, extraNights);
           }
+          sync(`/api/app/bookings/${bookingId}`, "PATCH", {
+            extras: newExtras,
+            grandTotal,
+            balance,
+            nights,
+            checkout,
+            status: "Completed",
+          });
           return {
             ...b,
             extras: newExtras,
@@ -646,6 +615,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setBookings((prev) =>
       prev.map((b) => (b.id === bookingId ? { ...b, allocatedRooms: rooms } : b))
     );
+    sync(`/api/app/bookings/${bookingId}`, "PATCH", { allocatedRooms: rooms });
   }, []);
 
   const applyNightOverride = useCallback(
@@ -691,6 +661,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
             grandTotal += opts.upgrade.extraAmount;
             balance += opts.upgrade.extraAmount;
           }
+          sync(`/api/app/bookings/${bookingId}`, "PATCH", {
+            nightOverrides: nextOverrides,
+            extras: newExtras,
+            grandTotal,
+            balance,
+          });
           return {
             ...b,
             nightOverrides: nextOverrides,
@@ -740,6 +716,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
               balance = Math.max(0, balance - removed.upgrade.extraAmount);
             }
           }
+          sync(`/api/app/bookings/${bookingId}`, "PATCH", {
+            nightOverrides: nextOverrides,
+            extras: newExtras,
+            grandTotal,
+            balance,
+          });
           return {
             ...b,
             nightOverrides: nextOverrides,
@@ -779,6 +761,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AppContextValue>(
     () => ({
       isAuthed,
+      sessionChecking,
       currentRole,
       currentUser,
       login,
@@ -842,6 +825,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }),
     [
       isAuthed,
+      sessionChecking,
       currentRole,
       currentUser,
       login,

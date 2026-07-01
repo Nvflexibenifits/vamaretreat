@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
 import {
   calcPricingRow,
@@ -14,7 +14,7 @@ import {
   todayStr,
   tryAssignRooms,
 } from "@/lib/utils";
-import type { Booking, BookingStatus, PricingRow, PricingRowType } from "@/types";
+import type { Booking, BookingSegment, BookingStatus, PricingRow, PricingRowType, SegmentRoom } from "@/types";
 
 type FormRow = {
   uid: string;
@@ -24,6 +24,23 @@ type FormRow = {
   nights: string;
   numRooms: string;
   discountPct: string;
+};
+
+type FormSeg = {
+  id: string;
+  checkin: string;
+  checkout: string;
+  rows: FormRow[];
+  adults: string;
+  seniors: string;
+  kidsAbove10: string;
+  kids6to10: string;
+  kids2to6: string;
+  infants: string;
+  pets: string;
+  mealOn: boolean;
+  drivers: string;
+  driverMealOn: boolean;
 };
 
 type FieldErrors = {
@@ -55,15 +72,32 @@ function getInitialDates() {
   };
 }
 
-function rowsFromBooking(b: Booking): FormRow[] {
-  return b.pricingRows.map((r) => ({
-    uid: newUid(),
-    rowType: r.rowType,
-    roomId: r.roomId,
-    tariff: String(r.tariff),
-    nights: String(r.nights),
-    numRooms: String(r.numRooms),
-    discountPct: String(r.discountPct),
+function segsFromBooking(b: Booking): FormSeg[] {
+  return b.segments.map((seg) => ({
+    id: seg.id,
+    checkin: seg.checkin,
+    checkout: seg.checkout,
+    rows: seg.rooms.flatMap((room) =>
+      room.pricingRows.map((pr) => ({
+        uid: newUid(),
+        rowType: pr.rowType,
+        roomId: pr.roomId,
+        tariff: String(pr.tariff),
+        nights: String(pr.nights),
+        numRooms: String(pr.numRooms),
+        discountPct: String(pr.discountPct),
+      }))
+    ),
+    adults: String(seg.adults ?? b.adults ?? 2),
+    seniors: String(seg.seniors ?? b.seniors ?? 0),
+    kidsAbove10: String(seg.kidsAbove10 ?? b.kidsAbove10 ?? 0),
+    kids6to10: String(seg.kids6to10 ?? b.kids6to10 ?? 0),
+    kids2to6: String(seg.kids2to6 ?? b.kids2to6 ?? 0),
+    infants: String(seg.infantsBelow2 ?? b.infantsBelow2 ?? 0),
+    pets: String(seg.pets ?? b.pets ?? 0),
+    mealOn: seg.mealOn ?? b.mealOn ?? false,
+    drivers: String(seg.drivers ?? b.driverCount ?? 0),
+    driverMealOn: seg.driverMealOn ?? b.driverMealOn ?? false,
   }));
 }
 
@@ -111,24 +145,21 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   );
   const [notes, setNotes] = useState(initial?.notes ?? "");
 
-  const [adults, setAdults] = useState(String(initial?.adults ?? 2));
-  const [kidsAbove10, setKidsAbove10] = useState(String(initial?.kidsAbove10 ?? 0));
-  const [kids6to10, setKids6to10] = useState(String(initial?.kids6to10 ?? 0));
-  const [kids2to6, setKids2to6] = useState(String(initial?.kids2to6 ?? 0));
-  const [infants, setInfants] = useState(String(initial?.infantsBelow2 ?? 0));
-  const [seniors, setSeniors] = useState(String(initial?.seniors ?? 0));
-  const [pets, setPets] = useState(String(initial?.pets ?? 0));
-  const [drivers, setDrivers] = useState(String(initial?.driverCount ?? 0));
-  const [driverMealOn, setDriverMealOn] = useState(initial?.driverMealOn ?? false);
+  const defaultSegGuests = {
+    adults: "2", seniors: "0", kidsAbove10: "0", kids6to10: "0",
+    kids2to6: "0", infants: "0", pets: "0", mealOn: false, drivers: "0", driverMealOn: false,
+  };
 
-  const [checkin, setCheckin] = useState(initial?.checkin ?? "");
-  const [checkout, setCheckout] = useState(initial?.checkout ?? "");
-
-  const [rows, setRows] = useState<FormRow[]>(
-    initial ? rowsFromBooking(initial) : []
-  );
-
-  const [mealOn, setMealOn] = useState(initial?.mealOn ?? false);
+  const [formSegs, setFormSegs] = useState<FormSeg[]>(() => {
+    if (initial) return segsFromBooking(initial);
+    const { ci, co } = getInitialDates();
+    const { weekday, friday, saturday } = splitNightsByType(ci, co);
+    const initRows: FormRow[] = [];
+    if (weekday > 0) initRows.push({ uid: newUid(), rowType: "sun-thu", roomId: "", tariff: "0", nights: String(weekday), numRooms: "1", discountPct: "0" });
+    if (friday > 0) initRows.push({ uid: newUid(), rowType: "fri", roomId: "", tariff: "0", nights: String(friday), numRooms: "1", discountPct: "0" });
+    if (saturday > 0) initRows.push({ uid: newUid(), rowType: "sat", roomId: "", tariff: "0", nights: String(saturday), numRooms: "1", discountPct: "0" });
+    return [{ id: newUid(), checkin: ci, checkout: co, rows: initRows, ...defaultSegGuests }];
+  });
 
   const initialAdvance = initial?.advance ?? 0;
   const [advance, setAdvance] = useState(String(initialAdvance));
@@ -145,147 +176,231 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     { uid: newUid(), date: todayDate, amount: "", mode: "Bank Transfer" },
   ]);
 
-  // Seed default dates on create
-  useEffect(() => {
-    if (!isEdit && (!checkin || !checkout)) {
-      const { ci, co } = getInitialDates();
-      setCheckin(ci);
-      setCheckout(co);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const checkin = formSegs.length > 0
+    ? [...formSegs.map((s) => s.checkin).filter(Boolean)].sort()[0] ?? ""
+    : "";
+  const checkout = formSegs.length > 0
+    ? [...formSegs.map((s) => s.checkout).filter(Boolean)].sort().at(-1) ?? ""
+    : "";
+  const totalNights = formSegs.reduce((s, seg) => s + nightsBetween(seg.checkin, seg.checkout), 0);
 
-  const totalNights = nightsBetween(checkin, checkout);
-  const { weekday, friday, saturday } = useMemo(
-    () => splitNightsByType(checkin, checkout),
-    [checkin, checkout]
-  );
+  const addSegment = () => {
+    const { ci, co } = getInitialDates();
+    const { weekday, friday, saturday } = splitNightsByType(ci, co);
+    const initRows: FormRow[] = [];
+    if (weekday > 0) initRows.push({ uid: newUid(), rowType: "sun-thu", roomId: "", tariff: "0", nights: String(weekday), numRooms: "1", discountPct: "0" });
+    if (friday > 0) initRows.push({ uid: newUid(), rowType: "fri", roomId: "", tariff: "0", nights: String(friday), numRooms: "1", discountPct: "0" });
+    if (saturday > 0) initRows.push({ uid: newUid(), rowType: "sat", roomId: "", tariff: "0", nights: String(saturday), numRooms: "1", discountPct: "0" });
+    setFormSegs((prev) => [...prev, { id: newUid(), checkin: ci, checkout: co, rows: initRows, ...defaultSegGuests }]);
+  };
 
-  // Auto-row sync on date change. Preserve user's per-row picks; just resync nights.
-  useEffect(() => {
-    if (!checkin || !checkout || checkout <= checkin) return;
-    setRows((prev) => {
-      const customRows = prev.filter((r) => r.rowType === "custom");
-      const sunThu = prev.find((r) => r.rowType === "sun-thu");
-      const friRow = prev.find((r) => r.rowType === "fri");
-      const satRow = prev.find((r) => r.rowType === "sat");
-      const next: FormRow[] = [];
-      if (weekday > 0) {
-        next.push(
-          sunThu
-            ? { ...sunThu, nights: String(weekday) }
-            : { uid: newUid(), rowType: "sun-thu", roomId: "", tariff: "0", nights: String(weekday), numRooms: "1", discountPct: "0" }
-        );
-      }
-      if (friday > 0) {
-        next.push(
-          friRow
-            ? { ...friRow, nights: String(friday) }
-            : { uid: newUid(), rowType: "fri", roomId: "", tariff: "0", nights: String(friday), numRooms: "1", discountPct: "0" }
-        );
-      }
-      if (saturday > 0) {
-        next.push(
-          satRow
-            ? { ...satRow, nights: String(saturday) }
-            : { uid: newUid(), rowType: "sat", roomId: "", tariff: "0", nights: String(saturday), numRooms: "1", discountPct: "0" }
-        );
-      }
-      return [...next, ...customRows];
-    });
-  }, [checkin, checkout, weekday, friday, saturday]);
+  const removeSegment = (segId: string) => {
+    setFormSegs((prev) => prev.filter((s) => s.id !== segId));
+  };
 
-  const setRow = (uid: string, patch: Partial<FormRow>) =>
-    setRows((prev) => prev.map((r) => (r.uid === uid ? { ...r, ...patch } : r)));
-
-  const removeRow = (uid: string) =>
-    setRows((prev) => prev.filter((r) => r.uid !== uid));
-
-  const addCustomRow = () =>
-    setRows((prev) => [
-      ...prev,
-      {
-        uid: newUid(),
-        rowType: "custom",
-        roomId: "",
-        tariff: "0",
-        nights: "1",
-        numRooms: "1",
-        discountPct: "0",
-      },
-    ]);
-
-  const onRoomChange = (uid: string, roomId: string) => {
-    const room = rooms.find((r) => r.id === roomId);
-    setRows((prev) =>
-      prev.map((r) => {
-        if (r.uid !== uid) return r;
-        let tariff = r.tariff;
-        let discountPct = r.discountPct;
-        if (room) {
-          tariff = String(room.price);
-          const dayDisc =
-            r.rowType === "sat" ? room.weekendDiscount
-            : r.rowType === "fri" ? room.fridayDiscount
-            : room.weekdayDiscount;
-          discountPct = String(dayDisc);
+  const updateSegDates = (segId: string, newCheckin: string, newCheckout: string) => {
+    setFormSegs((prev) =>
+      prev.map((s) => {
+        if (s.id !== segId) return s;
+        if (!newCheckin || !newCheckout || newCheckout <= newCheckin) {
+          return { ...s, checkin: newCheckin, checkout: newCheckout };
         }
-        return { ...r, roomId, tariff, discountPct };
+        const { weekday: wd, friday: fr, saturday: sa } = splitNightsByType(newCheckin, newCheckout);
+        const roomIds = [...new Set(s.rows.filter((r) => r.roomId).map((r) => r.roomId))];
+        const customRows = s.rows.filter((r) => r.rowType === "custom");
+        const newRows: FormRow[] = [];
+        if (roomIds.length === 0) {
+          if (wd > 0) newRows.push({ uid: newUid(), rowType: "sun-thu", roomId: "", tariff: "0", nights: String(wd), numRooms: "1", discountPct: "0" });
+          if (fr > 0) newRows.push({ uid: newUid(), rowType: "fri", roomId: "", tariff: "0", nights: String(fr), numRooms: "1", discountPct: "0" });
+          if (sa > 0) newRows.push({ uid: newUid(), rowType: "sat", roomId: "", tariff: "0", nights: String(sa), numRooms: "1", discountPct: "0" });
+        } else {
+          roomIds.forEach((roomId) => {
+            const existing = s.rows.filter((r) => r.roomId === roomId);
+            const sunThu = existing.find((r) => r.rowType === "sun-thu");
+            const friRow = existing.find((r) => r.rowType === "fri");
+            const satRow = existing.find((r) => r.rowType === "sat");
+            const first = existing[0];
+            if (wd > 0) newRows.push(sunThu ? { ...sunThu, nights: String(wd) } : { uid: newUid(), rowType: "sun-thu", roomId, tariff: first?.tariff ?? "0", nights: String(wd), numRooms: first?.numRooms ?? "1", discountPct: first?.discountPct ?? "0" });
+            if (fr > 0) newRows.push(friRow ? { ...friRow, nights: String(fr) } : { uid: newUid(), rowType: "fri", roomId, tariff: first?.tariff ?? "0", nights: String(fr), numRooms: first?.numRooms ?? "1", discountPct: first?.discountPct ?? "0" });
+            if (sa > 0) newRows.push(satRow ? { ...satRow, nights: String(sa) } : { uid: newUid(), rowType: "sat", roomId, tariff: first?.tariff ?? "0", nights: String(sa), numRooms: first?.numRooms ?? "1", discountPct: first?.discountPct ?? "0" });
+          });
+        }
+        return { ...s, checkin: newCheckin, checkout: newCheckout, rows: [...newRows, ...customRows] };
       })
     );
   };
 
-  const onDiscChange = (uid: string, val: string) => {
-    const row = rows.find((r) => r.uid === uid);
+  const setSegRow = (segId: string, uid: string, patch: Partial<FormRow>) =>
+    setFormSegs((prev) =>
+      prev.map((s) =>
+        s.id === segId ? { ...s, rows: s.rows.map((r) => (r.uid === uid ? { ...r, ...patch } : r)) } : s
+      )
+    );
+
+  const removeSegRow = (segId: string, uid: string) =>
+    setFormSegs((prev) =>
+      prev.map((s) => (s.id === segId ? { ...s, rows: s.rows.filter((r) => r.uid !== uid) } : s))
+    );
+
+  const addSegRoom = (segId: string) => {
+    const seg = formSegs.find((s) => s.id === segId);
+    if (!seg) return;
+    const { weekday: wd, friday: fr, saturday: sa } = splitNightsByType(seg.checkin, seg.checkout);
+    const newRows: FormRow[] = [];
+    if (wd > 0) newRows.push({ uid: newUid(), rowType: "sun-thu", roomId: "", tariff: "0", nights: String(wd), numRooms: "1", discountPct: "0" });
+    if (fr > 0) newRows.push({ uid: newUid(), rowType: "fri", roomId: "", tariff: "0", nights: String(fr), numRooms: "1", discountPct: "0" });
+    if (sa > 0) newRows.push({ uid: newUid(), rowType: "sat", roomId: "", tariff: "0", nights: String(sa), numRooms: "1", discountPct: "0" });
+    if (newRows.length === 0) newRows.push({ uid: newUid(), rowType: "custom", roomId: "", tariff: "0", nights: "1", numRooms: "1", discountPct: "0" });
+    setFormSegs((prev) =>
+      prev.map((s) => (s.id === segId ? { ...s, rows: [...s.rows, ...newRows] } : s))
+    );
+  };
+
+  const onSegRoomChange = (segId: string, uid: string, roomId: string) => {
+    const seg = formSegs.find((s) => s.id === segId);
+    const row = seg?.rows.find((r) => r.uid === uid);
+    if (!row) return;
+    const room = rooms.find((r) => r.id === roomId);
+    const wasEmpty = !row.roomId;
+    const discFor = (rt: string) => {
+      if (!room) return 0;
+      return rt === "sat" ? room.weekendDiscount : rt === "fri" ? room.fridayDiscount : room.weekdayDiscount;
+    };
+    setFormSegs((prev) =>
+      prev.map((s) => {
+        if (s.id !== segId) return s;
+        return {
+          ...s,
+          rows: s.rows.map((r) => {
+            if (r.uid === uid) {
+              return { ...r, roomId, tariff: room ? String(room.price) : r.tariff, discountPct: String(discFor(r.rowType)) };
+            }
+            // propagate to other empty rows when this row was also empty (same "add room" batch)
+            if (wasEmpty && !r.roomId && room) {
+              return { ...r, roomId, tariff: String(room.price), discountPct: String(discFor(r.rowType)) };
+            }
+            return r;
+          }),
+        };
+      })
+    );
+  };
+
+  const onSegDiscChange = (segId: string, uid: string, val: string) => {
+    const seg = formSegs.find((s) => s.id === segId);
+    const row = seg?.rows.find((r) => r.uid === uid);
     if (!row) return;
     const cap = maxDiscountForRowAndRole(row.rowType, currentRole, discountCaps);
     const v = parseFloat(val);
-    if (!isNaN(v) && v > cap) setRow(uid, { discountPct: String(cap) });
-    else setRow(uid, { discountPct: val });
+    setSegRow(segId, uid, { discountPct: !isNaN(v) && v > cap ? String(cap) : val });
+  };
+
+  const updateSegField = (segId: string, field: keyof FormSeg, value: string | boolean) => {
+    setFormSegs((prev) => prev.map((s) => s.id === segId ? { ...s, [field]: value } : s));
   };
 
   // ─── Calculations ───
   const computedRows = useMemo<PricingRow[]>(
     () =>
-      rows.map((r) =>
-        calcPricingRow(
-          r.rowType,
-          r.roomId,
-          parseFloat(r.tariff) || 0,
-          parseInt(r.nights) || 0,
-          parseInt(r.numRooms) || 0,
-          Math.min(
-            parseFloat(r.discountPct) || 0,
-            maxDiscountForRowAndRole(r.rowType, currentRole, discountCaps)
-          ),
-          gstSettings,
-          rooms
+      formSegs.flatMap((seg) =>
+        seg.rows.map((r) =>
+          calcPricingRow(
+            r.rowType,
+            r.roomId,
+            parseFloat(r.tariff) || 0,
+            parseInt(r.nights) || 0,
+            parseInt(r.numRooms) || 0,
+            Math.min(
+              parseFloat(r.discountPct) || 0,
+              maxDiscountForRowAndRole(r.rowType, currentRole, discountCaps)
+            ),
+            gstSettings,
+            rooms
+          )
         )
       ),
-    [rows, currentRole, gstSettings]
+    [formSegs, currentRole, gstSettings, rooms, discountCaps]
+  );
+
+  const computedSegments = useMemo(
+    () =>
+      formSegs.map((seg) => {
+        let rowIdx = 0;
+        for (const prevSeg of formSegs) {
+          if (prevSeg.id === seg.id) break;
+          rowIdx += prevSeg.rows.length;
+        }
+        const segCalcRows = computedRows.slice(rowIdx, rowIdx + seg.rows.length);
+        const roomMap = new Map<string, { roomId: string; roomName: string; numRooms: number; discountPct: number; pricingRows: PricingRow[] }>();
+        seg.rows.forEach((r, i) => {
+          if (!r.roomId) return;
+          const calc = segCalcRows[i];
+          if (!calc) return;
+          const stampedCalc = { ...calc, checkin: seg.checkin, checkout: seg.checkout };
+          const existing = roomMap.get(r.roomId);
+          if (existing) {
+            existing.pricingRows.push(stampedCalc);
+          } else {
+            const roomObj = rooms.find((rm) => rm.id === r.roomId);
+            roomMap.set(r.roomId, {
+              roomId: r.roomId,
+              roomName: roomObj?.name ?? "",
+              numRooms: parseInt(r.numRooms) || 1,
+              discountPct: parseFloat(r.discountPct) || 0,
+              pricingRows: [stampedCalc],
+            });
+          }
+        });
+        const segRooms: SegmentRoom[] = Array.from(roomMap.values()).map((data) => ({
+          id: data.roomId,
+          ...data,
+          netCharges: data.pricingRows.reduce((s, r) => s + r.netCharges, 0),
+          gstAmt: data.pricingRows.reduce((s, r) => s + r.gstAmt, 0),
+          totalAmt: data.pricingRows.reduce((s, r) => s + r.totalAmt, 0),
+        }));
+        return {
+          id: seg.id,
+          checkin: seg.checkin,
+          checkout: seg.checkout,
+          rooms: segRooms,
+          segmentTotal: segRooms.reduce((s, r) => s + r.totalAmt, 0),
+          adults: parseInt(seg.adults) || 2,
+          seniors: parseInt(seg.seniors) || 0,
+          kidsAbove10: parseInt(seg.kidsAbove10) || 0,
+          kids6to10: parseInt(seg.kids6to10) || 0,
+          kids2to6: parseInt(seg.kids2to6) || 0,
+          infantsBelow2: parseInt(seg.infants) || 0,
+          pets: parseInt(seg.pets) || 0,
+          mealOn: seg.mealOn,
+          drivers: parseInt(seg.drivers) || 0,
+          driverMealOn: seg.driverMealOn,
+          mealTotal: 0,
+          mealGst: 0,
+          mealWithGst: 0,
+        } satisfies BookingSegment;
+      }),
+    [formSegs, computedRows, rooms]
   );
 
   const totalRoomCharges = computedRows.reduce((s, r) => s + r.totalAmt, 0);
 
-  const adultsN = parseInt(adults) || 0;
-  const petsN = parseInt(pets) || 0;
-  const driversN = parseInt(drivers) || 0;
+  // Per-segment meal computations (used in UI and in buildNewBooking)
+  const segMealCalcs = formSegs.map((seg) => {
+    const nights = nightsBetween(seg.checkin, seg.checkout);
+    const adultsN = parseInt(seg.adults) || 0;
+    const petsN = parseInt(seg.pets) || 0;
+    const driversN = parseInt(seg.drivers) || 0;
+    const meal = seg.mealOn ? packageRates.mealPerAdultPerNight * nights * adultsN : 0;
+    const pet = petsN > 0 ? packageRates.petPerPetPerNight * nights * petsN : 0;
+    const drvMeal = seg.driverMealOn && driversN > 0 ? packageRates.mealPerAdultPerNight * nights * driversN : 0;
+    const base = meal + pet + drvMeal;
+    const gst = base * 0.18;
+    return { meal, pet, drvMeal, base, gst, total: base + gst, adultsN, petsN, driversN, nights };
+  });
+  const totalMealPet = segMealCalcs.reduce((s, c) => s + c.total, 0);
+
   const createAdvance = newPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
   const advN = isEdit ? initialAdvance : createAdvance;
-
-  const mealCharges = mealOn ? packageRates.mealPerAdultPerNight * totalNights * adultsN : 0;
-  const mealGstAmt = mealCharges * 0.18;
-  const totalMealAmt = mealCharges + mealGstAmt;
-
-  const petCharges = petsN > 0 ? packageRates.petPerPetPerNight * totalNights * petsN : 0;
-  const petGstAmt = petCharges * 0.18;
-  const totalPetAmt = petCharges + petGstAmt;
-
-  const driverMealCharges = driverMealOn && driversN > 0 ? packageRates.mealPerAdultPerNight * totalNights * driversN : 0;
-  const driverMealGstAmt = driverMealCharges * 0.18;
-  const totalDriverMealAmt = driverMealCharges + driverMealGstAmt;
-
-  const totalMealPet = totalMealAmt + totalPetAmt + totalDriverMealAmt;
 
   const addOnTotals = addOnRows.map(r => {
     const amt = parseFloat(r.amount) || 0;
@@ -307,11 +422,11 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     if (!/^\d{10}$/.test(mobile.trim())) errs.mobile = true;
     if (!checkin) errs.checkin = true;
     if (!checkout || checkout <= checkin) errs.checkout = true;
-    const hasRoom = rows.some((r) => r.roomId);
+    const hasRoom = formSegs.some((s) => s.rows.some((r) => r.roomId));
     if (!hasRoom) errs.rooms = true;
     setErrors(errs);
     if (errs.rooms) {
-      showNotif("Please select room category in at least one row", "error");
+      showNotif("Please select room category in at least one segment", "error");
       return false;
     }
     if (errs.name || errs.mobile || errs.checkin || errs.checkout) {
@@ -327,7 +442,33 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     status: BookingStatus,
     allocatedRooms: string[]
   ): Booking => {
-    const pricingRows = computedRows.filter((r) => r.roomId);
+    const validSegments = computedSegments
+      .map((cs, i) => {
+        const fs = formSegs[i];
+        const mc = segMealCalcs[i];
+        return {
+          ...cs,
+          adults: mc?.adultsN ?? 2,
+          seniors: parseInt(fs?.seniors ?? "0") || 0,
+          kidsAbove10: parseInt(fs?.kidsAbove10 ?? "0") || 0,
+          kids6to10: parseInt(fs?.kids6to10 ?? "0") || 0,
+          kids2to6: parseInt(fs?.kids2to6 ?? "0") || 0,
+          infantsBelow2: parseInt(fs?.infants ?? "0") || 0,
+          pets: mc?.petsN ?? 0,
+          mealOn: fs?.mealOn ?? false,
+          drivers: mc?.driversN ?? 0,
+          driverMealOn: fs?.driverMealOn ?? false,
+          mealTotal: mc?.base ?? 0,
+          mealGst: mc?.gst ?? 0,
+          mealWithGst: mc?.total ?? 0,
+          segmentTotal: cs.segmentTotal + (mc?.total ?? 0),
+        };
+      })
+      .filter((s) => s.rooms.length > 0);
+    const maxAdults = Math.max(...validSegments.map((s) => s.adults), 0);
+    const anyMeal = validSegments.some((s) => s.mealOn);
+    const totalMealBase = segMealCalcs.reduce((s, c) => s + c.base, 0);
+    const totalMealGst = segMealCalcs.reduce((s, c) => s + c.gst, 0);
     return {
       id,
       guest: name.trim(),
@@ -341,27 +482,27 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       checkout,
       nights: totalNights,
 
-      adults: adultsN,
-      kidsAbove10: parseInt(kidsAbove10) || 0,
-      kids6to10: parseInt(kids6to10) || 0,
-      kids2to6: parseInt(kids2to6) || 0,
-      infantsBelow2: parseInt(infants) || 0,
-      seniors: parseInt(seniors) || 0,
-      pets: petsN,
+      adults: maxAdults || 2,
+      kidsAbove10: Math.max(...validSegments.map((s) => s.kidsAbove10), 0),
+      kids6to10: Math.max(...validSegments.map((s) => s.kids6to10), 0),
+      kids2to6: Math.max(...validSegments.map((s) => s.kids2to6), 0),
+      infantsBelow2: Math.max(...validSegments.map((s) => s.infantsBelow2), 0),
+      seniors: Math.max(...validSegments.map((s) => s.seniors), 0),
+      pets: Math.max(...validSegments.map((s) => s.pets), 0),
 
-      pricingRows,
+      segments: validSegments,
 
-      mealOn,
-      mealTotal: mealCharges,
-      mealGst: mealGstAmt,
-      petTotal: petCharges,
-      petGst: petGstAmt,
-      driverCount: driversN,
+      mealOn: anyMeal,
+      mealTotal: totalMealBase,
+      mealGst: totalMealGst,
+      petTotal: segMealCalcs.reduce((s, c) => s + c.pet, 0),
+      petGst: segMealCalcs.reduce((s, c) => s + c.pet, 0) * 0.18,
+      driverCount: Math.max(...validSegments.map((s) => s.drivers), 0),
       driverTotal: 0,
       driverGst: 0,
-      driverMealOn,
-      driverMealTotal: driverMealCharges,
-      driverMealGst: driverMealGstAmt,
+      driverMealOn: validSegments.some((s) => s.driverMealOn),
+      driverMealTotal: segMealCalcs.reduce((s, c) => s + c.drvMeal, 0),
+      driverMealGst: segMealCalcs.reduce((s, c) => s + c.drvMeal, 0) * 0.18,
 
       totalRoomCharges,
       totalMealCharges: totalMealPet,
@@ -388,7 +529,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   };
 
   const buildEditPatch = (allocatedRooms: string[]): Partial<Booking> => {
-    const pricingRows = computedRows.filter((r) => r.roomId);
+    const validSegments = computedSegments.filter((s) => s.rooms.length > 0);
     const validNewPayments = newPaymentRows
       .filter((p) => p.date && (parseFloat(p.amount) || 0) > 0)
       .map((p) => ({
@@ -405,6 +546,32 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     const newAdvance = validNewPayments.length > 0
       ? initialAdvance + validNewPayments.reduce((s, p) => s + p.amount, 0)
       : undefined;
+    const segsFull = computedSegments
+      .map((cs, i) => {
+        const fs = formSegs[i];
+        const mc = segMealCalcs[i];
+        return {
+          ...cs,
+          adults: mc?.adultsN ?? 2,
+          seniors: parseInt(fs?.seniors ?? "0") || 0,
+          kidsAbove10: parseInt(fs?.kidsAbove10 ?? "0") || 0,
+          kids6to10: parseInt(fs?.kids6to10 ?? "0") || 0,
+          kids2to6: parseInt(fs?.kids2to6 ?? "0") || 0,
+          infantsBelow2: parseInt(fs?.infants ?? "0") || 0,
+          pets: mc?.petsN ?? 0,
+          mealOn: fs?.mealOn ?? false,
+          drivers: mc?.driversN ?? 0,
+          driverMealOn: fs?.driverMealOn ?? false,
+          mealTotal: mc?.base ?? 0,
+          mealGst: mc?.gst ?? 0,
+          mealWithGst: mc?.total ?? 0,
+          segmentTotal: cs.segmentTotal + (mc?.total ?? 0),
+        };
+      })
+      .filter((s) => s.rooms.length > 0);
+    const anyMeal = segsFull.some((s) => s.mealOn);
+    const totalMealBase = segMealCalcs.reduce((s, c) => s + c.base, 0);
+    const totalMealGst = segMealCalcs.reduce((s, c) => s + c.gst, 0);
     return {
       guest: name.trim(),
       mobile: mobile.trim(),
@@ -416,27 +583,27 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       checkout,
       nights: totalNights,
 
-      adults: adultsN,
-      kidsAbove10: parseInt(kidsAbove10) || 0,
-      kids6to10: parseInt(kids6to10) || 0,
-      kids2to6: parseInt(kids2to6) || 0,
-      infantsBelow2: parseInt(infants) || 0,
-      seniors: parseInt(seniors) || 0,
-      pets: petsN,
+      adults: Math.max(...segsFull.map((s) => s.adults), 0) || 2,
+      kidsAbove10: Math.max(...segsFull.map((s) => s.kidsAbove10), 0),
+      kids6to10: Math.max(...segsFull.map((s) => s.kids6to10), 0),
+      kids2to6: Math.max(...segsFull.map((s) => s.kids2to6), 0),
+      infantsBelow2: Math.max(...segsFull.map((s) => s.infantsBelow2), 0),
+      seniors: Math.max(...segsFull.map((s) => s.seniors), 0),
+      pets: Math.max(...segsFull.map((s) => s.pets), 0),
 
-      pricingRows,
+      segments: segsFull,
 
-      mealOn,
-      mealTotal: mealCharges,
-      mealGst: mealGstAmt,
-      petTotal: petCharges,
-      petGst: petGstAmt,
-      driverCount: driversN,
+      mealOn: anyMeal,
+      mealTotal: totalMealBase,
+      mealGst: totalMealGst,
+      petTotal: segMealCalcs.reduce((s, c) => s + c.pet, 0),
+      petGst: segMealCalcs.reduce((s, c) => s + c.pet, 0) * 0.18,
+      driverCount: Math.max(...segsFull.map((s) => s.drivers), 0),
       driverTotal: 0,
       driverGst: 0,
-      driverMealOn,
-      driverMealTotal: driverMealCharges,
-      driverMealGst: driverMealGstAmt,
+      driverMealOn: segsFull.some((s) => s.driverMealOn),
+      driverMealTotal: segMealCalcs.reduce((s, c) => s + c.drvMeal, 0),
+      driverMealGst: segMealCalcs.reduce((s, c) => s + c.drvMeal, 0) * 0.18,
 
       totalRoomCharges,
       totalMealCharges: totalMealPet,
@@ -469,7 +636,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     let allocatedRooms: string[] = [];
     if (intent === "Tentative" || intent === "Confirmed") {
       const result = tryAssignRooms(
-        computedRows.filter((r) => r.roomId),
+        computedSegments,
         checkin,
         checkout,
         bookings,
@@ -498,7 +665,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     let allocatedRooms = initial.allocatedRooms;
     if (initial.status === "Tentative" || initial.status === "Confirmed") {
       const result = tryAssignRooms(
-        computedRows.filter((r) => r.roomId),
+        computedSegments,
         checkin,
         checkout,
         bookings,
@@ -608,430 +775,451 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
         </div>
       </div>
 
-      {/* §2 Guest Count */}
+      {/* §2 Accommodation */}
       <div className="form-panel">
         <div className="form-sec">
-          <div className="form-sec-title">
-            <span className="form-sec-num">2</span>Guest Count
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 11, alignItems: "start" }}>
-            <div className="field">
-              <label>Adults</label>
-              <input
-                type="number"
-                value={adults}
-                onChange={(e) => setAdults(e.target.value)}
-                min={1}
-              />
-            </div>
-            <div className="field">
-              <label>Senior Citizens</label>
-              <input
-                type="number"
-                value={seniors}
-                onChange={(e) => setSeniors(e.target.value)}
-                min={0}
-              />
-              <div className="field-hint">for room setup tracking only</div>
-            </div>
-            <div className="field">
-              <label>Kids &gt; 10 yrs</label>
-              <input
-                type="number"
-                value={kidsAbove10}
-                onChange={(e) => setKidsAbove10(e.target.value)}
-                min={0}
-              />
-            </div>
-            <div className="field">
-              <label>Kids 6–10 yrs</label>
-              <input
-                type="number"
-                value={kids6to10}
-                onChange={(e) => setKids6to10(e.target.value)}
-                min={0}
-              />
-            </div>
-            <div className="field">
-              <label>Kids 2–6 yrs</label>
-              <input
-                type="number"
-                value={kids2to6}
-                onChange={(e) => setKids2to6(e.target.value)}
-                min={0}
-              />
-            </div>
-            <div className="field">
-              <label>Infants &lt; 2</label>
-              <input
-                type="number"
-                value={infants}
-                onChange={(e) => setInfants(e.target.value)}
-                min={0}
-              />
-            </div>
-            <div className="field">
-              <label>Pets</label>
-              <input
-                type="number"
-                value={pets}
-                onChange={(e) => {
-                  const v = parseInt(e.target.value) || 0;
-                  setPets(String(Math.max(0, Math.min(2, v))));
-                }}
-                min={0}
-                max={2}
-              />
-              <div className="field-hint">max 2 per villa</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* §3 Stay Dates & Pricing */}
-      <div className="form-panel">
-        <div className="form-sec">
-          <div className="form-sec-title">
-            <span className="form-sec-num">3</span>Stay Dates &amp; Pricing
-          </div>
-          <div className="fg3" style={{ marginBottom: 14 }}>
-            <div className={`field${errors.checkin ? " error" : ""}`}>
-              <label>Check-in Date *</label>
-              <input type="date" value={checkin} onChange={(e) => setCheckin(e.target.value)} />
-              <span className="field-err">Select check-in date</span>
-            </div>
-            <div className={`field${errors.checkout ? " error" : ""}`}>
-              <label>Check-out Date *</label>
-              <input type="date" value={checkout} onChange={(e) => setCheckout(e.target.value)} />
-              <span className="field-err">Check-out must be after check-in</span>
-            </div>
-            <div className="field">
-              <label>Total Nights</label>
-              <input type="number" value={totalNights} readOnly />
-            </div>
+          <div className="form-sec-title" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span><span className="form-sec-num">2</span>Accommodation</span>
+            <button type="button" className="btn btn-sm" onClick={addSegment} style={{ fontSize: 12 }}>
+              + Add Segment
+            </button>
           </div>
 
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ minWidth: 1100 }}>
-              <thead>
-                <tr>
-                  <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 90 }}>Day Type</th>
-                  <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 180 }}>Room Category</th>
-                  <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 100, textAlign: "right" }}>Tariff</th>
-                  <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 60, textAlign: "right" }}>Nights</th>
-                  <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 60, textAlign: "right" }}>Rooms</th>
-                  <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 110, textAlign: "right" }}>Charges</th>
-                  <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 70, textAlign: "right" }}>Disc %</th>
-                  <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 100, textAlign: "right" }}>Disc Amt</th>
-                  <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 110, textAlign: "right" }}>Net</th>
-                  <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 60, textAlign: "right" }}>GST %</th>
-                  <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 100, textAlign: "right" }}>GST Amt</th>
-                  <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 110, textAlign: "right" }}>Total</th>
-                  <th style={{ width: 32 }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.length === 0 ? (
-                  <tr>
-                    <td colSpan={13}>
-                      <div className="empty-state" style={{ padding: 20 }}>
-                        <p>Pick check-in and check-out dates above to auto-generate pricing rows.</p>
-                      </div>
-                    </td>
-                  </tr>
-                ) : (
-                  rows.map((row, i) => {
-                    const calc = computedRows[i];
-                    const cap = maxDiscountForRowAndRole(row.rowType, currentRole, discountCaps);
-                    const overCap = (parseFloat(row.discountPct) || 0) > cap;
-                    return (
-                      <tr key={row.uid} style={{ cursor: "default" }}>
-                        <td style={{ verticalAlign: "middle" }}>
-                          <span
-                            className="badge"
-                            style={{
-                              background:
-                                row.rowType === "sat" || row.rowType === "fri-sat" ? "var(--acc-bg)"
-                                : row.rowType === "fri" ? "var(--amb-bg)"
-                                : "var(--bd)",
-                              color:
-                                row.rowType === "sat" || row.rowType === "fri-sat" ? "var(--acc)"
-                                : row.rowType === "fri" ? "var(--amb)"
-                                : "var(--t2)",
-                            }}
-                          >
-                            {ROW_LABEL[row.rowType]}
-                          </span>
-                        </td>
-                        <td style={{ verticalAlign: "middle" }}>
-                          <select
-                            value={row.roomId}
-                            onChange={(e) => onRoomChange(row.uid, e.target.value)}
-                            style={{
-                              width: "100%",
-                              padding: "5px 8px",
-                              border: "1px solid var(--bd)",
-                              borderRadius: "var(--r3)",
-                              fontSize: 12,
-                              background: "var(--surf)",
-                              outline: "none",
-                            }}
-                          >
-                            <option value="">— Select —</option>
-                            {rooms.map((r) => (
-                              <option key={r.id} value={r.id}>
-                                {r.name}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                        <td style={{ verticalAlign: "middle" }}>
-                          <input
-                            type="number"
-                            value={row.tariff}
-                            onChange={(e) => setRow(row.uid, { tariff: e.target.value })}
-                            style={cellInputStyle}
-                          />
-                        </td>
-                        <td style={{ verticalAlign: "middle" }}>
-                          <input
-                            type="number"
-                            value={row.nights}
-                            readOnly={row.rowType !== "custom"}
-                            onChange={(e) => setRow(row.uid, { nights: e.target.value })}
-                            style={cellInputStyle}
-                          />
-                        </td>
-                        <td style={{ verticalAlign: "middle" }}>
-                          <input
-                            type="number"
-                            value={row.numRooms}
-                            min={1}
-                            onChange={(e) => setRow(row.uid, { numRooms: e.target.value })}
-                            style={cellInputStyle}
-                          />
-                        </td>
-                        <td
-                          style={{
-                            textAlign: "right",
-                            verticalAlign: "middle",
-                            fontWeight: 600,
-                            color: "var(--t1)",
-                          }}
-                        >
-                          {fmt(calc.roomCharges)}
-                        </td>
-                        <td style={{ verticalAlign: "middle" }}>
-                          <input
-                            type="number"
-                            value={row.discountPct}
-                            min={0}
-                            max={cap}
-                            onChange={(e) => onDiscChange(row.uid, e.target.value)}
-                            style={cellInputStyle}
-                          />
-                          {overCap && (
-                            <div style={{ fontSize: 9, color: "var(--red)", marginTop: 2 }}>
-                              Max {cap}%
-                            </div>
-                          )}
-                        </td>
-                        <td style={{ textAlign: "right", verticalAlign: "middle", color: "var(--amb)" }}>
-                          {calc.discountAmt > 0 ? `− ${fmt(calc.discountAmt)}` : "—"}
-                        </td>
-                        <td style={{ textAlign: "right", verticalAlign: "middle" }}>
-                          {fmt(calc.netCharges)}
-                        </td>
-                        <td
-                          style={{ textAlign: "center", verticalAlign: "middle", color: "var(--t3)" }}
-                        >
-                          {calc.gstRate > 0 ? `${calc.gstRate}%` : "—"}
-                        </td>
-                        <td style={{ textAlign: "right", verticalAlign: "middle" }}>
-                          {fmt(calc.gstAmt)}
-                        </td>
-                        <td
-                          style={{
-                            textAlign: "right",
-                            verticalAlign: "middle",
-                            fontWeight: 700,
-                            color: "var(--t1)",
-                          }}
-                        >
-                          {fmt(calc.totalAmt)}
-                        </td>
-                        <td style={{ verticalAlign: "middle" }}>
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-xs"
-                            onClick={() => removeRow(row.uid)}
-                            title="Remove row"
-                          >
-                            Remove
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-                <tr style={{ background: "var(--surf2)" }}>
-                  <td colSpan={11} style={{ textAlign: "right", fontWeight: 700, color: "var(--t1)" }}>
-                    Total Room Charges (A)
-                  </td>
-                  <td
-                    style={{ textAlign: "right", fontWeight: 800, color: "var(--sb)", fontSize: 14 }}
-                  >
-                    {fmt(totalRoomCharges)}
-                  </td>
-                  <td></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            style={{ marginTop: 12 }}
-            onClick={addCustomRow}
-          >
-            Add Row
-          </button>
-        </div>
-      </div>
-
-      {/* §4 Meal Charges */}
-      <div className="form-panel">
-        <div className="form-sec">
-          <div className="form-sec-title">
-            <span className="form-sec-num">4</span>Meal Charges
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
-              <span style={{ fontSize: 13, fontWeight: 500, color: "var(--t1)", minWidth: 220 }}>
-                Include Meal Package?
-              </span>
-              <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-                <input type="radio" name="meal" checked={mealOn} onChange={() => setMealOn(true)} /> Yes
-              </label>
-              <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-                <input type="radio" name="meal" checked={!mealOn} onChange={() => setMealOn(false)} /> No
-              </label>
+          {formSegs.length === 0 ? (
+            <div className="empty-state" style={{ padding: 20 }}>
+              <p>Click &quot;+ Add Segment&quot; to add dates and rooms.</p>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
-              <span style={{ fontSize: 13, fontWeight: 500, color: "var(--t1)", minWidth: 220 }}>
-                Drivers / Attendants
-              </span>
-              <input
-                type="number"
-                value={drivers}
-                onChange={(e) => {
-                  const v = Math.max(0, parseInt(e.target.value) || 0);
-                  setDrivers(String(v));
-                  if (v === 0) setDriverMealOn(false);
-                }}
-                min={0}
-                style={{ width: 64, padding: "5px 8px", border: "1px solid var(--bd)", borderRadius: "var(--r3)", fontSize: 13, textAlign: "center", background: "var(--surf)", outline: "none" }}
-              />
-              {driversN > 0 && (
-                <>
-                  <span style={{ fontSize: 13, fontWeight: 500, color: "var(--t1)", marginLeft: 16 }}>
-                    Include Meal for Driver?
-                  </span>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-                    <input type="radio" name="driverMeal" checked={driverMealOn} onChange={() => setDriverMealOn(true)} /> Yes
-                  </label>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-                    <input type="radio" name="driverMeal" checked={!driverMealOn} onChange={() => setDriverMealOn(false)} /> No
-                  </label>
-                </>
-              )}
-            </div>
-          </div>
-
-          {mealOn || petsN > 0 || (driverMealOn && driversN > 0) ? (
-            <table>
-              <thead>
-                <tr>
-                  <th style={{ whiteSpace: "nowrap" }}>Charge</th>
-                  <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Tariff</th>
-                  <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Nights</th>
-                  <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Pax</th>
-                  <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Charges</th>
-                  <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>GST %</th>
-                  <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>GST Amt</th>
-                  <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {mealOn && (
-                  <tr style={{ cursor: "default" }}>
-                    <td>
-                      <strong>Meal &amp; Activity Package</strong>
-                    </td>
-                    <td style={{ textAlign: "right" }}>{fmt(packageRates.mealPerAdultPerNight)}</td>
-                    <td style={{ textAlign: "right" }}>{totalNights}</td>
-                    <td style={{ textAlign: "right" }}>{adultsN}</td>
-                    <td style={{ textAlign: "right" }}>{fmt(mealCharges)}</td>
-                    <td style={{ textAlign: "right" }}>18%</td>
-                    <td style={{ textAlign: "right" }}>{fmt(mealGstAmt)}</td>
-                    <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(totalMealAmt)}</td>
-                  </tr>
-                )}
-                {petsN > 0 && (
-                  <tr style={{ cursor: "default" }}>
-                    <td>
-                      <strong>Pet Package</strong>
-                    </td>
-                    <td style={{ textAlign: "right" }}>{fmt(packageRates.petPerPetPerNight)}</td>
-                    <td style={{ textAlign: "right" }}>{totalNights}</td>
-                    <td style={{ textAlign: "right" }}>{petsN}</td>
-                    <td style={{ textAlign: "right" }}>{fmt(petCharges)}</td>
-                    <td style={{ textAlign: "right" }}>18%</td>
-                    <td style={{ textAlign: "right" }}>{fmt(petGstAmt)}</td>
-                    <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(totalPetAmt)}</td>
-                  </tr>
-                )}
-                {driverMealOn && driversN > 0 && (
-                  <tr style={{ cursor: "default" }}>
-                    <td>
-                      <strong>Driver / Attendant Meal</strong>
-                    </td>
-                    <td style={{ textAlign: "right" }}>{fmt(packageRates.mealPerAdultPerNight)}</td>
-                    <td style={{ textAlign: "right" }}>{totalNights}</td>
-                    <td style={{ textAlign: "right" }}>{driversN}</td>
-                    <td style={{ textAlign: "right" }}>{fmt(driverMealCharges)}</td>
-                    <td style={{ textAlign: "right" }}>18%</td>
-                    <td style={{ textAlign: "right" }}>{fmt(driverMealGstAmt)}</td>
-                    <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(totalDriverMealAmt)}</td>
-                  </tr>
-                )}
-                <tr style={{ background: "var(--surf2)" }}>
-                  <td colSpan={7} style={{ textAlign: "right", fontWeight: 700, color: "var(--t1)" }}>
-                    Total Meal Charges (B)
-                  </td>
-                  <td
-                    style={{ textAlign: "right", fontWeight: 800, color: "var(--sb)", fontSize: 14 }}
-                  >
-                    {fmt(totalMealPet)}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
           ) : (
-            <div style={{ fontSize: 12, color: "var(--t3)" }}>
-              No packages selected. Toggle Yes above to include meal package, or add pets / drivers in Guest Count.
+            formSegs.map((seg, segIdx) => {
+              const segNights = nightsBetween(seg.checkin, seg.checkout);
+              const segMeal = segMealCalcs[segIdx];
+              const { weekday: segWd, friday: segFr, saturday: segSa } = splitNightsByType(seg.checkin, seg.checkout);
+              const nightParts = [
+                segWd > 0 ? `${segWd} Weekday` : "",
+                segFr > 0 ? `${segFr} Fri` : "",
+                segSa > 0 ? `${segSa} Sat` : "",
+              ].filter(Boolean).join(" · ");
+              const ciDay = seg.checkin ? new Date(seg.checkin + "T00:00:00").toLocaleDateString("en-IN", { weekday: "short" }) : "";
+              const coDay = seg.checkout ? new Date(seg.checkout + "T00:00:00").toLocaleDateString("en-IN", { weekday: "short" }) : "";
+
+              // Compute offset into computedRows for this segment
+              let segRowOffset = 0;
+              for (const ps of formSegs) {
+                if (ps.id === seg.id) break;
+                segRowOffset += ps.rows.length;
+              }
+
+              return (
+                <div
+                  key={seg.id}
+                  style={{
+                    border: "1px solid var(--bd)",
+                    borderRadius: "var(--r4)",
+                    marginBottom: 16,
+                    overflow: "hidden",
+                  }}
+                >
+                  {/* Segment header */}
+                  <div
+                    style={{
+                      padding: "10px 14px",
+                      background: "var(--surf2)",
+                      borderBottom: "1px solid var(--bd)",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                      gap: 8,
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ fontSize: 11, color: "var(--t3)", fontWeight: 600 }}>Check-in</span>
+                        <input
+                          type="date"
+                          value={seg.checkin}
+                          onChange={(e) => updateSegDates(seg.id, e.target.value, seg.checkout)}
+                          style={{ fontSize: 12, padding: "4px 8px", border: "1px solid var(--bd)", borderRadius: "var(--r3)", background: "var(--surf)", outline: "none" }}
+                        />
+                        {ciDay && <span style={{ fontSize: 11, color: "var(--acc)", fontWeight: 700 }}>{ciDay}</span>}
+                      </div>
+                      <span style={{ color: "var(--t3)", fontSize: 13 }}>&rarr;</span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ fontSize: 11, color: "var(--t3)", fontWeight: 600 }}>Check-out</span>
+                        <input
+                          type="date"
+                          value={seg.checkout}
+                          onChange={(e) => updateSegDates(seg.id, seg.checkin, e.target.value)}
+                          style={{ fontSize: 12, padding: "4px 8px", border: "1px solid var(--bd)", borderRadius: "var(--r3)", background: "var(--surf)", outline: "none" }}
+                        />
+                        {coDay && <span style={{ fontSize: 11, color: "var(--acc)", fontWeight: 700 }}>{coDay}</span>}
+                      </div>
+                      {segNights > 0 && (
+                        <span style={{ fontSize: 11, color: "var(--t2)" }}>
+                          {segNights} night{segNights > 1 ? "s" : ""}
+                          {nightParts ? ` (${nightParts})` : ""}
+                        </span>
+                      )}
+                    </div>
+                    {formSegs.length > 1 && (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-xs"
+                        onClick={() => removeSegment(seg.id)}
+                      >
+                        Remove Segment
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Guest counts for this segment */}
+                  <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--bd)", background: "var(--surf)" }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", marginBottom: 7, textTransform: "uppercase", letterSpacing: "0.04em" }}>Guest Count</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                      {[
+                        { label: "Adults", field: "adults" as keyof FormSeg, min: 1 },
+                        { label: "Sr. Citizens", field: "seniors" as keyof FormSeg, min: 0 },
+                        { label: "Kids >10", field: "kidsAbove10" as keyof FormSeg, min: 0 },
+                        { label: "Kids 6–10", field: "kids6to10" as keyof FormSeg, min: 0 },
+                        { label: "Kids 2–6", field: "kids2to6" as keyof FormSeg, min: 0 },
+                        { label: "Infants <2", field: "infants" as keyof FormSeg, min: 0 },
+                        { label: "Pets (max 2)", field: "pets" as keyof FormSeg, min: 0 },
+                      ].map(({ label, field, min }) => (
+                        <div key={field} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+                          <span style={{ fontSize: 10, color: "var(--t3)", fontWeight: 500, whiteSpace: "nowrap" }}>{label}</span>
+                          <input
+                            type="number"
+                            value={seg[field] as string}
+                            min={min}
+                            max={field === "pets" ? 2 : undefined}
+                            onChange={(e) => {
+                              let v = parseInt(e.target.value) || 0;
+                              if (v < min) v = min;
+                              if (field === "pets" && v > 2) v = 2;
+                              updateSegField(seg.id, field, String(v));
+                            }}
+                            style={{ width: 52, padding: "4px 6px", border: "1px solid var(--bd)", borderRadius: "var(--r3)", fontSize: 13, textAlign: "center", background: "var(--surf)", outline: "none" }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Rooms table */}
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ minWidth: 1100 }}>
+                      <thead>
+                        <tr>
+                          <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 90 }}>Day Type</th>
+                          <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 180 }}>Room Category</th>
+                          <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 100, textAlign: "right" }}>Tariff</th>
+                          <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 60, textAlign: "right" }}>Nights</th>
+                          <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 60, textAlign: "right" }}>Rooms</th>
+                          <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 110, textAlign: "right" }}>Charges</th>
+                          <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 70, textAlign: "right" }}>Disc %</th>
+                          <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 100, textAlign: "right" }}>Disc Amt</th>
+                          <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 110, textAlign: "right" }}>Net</th>
+                          <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 60, textAlign: "right" }}>GST %</th>
+                          <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 100, textAlign: "right" }}>GST Amt</th>
+                          <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 110, textAlign: "right" }}>Total</th>
+                          <th style={{ width: 32 }}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {seg.rows.length === 0 ? (
+                          <tr>
+                            <td colSpan={13}>
+                              <div className="empty-state" style={{ padding: 16 }}>
+                                <p>Click &quot;+ Add Room Row&quot; to add rooms for this period.</p>
+                              </div>
+                            </td>
+                          </tr>
+                        ) : (
+                          seg.rows.map((row, rowI) => {
+                            const calc = computedRows[segRowOffset + rowI];
+                            if (!calc) return null;
+                            const cap = maxDiscountForRowAndRole(row.rowType, currentRole, discountCaps);
+                            const overCap = (parseFloat(row.discountPct) || 0) > cap;
+                            return (
+                              <tr key={row.uid} style={{ cursor: "default" }}>
+                                <td style={{ verticalAlign: "middle" }}>
+                                  <span
+                                    className="badge"
+                                    style={{
+                                      background:
+                                        row.rowType === "sat" || row.rowType === "fri-sat" ? "var(--acc-bg)"
+                                        : row.rowType === "fri" ? "var(--amb-bg)"
+                                        : "var(--bd)",
+                                      color:
+                                        row.rowType === "sat" || row.rowType === "fri-sat" ? "var(--acc)"
+                                        : row.rowType === "fri" ? "var(--amb)"
+                                        : "var(--t2)",
+                                    }}
+                                  >
+                                    {ROW_LABEL[row.rowType]}
+                                  </span>
+                                </td>
+                                <td style={{ verticalAlign: "middle" }}>
+                                  <select
+                                    value={row.roomId}
+                                    onChange={(e) => onSegRoomChange(seg.id, row.uid, e.target.value)}
+                                    style={{
+                                      width: "100%",
+                                      padding: "5px 8px",
+                                      border: "1px solid var(--bd)",
+                                      borderRadius: "var(--r3)",
+                                      fontSize: 12,
+                                      background: "var(--surf)",
+                                      outline: "none",
+                                    }}
+                                  >
+                                    <option value="">— Select —</option>
+                                    {rooms.map((r) => (
+                                      <option key={r.id} value={r.id}>{r.name}</option>
+                                    ))}
+                                  </select>
+                                </td>
+                                <td style={{ verticalAlign: "middle" }}>
+                                  <input
+                                    type="number"
+                                    value={row.tariff}
+                                    onChange={(e) => setSegRow(seg.id, row.uid, { tariff: e.target.value })}
+                                    style={cellInputStyle}
+                                  />
+                                </td>
+                                <td style={{ verticalAlign: "middle" }}>
+                                  <input
+                                    type="number"
+                                    value={row.nights}
+                                    readOnly={row.rowType !== "custom"}
+                                    onChange={(e) => setSegRow(seg.id, row.uid, { nights: e.target.value })}
+                                    style={cellInputStyle}
+                                  />
+                                </td>
+                                <td style={{ verticalAlign: "middle" }}>
+                                  <input
+                                    type="number"
+                                    value={row.numRooms}
+                                    min={1}
+                                    onChange={(e) => setSegRow(seg.id, row.uid, { numRooms: e.target.value })}
+                                    style={cellInputStyle}
+                                  />
+                                </td>
+                                <td style={{ textAlign: "right", verticalAlign: "middle", fontWeight: 600, color: "var(--t1)" }}>
+                                  {fmt(calc.roomCharges)}
+                                </td>
+                                <td style={{ verticalAlign: "middle" }}>
+                                  <input
+                                    type="number"
+                                    value={row.discountPct}
+                                    min={0}
+                                    max={cap}
+                                    onChange={(e) => onSegDiscChange(seg.id, row.uid, e.target.value)}
+                                    style={cellInputStyle}
+                                  />
+                                  {overCap && (
+                                    <div style={{ fontSize: 9, color: "var(--red)", marginTop: 2 }}>
+                                      Max {cap}%
+                                    </div>
+                                  )}
+                                </td>
+                                <td style={{ textAlign: "right", verticalAlign: "middle", color: "var(--amb)" }}>
+                                  {calc.discountAmt > 0 ? `− ${fmt(calc.discountAmt)}` : "—"}
+                                </td>
+                                <td style={{ textAlign: "right", verticalAlign: "middle" }}>
+                                  {fmt(calc.netCharges)}
+                                </td>
+                                <td style={{ textAlign: "center", verticalAlign: "middle", color: "var(--t3)" }}>
+                                  {calc.gstRate > 0 ? `${calc.gstRate}%` : "—"}
+                                </td>
+                                <td style={{ textAlign: "right", verticalAlign: "middle" }}>
+                                  {fmt(calc.gstAmt)}
+                                </td>
+                                <td style={{ textAlign: "right", verticalAlign: "middle", fontWeight: 700, color: "var(--t1)" }}>
+                                  {fmt(calc.totalAmt)}
+                                </td>
+                                <td style={{ verticalAlign: "middle" }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn-ghost btn-xs"
+                                    onClick={() => removeSegRow(seg.id, row.uid)}
+                                    title="Remove row"
+                                  >
+                                    Remove
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                        {seg.rows.some((r) => r.roomId) && (
+                          <tr style={{ background: "var(--surf2)" }}>
+                            <td colSpan={11} style={{ textAlign: "right", fontWeight: 700, color: "var(--t1)", padding: "8px 10px" }}>
+                              Room Total
+                            </td>
+                            <td style={{ textAlign: "right", fontWeight: 800, color: "var(--sb)", fontSize: 14, padding: "8px 10px" }}>
+                              {fmt(computedRows.slice(segRowOffset, segRowOffset + seg.rows.length).reduce((s, r) => s + r.totalAmt, 0))}
+                            </td>
+                            <td></td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Add room row button */}
+                  <div style={{ padding: "8px 14px", borderTop: "1px solid var(--bd)" }}>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => addSegRoom(seg.id)}
+                    >
+                      + Add Room Row
+                    </button>
+                  </div>
+
+                  {/* Meal package for this segment */}
+                  <div style={{ padding: "12px 14px", borderTop: "1px solid var(--bd)", background: "var(--surf)" }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.04em" }}>Meal Package</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 18, marginBottom: 10 }}>
+                      <span style={{ fontSize: 13, fontWeight: 500, color: "var(--t1)" }}>Include Meal Package?</span>
+                      <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13 }}>
+                        <input type="radio" name={`meal-${seg.id}`} checked={seg.mealOn} onChange={() => updateSegField(seg.id, "mealOn", true)} /> Yes
+                      </label>
+                      <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13 }}>
+                        <input type="radio" name={`meal-${seg.id}`} checked={!seg.mealOn} onChange={() => updateSegField(seg.id, "mealOn", false)} /> No
+                      </label>
+                      <span style={{ fontSize: 13, fontWeight: 500, color: "var(--t1)", marginLeft: 8 }}>Drivers / Attendants</span>
+                      <input
+                        type="number"
+                        value={seg.drivers}
+                        min={0}
+                        onChange={(e) => {
+                          const v = Math.max(0, parseInt(e.target.value) || 0);
+                          updateSegField(seg.id, "drivers", String(v));
+                          if (v === 0) updateSegField(seg.id, "driverMealOn", false);
+                        }}
+                        style={{ width: 52, padding: "4px 6px", border: "1px solid var(--bd)", borderRadius: "var(--r3)", fontSize: 13, textAlign: "center", background: "var(--surf)", outline: "none" }}
+                      />
+                      {segMeal.driversN > 0 && (
+                        <>
+                          <span style={{ fontSize: 13, fontWeight: 500, color: "var(--t1)" }}>Driver Meal?</span>
+                          <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13 }}>
+                            <input type="radio" name={`driverMeal-${seg.id}`} checked={seg.driverMealOn} onChange={() => updateSegField(seg.id, "driverMealOn", true)} /> Yes
+                          </label>
+                          <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13 }}>
+                            <input type="radio" name={`driverMeal-${seg.id}`} checked={!seg.driverMealOn} onChange={() => updateSegField(seg.id, "driverMealOn", false)} /> No
+                          </label>
+                        </>
+                      )}
+                    </div>
+                    {(seg.mealOn || segMeal.petsN > 0 || (seg.driverMealOn && segMeal.driversN > 0)) ? (
+                      <table>
+                        <thead>
+                          <tr>
+                            <th style={{ whiteSpace: "nowrap" }}>Charge</th>
+                            <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Tariff</th>
+                            <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Nights</th>
+                            <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Pax</th>
+                            <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Charges</th>
+                            <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>GST %</th>
+                            <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>GST Amt</th>
+                            <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {seg.mealOn && (
+                            <tr style={{ cursor: "default" }}>
+                              <td><strong>Meal &amp; Activity Package</strong></td>
+                              <td style={{ textAlign: "right" }}>{fmt(packageRates.mealPerAdultPerNight)}</td>
+                              <td style={{ textAlign: "right" }}>{segMeal.nights}</td>
+                              <td style={{ textAlign: "right" }}>{segMeal.adultsN}</td>
+                              <td style={{ textAlign: "right" }}>{fmt(segMeal.meal)}</td>
+                              <td style={{ textAlign: "right" }}>18%</td>
+                              <td style={{ textAlign: "right" }}>{fmt(segMeal.meal * 0.18)}</td>
+                              <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(segMeal.meal * 1.18)}</td>
+                            </tr>
+                          )}
+                          {segMeal.petsN > 0 && (
+                            <tr style={{ cursor: "default" }}>
+                              <td><strong>Pet Package</strong></td>
+                              <td style={{ textAlign: "right" }}>{fmt(packageRates.petPerPetPerNight)}</td>
+                              <td style={{ textAlign: "right" }}>{segMeal.nights}</td>
+                              <td style={{ textAlign: "right" }}>{segMeal.petsN}</td>
+                              <td style={{ textAlign: "right" }}>{fmt(segMeal.pet)}</td>
+                              <td style={{ textAlign: "right" }}>18%</td>
+                              <td style={{ textAlign: "right" }}>{fmt(segMeal.pet * 0.18)}</td>
+                              <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(segMeal.pet * 1.18)}</td>
+                            </tr>
+                          )}
+                          {seg.driverMealOn && segMeal.driversN > 0 && (
+                            <tr style={{ cursor: "default" }}>
+                              <td><strong>Driver / Attendant Meal</strong></td>
+                              <td style={{ textAlign: "right" }}>{fmt(packageRates.mealPerAdultPerNight)}</td>
+                              <td style={{ textAlign: "right" }}>{segMeal.nights}</td>
+                              <td style={{ textAlign: "right" }}>{segMeal.driversN}</td>
+                              <td style={{ textAlign: "right" }}>{fmt(segMeal.drvMeal)}</td>
+                              <td style={{ textAlign: "right" }}>18%</td>
+                              <td style={{ textAlign: "right" }}>{fmt(segMeal.drvMeal * 0.18)}</td>
+                              <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(segMeal.drvMeal * 1.18)}</td>
+                            </tr>
+                          )}
+                          <tr style={{ background: "var(--surf2)" }}>
+                            <td colSpan={7} style={{ textAlign: "right", fontWeight: 700, color: "var(--t1)" }}>
+                              Meal Total (this segment)
+                            </td>
+                            <td style={{ textAlign: "right", fontWeight: 800, color: "var(--sb)", fontSize: 14 }}>
+                              {fmt(segMeal.total)}
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    ) : (
+                      <div style={{ fontSize: 12, color: "var(--t3)" }}>
+                        No meal package selected. Toggle Yes above to include meal, or add pets to show pet charges.
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Segment Grand Total */}
+                  {(seg.rows.some((r) => r.roomId) || segMeal.total > 0) && (
+                    <div style={{ padding: "10px 14px", borderTop: "2px solid var(--bd)", background: "var(--surf2)", display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 16 }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: "var(--t1)" }}>Segment Total</span>
+                      <span style={{ fontSize: 16, fontWeight: 800, color: "var(--sb)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>
+                        {fmt(computedRows.slice(segRowOffset, segRowOffset + seg.rows.length).reduce((s, r) => s + r.totalAmt, 0) + segMeal.total)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+
+          {/* Grand total */}
+          {formSegs.some((s) => s.rows.some((r) => r.roomId)) && (
+            <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: 8 }}>
+              <table style={{ minWidth: 320 }}>
+                <tbody>
+                  <tr style={{ background: "var(--surf2)" }}>
+                    <td colSpan={11} style={{ textAlign: "right", fontWeight: 700, color: "var(--t1)", padding: "8px 12px" }}>
+                      Total Room Charges (A)
+                    </td>
+                    <td style={{ textAlign: "right", fontWeight: 800, color: "var(--sb)", fontSize: 14, padding: "8px 12px" }}>
+                      {fmt(totalRoomCharges)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           )}
         </div>
       </div>
 
-      {/* §5 Add On Charges */}
+      {/* §3 Add On Charges */}
       <div className="form-panel">
         <div className="form-sec">
           <div className="form-sec-title">
-            <span className="form-sec-num">5</span>Add On Charges
+            <span className="form-sec-num">3</span>Add On Charges
           </div>
 
           <button
@@ -1148,253 +1336,172 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
         </div>
       </div>
 
-      {/* §6 Amount Due */}
+      {/* §4 Amount Due */}
       <div className="form-panel">
         <div className="form-sec">
           <div className="form-sec-title">
-            <span className="form-sec-num">6</span>Amount Due
+            <span className="form-sec-num">4</span>Amount Due
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ minWidth: 420 }}>
-                <thead>
-                  <tr>
-                    <th style={{ whiteSpace: "nowrap" }}>Items</th>
-                    <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Basic Amount</th>
-                    <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>GST Amount</th>
-                    <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Total</th>
-                  </tr>
-                </thead>
-                <tbody>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ minWidth: 420 }}>
+              <thead>
+                <tr>
+                  <th style={{ whiteSpace: "nowrap" }}>Items</th>
+                  <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Basic Amount</th>
+                  <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>GST Amount</th>
+                  <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style={{ cursor: "default" }}>
+                  <td>Room Charges (A)</td>
+                  <td style={{ textAlign: "right" }}>
+                    {fmt(computedRows.reduce((s, r) => s + r.netCharges, 0))}
+                  </td>
+                  <td style={{ textAlign: "right" }}>
+                    {fmt(computedRows.reduce((s, r) => s + r.gstAmt, 0))}
+                  </td>
+                  <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(totalRoomCharges)}</td>
+                </tr>
+                {totalMealPet > 0 && (
                   <tr style={{ cursor: "default" }}>
-                    <td>Room Charges (A)</td>
+                    <td>Meal Charges (B)</td>
                     <td style={{ textAlign: "right" }}>
-                      {fmt(computedRows.reduce((s, r) => s + r.netCharges, 0))}
+                      {fmt(segMealCalcs.reduce((s, c) => s + c.base, 0))}
                     </td>
                     <td style={{ textAlign: "right" }}>
-                      {fmt(computedRows.reduce((s, r) => s + r.gstAmt, 0))}
+                      {fmt(segMealCalcs.reduce((s, c) => s + c.gst, 0))}
                     </td>
-                    <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(totalRoomCharges)}</td>
+                    <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(totalMealPet)}</td>
                   </tr>
-                  {totalMealPet > 0 && (
-                    <tr style={{ cursor: "default" }}>
-                      <td>Meal Charges (B)</td>
-                      <td style={{ textAlign: "right" }}>
-                        {fmt(mealCharges + petCharges + driverMealCharges)}
-                      </td>
-                      <td style={{ textAlign: "right" }}>
-                        {fmt(mealGstAmt + petGstAmt + driverMealGstAmt)}
-                      </td>
-                      <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(totalMealPet)}</td>
-                    </tr>
-                  )}
-                  {totalAddOn > 0 && (
-                    <tr style={{ cursor: "default" }}>
-                      <td>Add On Charges (C)</td>
-                      <td style={{ textAlign: "right" }}>{fmt(totalAddOnBasic)}</td>
-                      <td style={{ textAlign: "right" }}>{fmt(totalAddOnGst)}</td>
-                      <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(totalAddOn)}</td>
-                    </tr>
-                  )}
-                  <tr style={{ background: "var(--surf2)", borderTop: "2px solid var(--bd)" }}>
-                    <td style={{ fontWeight: 700, color: "var(--t1)", fontSize: 14 }}>Amount Due</td>
-                    <td style={{ textAlign: "right", color: "var(--t3)" }}>—</td>
-                    <td style={{ textAlign: "right", color: "var(--t3)" }}>—</td>
-                    <td
-                      style={{
-                        textAlign: "right",
-                        fontFamily: "var(--font-outfit), Outfit, sans-serif",
-                        fontSize: 20,
-                        fontWeight: 800,
-                        color: "var(--sb)",
-                      }}
+                )}
+                {totalAddOn > 0 && (
+                  <tr style={{ cursor: "default" }}>
+                    <td>Add On Charges (C)</td>
+                    <td style={{ textAlign: "right" }}>{fmt(totalAddOnBasic)}</td>
+                    <td style={{ textAlign: "right" }}>{fmt(totalAddOnGst)}</td>
+                    <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(totalAddOn)}</td>
+                  </tr>
+                )}
+                <tr style={{ background: "var(--surf2)", borderTop: "2px solid var(--bd)" }}>
+                  <td style={{ fontWeight: 700, color: "var(--t1)", fontSize: 14 }}>Amount Due</td>
+                  <td style={{ textAlign: "right", color: "var(--t3)" }}>—</td>
+                  <td style={{ textAlign: "right", color: "var(--t3)" }}>—</td>
+                  <td
+                    style={{
+                      textAlign: "right",
+                      fontFamily: "var(--font-outfit), Outfit, sans-serif",
+                      fontSize: 20,
+                      fontWeight: 800,
+                      color: "var(--sb)",
+                    }}
+                  >
+                    {fmt(grandTotal)}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      {/* §5 Record Payments */}
+      <div className="form-panel">
+        <div className="form-sec">
+          <div className="form-sec-title">
+            <span className="form-sec-num">5</span>Record Payments
+          </div>
+          <table className="pricing-tbl" style={{ marginBottom: 8 }}>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Amount (₹)</th>
+                <th>Mode</th>
+                <th style={{ width: 32 }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {newPaymentRows.map((row) => (
+                <tr key={row.uid}>
+                  <td>
+                    <input
+                      type="date"
+                      value={row.date}
+                      onChange={(e) => setNewPaymentRows((prev) =>
+                        prev.map((r) => r.uid === row.uid ? { ...r, date: e.target.value } : r)
+                      )}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      min={0}
+                      placeholder="0"
+                      value={row.amount}
+                      onChange={(e) => setNewPaymentRows((prev) =>
+                        prev.map((r) => r.uid === row.uid ? { ...r, amount: e.target.value } : r)
+                      )}
+                    />
+                  </td>
+                  <td>
+                    <select
+                      value={row.mode}
+                      onChange={(e) => setNewPaymentRows((prev) =>
+                        prev.map((r) => r.uid === row.uid ? { ...r, mode: e.target.value } : r)
+                      )}
                     >
-                      {fmt(grandTotal)}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <div>
-              {isEdit ? (
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--t1)", marginBottom: 10 }}>
-                    Record Payments
-                  </div>
-                  <table className="pricing-tbl" style={{ marginBottom: 8 }}>
-                    <thead>
-                      <tr>
-                        <th>Date</th>
-                        <th>Amount (₹)</th>
-                        <th>Mode</th>
-                        <th style={{ width: 32 }}></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {newPaymentRows.map((row) => (
-                        <tr key={row.uid}>
-                          <td>
-                            <input
-                              type="date"
-                              value={row.date}
-                              onChange={(e) => setNewPaymentRows((prev) =>
-                                prev.map((r) => r.uid === row.uid ? { ...r, date: e.target.value } : r)
-                              )}
-                            />
-                          </td>
-                          <td>
-                            <input
-                              type="number"
-                              min={0}
-                              placeholder="0"
-                              value={row.amount}
-                              onChange={(e) => setNewPaymentRows((prev) =>
-                                prev.map((r) => r.uid === row.uid ? { ...r, amount: e.target.value } : r)
-                              )}
-                            />
-                          </td>
-                          <td>
-                            <select
-                              value={row.mode}
-                              onChange={(e) => setNewPaymentRows((prev) =>
-                                prev.map((r) => r.uid === row.uid ? { ...r, mode: e.target.value } : r)
-                              )}
-                            >
-                              <option>Bank Transfer</option>
-                              <option>Cash</option>
-                              <option>Credit Card</option>
-                              <option>Credit Note</option>
-                            </select>
-                          </td>
-                          <td style={{ textAlign: "center" }}>
-                            {newPaymentRows.length > 1 && (
-                              <button
-                                type="button"
-                                className="btn btn-ghost btn-xs"
-                                style={{ color: "var(--red)" }}
-                                onClick={() => setNewPaymentRows((prev) => prev.filter((r) => r.uid !== row.uid))}
-                              >
-                                ×
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-xs"
-                    onClick={() => setNewPaymentRows((prev) => [
-                      ...prev,
-                      { uid: newUid(), date: todayDate, amount: "", mode: "Bank Transfer" },
-                    ])}
-                  >
-                    + Add Row
-                  </button>
-                </div>
-              ) : (
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--t1)", marginBottom: 10 }}>
-                    Record Payments
-                  </div>
-                  <table className="pricing-tbl" style={{ marginBottom: 8 }}>
-                    <thead>
-                      <tr>
-                        <th>Date</th>
-                        <th>Amount (₹)</th>
-                        <th>Mode</th>
-                        <th style={{ width: 32 }}></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {newPaymentRows.map((row) => (
-                        <tr key={row.uid}>
-                          <td>
-                            <input
-                              type="date"
-                              value={row.date}
-                              onChange={(e) => setNewPaymentRows((prev) =>
-                                prev.map((r) => r.uid === row.uid ? { ...r, date: e.target.value } : r)
-                              )}
-                            />
-                          </td>
-                          <td>
-                            <input
-                              type="number"
-                              min={0}
-                              placeholder="0"
-                              value={row.amount}
-                              onChange={(e) => setNewPaymentRows((prev) =>
-                                prev.map((r) => r.uid === row.uid ? { ...r, amount: e.target.value } : r)
-                              )}
-                            />
-                          </td>
-                          <td>
-                            <select
-                              value={row.mode}
-                              onChange={(e) => setNewPaymentRows((prev) =>
-                                prev.map((r) => r.uid === row.uid ? { ...r, mode: e.target.value } : r)
-                              )}
-                            >
-                              <option>Bank Transfer</option>
-                              <option>Cash</option>
-                              <option>Credit Card</option>
-                              <option>Credit Note</option>
-                            </select>
-                          </td>
-                          <td style={{ textAlign: "center" }}>
-                            {newPaymentRows.length > 1 && (
-                              <button
-                                type="button"
-                                className="btn btn-ghost btn-xs"
-                                style={{ color: "var(--red)" }}
-                                onClick={() => setNewPaymentRows((prev) => prev.filter((r) => r.uid !== row.uid))}
-                              >
-                                ×
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-xs"
-                    onClick={() => setNewPaymentRows((prev) => [
-                      ...prev,
-                      { uid: newUid(), date: todayDate, amount: "", mode: "Bank Transfer" },
-                    ])}
-                  >
-                    + Add Row
-                  </button>
-                </div>
-              )}
-              <div
-                className="detail-row"
-                style={{
-                  marginTop: 14,
-                  background: balance > 0 ? "var(--amb-lt)" : "var(--grn-lt)",
-                  padding: "10px 12px",
-                  borderRadius: "var(--r2)",
-                }}
-              >
-                <span className="detail-key" style={{ fontWeight: 600 }}>
-                  Balance Amount
-                </span>
-                <span
-                  className="detail-val"
-                  style={{
-                    fontWeight: 800,
-                    color: balance > 0 ? "var(--amb)" : "var(--grn)",
-                    fontSize: 16,
-                  }}
-                >
-                  {balance > 0 ? fmt(balance) : "Paid"}
-                </span>
-              </div>
-            </div>
+                      <option>Bank Transfer</option>
+                      <option>Cash</option>
+                      <option>Credit Card</option>
+                      <option>Credit Note</option>
+                    </select>
+                  </td>
+                  <td style={{ textAlign: "center" }}>
+                    {newPaymentRows.length > 1 && (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-xs"
+                        style={{ color: "var(--red)" }}
+                        onClick={() => setNewPaymentRows((prev) => prev.filter((r) => r.uid !== row.uid))}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <button
+            type="button"
+            className="btn btn-ghost btn-xs"
+            onClick={() => setNewPaymentRows((prev) => [
+              ...prev,
+              { uid: newUid(), date: todayDate, amount: "", mode: "Bank Transfer" },
+            ])}
+          >
+            + Add Row
+          </button>
+          <div
+            className="detail-row"
+            style={{
+              marginTop: 14,
+              background: balance > 0 ? "var(--amb-lt)" : "var(--grn-lt)",
+              padding: "10px 12px",
+              borderRadius: "var(--r2)",
+            }}
+          >
+            <span className="detail-key" style={{ fontWeight: 600 }}>Balance Amount</span>
+            <span
+              className="detail-val"
+              style={{
+                fontWeight: 800,
+                color: balance > 0 ? "var(--amb)" : "var(--grn)",
+                fontSize: 16,
+              }}
+            >
+              {balance > 0 ? fmt(balance) : "Paid"}
+            </span>
           </div>
         </div>
       </div>

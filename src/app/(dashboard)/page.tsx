@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { fmt, fmtIN, sevenDaysFrom, todayStr, weekRange } from "@/lib/utils";
+import { addDays, fmt, fmtIN, nightsBetween, sevenDaysFrom, todayStr, weekRange } from "@/lib/utils";
 
 type RevFilter = "month";
 
@@ -24,6 +24,8 @@ export default function DashboardPage() {
   const [today, setToday] = useState("");
   const [revFilter, setRevFilter] = useState<RevFilter>("month");
   const [pendingOpen, setPendingOpen] = useState(false);
+  const [foFilter, setFoFilter] = useState<"today" | "tomorrow" | "custom">("today");
+  const [foCustomDate, setFoCustomDate] = useState("");
 
   useEffect(() => {
     setToday(todayStr());
@@ -70,11 +72,15 @@ export default function DashboardPage() {
         bookings.forEach((b) => {
           if (b.checkin <= d && d < b.checkout) {
             const qtyByCat = new Map<string, number>();
-            b.pricingRows.forEach((r) => {
-              if (!cat.cats.includes(r.roomId)) return;
-              const prev = qtyByCat.get(r.roomId) || 0;
-              qtyByCat.set(r.roomId, Math.max(prev, r.numRooms));
-            });
+            b.segments
+              .filter((seg) => seg.checkin <= d && d < seg.checkout)
+              .forEach((seg) => {
+                seg.rooms.forEach((r) => {
+                  if (!cat.cats.includes(r.roomId)) return;
+                  const prev = qtyByCat.get(r.roomId) || 0;
+                  qtyByCat.set(r.roomId, Math.max(prev, r.numRooms));
+                });
+              });
             const qty = Array.from(qtyByCat.values()).reduce((s, n) => s + n, 0);
             if (qty <= 0) return;
             if (b.status === "Confirmed" || b.status === "Completed") booked += qty;
@@ -92,12 +98,15 @@ export default function DashboardPage() {
   const roomSummaryToday = useMemo(() => {
     if (!today) return [];
     const getRoomCount = (b: (typeof bookings)[0], catId: string): number => {
-      const qty = new Map<string, number>();
-      b.pricingRows.forEach((r) => {
-        if (r.roomId !== catId) return;
-        qty.set(r.roomId, Math.max(qty.get(r.roomId) ?? 0, r.numRooms));
-      });
-      return Array.from(qty.values()).reduce((s, n) => s + n, 0);
+      let qty = 0;
+      b.segments
+        .filter((seg) => seg.checkin <= today && today < seg.checkout)
+        .forEach((seg) => {
+          seg.rooms
+            .filter((r) => r.roomId === catId)
+            .forEach((r) => { qty = Math.max(qty, r.numRooms); });
+        });
+      return qty;
     };
     return rooms
       .map((r) => {
@@ -171,24 +180,201 @@ export default function DashboardPage() {
     ].filter((row) => row.total > 0);
   }, [bookings, today]);
 
+  // ───── Front Office: daily report filter date ─────
+  const foDate = useMemo(() => {
+    if (!today) return "";
+    if (foFilter === "today") return today;
+    if (foFilter === "tomorrow") return addDays(today, 1);
+    return foCustomDate || today;
+  }, [today, foFilter, foCustomDate]);
+
+  const foDateLabel = useMemo(() => {
+    if (!foDate) return "";
+    return new Date(foDate + "T00:00:00").toLocaleDateString("en-IN", {
+      weekday: "long", day: "numeric", month: "long", year: "numeric",
+    });
+  }, [foDate]);
+
+  // ───── Front Office: Check-ins / Stayovers / Check-outs ─────
+  const foCheckIns = useMemo(() => {
+    if (!foDate) return [];
+    return bookings.filter(
+      (b) => b.checkin === foDate &&
+        (b.status === "Confirmed" || b.status === "Tentative")
+    );
+  }, [bookings, foDate]);
+
+  const foStayovers = useMemo(() => {
+    if (!foDate) return [];
+    return bookings.filter(
+      (b) => b.checkin < foDate && b.checkout > foDate &&
+        (b.status === "Confirmed" || b.status === "Tentative" || b.status === "Completed")
+    );
+  }, [bookings, foDate]);
+
+  const foCheckOuts = useMemo(() => {
+    if (!foDate) return [];
+    return bookings.filter(
+      (b) => b.checkout === foDate &&
+        (b.status === "Confirmed" || b.status === "Tentative" || b.status === "Completed")
+    );
+  }, [bookings, foDate]);
+
   // ───── Front Office View ─────
   if (isFrontOffice) {
-    const todayLabel = today
-      ? new Date(today + "T00:00:00").toLocaleDateString("en-IN", {
-          weekday: "long",
-          day: "numeric",
-          month: "long",
-          year: "numeric",
-        })
-      : "";
+    // helper to compute pax totals for a booking list
+    const paxTotals = (list: typeof bookings) => ({
+      adults: list.reduce((s, b) => s + b.adults, 0),
+      seniors: list.reduce((s, b) => s + b.seniors, 0),
+      kGt14: list.reduce((s, b) => s + b.kidsAbove10, 0),
+      kLt14: list.reduce((s, b) => s + (b.kids6to10 + b.kids2to6 + b.infantsBelow2), 0),
+      pets: list.reduce((s, b) => s + b.pets, 0),
+    });
+
+    const soTotals = paxTotals(foStayovers);
+
+    const foTblHead = (
+      <tr>
+        <th style={{ width: 36, textAlign: "center" }}>Sl.</th>
+        <th>Guest Name</th>
+        <th style={{ textAlign: "center", width: 48 }}>Day</th>
+        <th>Room No's</th>
+        <th style={{ textAlign: "center", width: 44 }}>A</th>
+        <th style={{ textAlign: "center", width: 52 }}>Sr.Ct</th>
+        <th style={{ textAlign: "center", width: 52 }}>K&gt;14</th>
+        <th style={{ textAlign: "center", width: 52 }}>K&lt;14</th>
+        <th style={{ textAlign: "center", width: 48 }}>Pets</th>
+        <th style={{ textAlign: "center", width: 60 }}>Meals</th>
+        <th style={{ textAlign: "right", width: 110, whiteSpace: "nowrap" }}>Pmt Pending</th>
+        <th style={{ textAlign: "center", width: 72 }}>Actions</th>
+      </tr>
+    );
+
+    const foRow = (b: typeof bookings[0], day: number, idx: number) => (
+      <tr key={b.id}>
+        <td style={{ textAlign: "center", color: "var(--t3)", fontSize: 11 }}>{idx + 1}</td>
+        <td>
+          <div style={{ fontWeight: 500, color: "var(--t1)" }}>{b.guest}</div>
+          <div style={{ fontSize: 11, color: "var(--t3)" }}>{b.mobile}</div>
+        </td>
+        <td style={{ textAlign: "center", fontWeight: 600 }}>{day}</td>
+        <td style={{ fontSize: 12, color: "var(--t2)" }}>{b.allocatedRooms.join(", ") || "—"}</td>
+        <td style={{ textAlign: "center" }}>{b.adults || "—"}</td>
+        <td style={{ textAlign: "center" }}>{b.seniors || "—"}</td>
+        <td style={{ textAlign: "center" }}>{b.kidsAbove10 || "—"}</td>
+        <td style={{ textAlign: "center" }}>{(b.kids6to10 + b.kids2to6 + b.infantsBelow2) || "—"}</td>
+        <td style={{ textAlign: "center" }}>{b.pets || "—"}</td>
+        <td style={{ textAlign: "center" }}>
+          <span style={{ fontWeight: 600, color: b.mealOn ? "var(--grn)" : "var(--t3)" }}>
+            {b.mealOn ? "Yes" : "No"}
+          </span>
+        </td>
+        <td style={{ textAlign: "right", fontWeight: 600, color: b.balance > 0 ? "var(--amb)" : "var(--grn)" }}>
+          {b.balance > 0 ? fmt(b.balance) : "Nil"}
+        </td>
+        <td style={{ textAlign: "center" }}>
+          <button className="btn btn-ghost btn-xs" onClick={() => router.push(`/bookings/${b.id}`)}>
+            View
+          </button>
+        </td>
+      </tr>
+    );
+
+    const foTotalsRow = (totals: ReturnType<typeof paxTotals>, label: string) => (
+      <tr style={{ background: "var(--surf2)", fontWeight: 700 }}>
+        <td colSpan={4} style={{ color: "var(--t1)" }}>{label}</td>
+        <td style={{ textAlign: "center" }}>{totals.adults || "—"}</td>
+        <td style={{ textAlign: "center" }}>{totals.seniors || "—"}</td>
+        <td style={{ textAlign: "center" }}>{totals.kGt14 || "—"}</td>
+        <td style={{ textAlign: "center" }}>{totals.kLt14 || "—"}</td>
+        <td style={{ textAlign: "center" }}>{totals.pets || "—"}</td>
+        <td colSpan={3} />
+      </tr>
+    );
 
     return (
       <div className="view">
         <div className="pg-hd">
           <div>
             <h2>Hello, {currentUser}</h2>
-            <p>Today&apos;s occupancy and guest pax overview &mdash; {todayLabel}</p>
+            <p>Daily occupancy report &mdash; {foDateLabel}</p>
           </div>
+        </div>
+
+        {/* Filter bar */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20 }}>
+          {(["today", "tomorrow", "custom"] as const).map((f) => (
+            <button
+              key={f}
+              className={`btn btn-sm${foFilter === f ? " btn-primary" : " btn-ghost"}`}
+              onClick={() => setFoFilter(f)}
+            >
+              {f === "today" ? "Today" : f === "tomorrow" ? "Tomorrow" : "Date"}
+            </button>
+          ))}
+          {foFilter === "custom" && (
+            <input
+              type="date"
+              className="input input-sm"
+              value={foCustomDate}
+              onChange={(e) => setFoCustomDate(e.target.value)}
+              style={{ marginLeft: 4, fontSize: 13, padding: "4px 8px", border: "1px solid var(--bd)", borderRadius: "var(--r1)", background: "var(--surf)", color: "var(--t1)" }}
+            />
+          )}
+        </div>
+
+        {/* Check-ins */}
+        <div className="tbl-wrap" style={{ marginBottom: 16 }}>
+          <div className="tbl-hd">
+            <h3>Check-in&apos;s &mdash; {foCheckIns.length}</h3>
+          </div>
+          <table>
+            <thead>{foTblHead}</thead>
+            <tbody>
+              {foCheckIns.length === 0 ? (
+                <tr><td colSpan={12}><div className="empty-state"><h3>No check-ins</h3><p>No arrivals on this date</p></div></td></tr>
+              ) : (
+                foCheckIns.map((b, i) => foRow(b, 1, i))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Stayovers */}
+        <div className="tbl-wrap" style={{ marginBottom: 16 }}>
+          <div className="tbl-hd">
+            <h3>Stayovers &mdash; {foStayovers.length}</h3>
+          </div>
+          <table>
+            <thead>{foTblHead}</thead>
+            <tbody>
+              {foStayovers.length === 0 ? (
+                <tr><td colSpan={12}><div className="empty-state"><h3>No stayovers</h3><p>No in-house guests on this date</p></div></td></tr>
+              ) : (
+                <>
+                  {foStayovers.map((b, i) => foRow(b, nightsBetween(b.checkin, foDate) + 1, i))}
+                  {foTotalsRow(soTotals, "Total In-House Guests")}
+                </>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Check-outs */}
+        <div className="tbl-wrap" style={{ marginBottom: 24 }}>
+          <div className="tbl-hd">
+            <h3>Check-out&apos;s &mdash; {foCheckOuts.length}</h3>
+          </div>
+          <table>
+            <thead>{foTblHead}</thead>
+            <tbody>
+              {foCheckOuts.length === 0 ? (
+                <tr><td colSpan={12}><div className="empty-state"><h3>No check-outs</h3><p>No departures on this date</p></div></td></tr>
+              ) : (
+                foCheckOuts.map((b, i) => foRow(b, 0, i))
+              )}
+            </tbody>
+          </table>
         </div>
 
         {/* Room Summary */}

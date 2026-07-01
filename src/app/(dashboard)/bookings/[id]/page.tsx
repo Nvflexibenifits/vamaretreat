@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { fmt, fmtIN, todayStr } from "@/lib/utils";
+import { fmt, fmtIN, getBookingPricingRows, todayStr } from "@/lib/utils";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { CancellationDetails, CancellationPolicy, SpecialDay } from "@/types";
 
@@ -102,30 +102,11 @@ export default function BookingDetailPage() {
     if (id && !b) router.replace("/bookings");
   }, [b, id, router, hydrated]);
 
-  if (!b) return null;
+  const showCancel = !isFrontOffice && b?.status === "Confirmed";
 
-  const canEdit = !isFrontOffice && (b.status === "Enquiry" || b.status === "Tentative" || b.status === "Confirmed" || b.status === "Completed");
-  const showMarkLost = !isFrontOffice && (b.status === "Enquiry" || b.status === "Tentative");
-  const showCancel = !isFrontOffice && b.status === "Confirmed";
-
-  const totalKids = b.kidsAbove10 + b.kids6to10 + b.kids2to6;
-  const totalRoomBaseCharges = b.pricingRows.reduce((s, r) => s + r.roomCharges, 0);
-  const totalDiscount = b.pricingRows.reduce((s, r) => s + r.discountAmt, 0);
-  const totalNet = b.pricingRows.reduce((s, r) => s + r.netCharges, 0);
-  const totalRoomGst = b.pricingRows.reduce((s, r) => s + r.gstAmt, 0);
-  const totalGstAll = totalRoomGst + b.mealGst + b.petGst + (b.driverMealGst ?? 0);
-
-  const roomCategoryMap = (() => {
-    const m = new Map<string, number>();
-    b.pricingRows.forEach((r) => {
-      m.set(r.roomName, Math.max(m.get(r.roomName) ?? 0, r.numRooms));
-    });
-    return m;
-  })();
-
-  // Pre-compute cancellation breakdown for the modal
+  // Pre-compute cancellation breakdown for the modal — must be before early return
   const cancelCalc = useMemo(() => {
-    if (!showCancel) return null;
+    if (!b || !showCancel) return null;
     const stayNights = getDatesInRange(b.checkin, b.checkout);
     const todayMs = new Date(today + "T00:00:00").getTime();
     const checkinMs = new Date(b.checkin + "T00:00:00").getTime();
@@ -161,6 +142,29 @@ export default function BookingDetailPage() {
       creditNotePct: cell.creditNotePct,
     };
   }, [b, showCancel, today, cancellationPolicy, specialDays, creditNoteSettings]);
+
+  if (!b) return null;
+
+  const canEdit = !isFrontOffice && (b.status === "Enquiry" || b.status === "Tentative" || b.status === "Confirmed" || b.status === "Completed");
+  const showMarkLost = !isFrontOffice && (b.status === "Enquiry" || b.status === "Tentative");
+
+  const totalKids = b.kidsAbove10 + b.kids6to10 + b.kids2to6;
+  const pricingRows = getBookingPricingRows(b);
+  const totalRoomBaseCharges = pricingRows.reduce((s, r) => s + r.roomCharges, 0);
+  const totalDiscount = pricingRows.reduce((s, r) => s + r.discountAmt, 0);
+  const totalNet = pricingRows.reduce((s, r) => s + r.netCharges, 0);
+  const totalRoomGst = pricingRows.reduce((s, r) => s + r.gstAmt, 0);
+  const totalGstAll = totalRoomGst + b.mealGst + b.petGst + (b.driverMealGst ?? 0);
+
+  const roomCategoryMap = (() => {
+    const m = new Map<string, number>();
+    b.segments.forEach((seg) => {
+      seg.rooms.forEach((r) => {
+        m.set(r.roomName, Math.max(m.get(r.roomName) ?? 0, r.numRooms));
+      });
+    });
+    return m;
+  })();
 
   const onConfirmCancel = () => {
     if (!cancelCalc) return;
@@ -269,7 +273,7 @@ export default function BookingDetailPage() {
           <h2>{b.guest}</h2>
           <p>{b.id}</p>
         </div>
-        <Link href="/bookings" className="btn btn-ghost btn-sm">Back to Booking List</Link>
+        <Link href="/bookings" className="btn btn-sm" style={{ background: "var(--sb)", color: "#fff", border: "none" }}>Booking List</Link>
       </div>
 
       <div>
@@ -421,18 +425,18 @@ export default function BookingDetailPage() {
                 </tr>
               </thead>
               <tbody>
-                {b.pricingRows.length === 0 ? (
+                {pricingRows.length === 0 ? (
                   <tr><td colSpan={12} style={{ padding: "14px 10px", color: "var(--t3)", fontSize: 12, textAlign: "center" }}>No pricing rows</td></tr>
                 ) : (
-                  b.pricingRows.map((r, i) => {
+                  pricingRows.map((r, i) => {
                     const netRatePerNight = r.nights > 0 && r.numRooms > 0
                       ? Math.round(r.netCharges / r.nights / r.numRooms)
                       : r.tariff;
                     return (
                       <tr key={i} style={{ borderBottom: "1px solid var(--bd)" }}>
                         <td style={{ padding: "8px 10px", fontSize: 12, color: "var(--t1)", fontWeight: 500 }}>{r.roomName}</td>
-                        <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right", whiteSpace: "nowrap" }}>{fmtIN(b.checkin)}</td>
-                        <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right", whiteSpace: "nowrap" }}>{fmtIN(b.checkout)}</td>
+                        <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right", whiteSpace: "nowrap" }}>{fmtIN(r.checkin || b.checkin)}</td>
+                        <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right", whiteSpace: "nowrap" }}>{fmtIN(r.checkout || b.checkout)}</td>
                         <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right" }}>{r.nights}</td>
                         <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right" }}>{fmt(r.tariff)}</td>
                         <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right" }}>{r.discountPct > 0 ? `${r.discountPct}%` : "—"}</td>
@@ -452,7 +456,7 @@ export default function BookingDetailPage() {
                   <td style={{ padding: "9px 10px", fontSize: 12, textAlign: "right" }}>{fmt(totalNet)}</td>
                   <td style={{ padding: "9px 10px" }}></td>
                   <td style={{ padding: "9px 10px", fontSize: 12, textAlign: "right" }}>{fmt(totalRoomGst)}</td>
-                  <td style={{ padding: "9px 10px", fontSize: 12, textAlign: "right", color: "var(--t1)" }}>{fmt(b.pricingRows.reduce((s, r) => s + r.totalAmt, 0))}</td>
+                  <td style={{ padding: "9px 10px", fontSize: 12, textAlign: "right", color: "var(--t1)" }}>{fmt(pricingRows.reduce((s, r) => s + r.totalAmt, 0))}</td>
                 </tr>
               </tbody>
             </table>

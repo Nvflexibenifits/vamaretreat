@@ -696,7 +696,7 @@ export default function RoomChartPage() {
                 >
                   <div className="unalloc-card-name">{b.guest}</div>
                   <div className="unalloc-card-meta">
-                    {fmtIN(b.checkin)} · {b.pricingRows.map((r) => r.roomName).filter(Boolean).join(", ")}
+                    {fmtIN(b.checkin)} · {[...new Set(b.segments.flatMap((s) => s.rooms.map((r) => r.roomName)).filter(Boolean))].join(", ")}
                   </div>
                 </div>
               ))}
@@ -763,7 +763,12 @@ export default function RoomChartPage() {
                       className={isToday ? "rc-today-hd" : ""}
                       style={isWknd ? { color: "var(--acc)", opacity: 0.8 } : undefined}
                     >
-                      {String(dt.getDate()).padStart(2, "0")}/{String(dt.getMonth() + 1).padStart(2, "0")}
+                      <div style={{ lineHeight: 1.2 }}>
+                        <div>{String(dt.getDate()).padStart(2, "0")}/{String(dt.getMonth() + 1).padStart(2, "0")}</div>
+                        <div style={{ fontSize: 9, fontWeight: 500, opacity: 0.7, marginTop: 2 }}>
+                          {dt.toLocaleDateString("en-IN", { weekday: "short" })}
+                        </div>
+                      </div>
                     </th>
                   );
                 })}

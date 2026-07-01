@@ -1,5 +1,6 @@
 import type {
   Booking,
+  BookingSegment,
   BulkRoomBlock,
   CancellationPolicy,
   CreditNoteSettings,
@@ -9,6 +10,7 @@ import type {
   PricingRow,
   RoomInventoryItem,
   RoomMaster,
+  SegmentRoom,
   SpecialDay,
   User,
   Venue,
@@ -97,6 +99,8 @@ function mkPricingRow(
     rowType,
     roomId,
     roomName: room.name,
+    checkin: "",
+    checkout: "",
     tariff,
     nights,
     numRooms,
@@ -123,6 +127,51 @@ function pricingRowsFor(
   if (friday > 0)   rows.push(mkPricingRow("fri",     roomId, friday,   numRooms, discountPct));
   if (saturday > 0) rows.push(mkPricingRow("sat",     roomId, saturday, numRooms, discountPct));
   return rows;
+}
+
+let _segCounter = 0;
+function sid() { return `seg-${++_segCounter}`; }
+
+function buildSegment(
+  checkin: string,
+  checkout: string,
+  roomId: string,
+  numRooms: number,
+  discountPct: number
+): BookingSegment {
+  const rows = pricingRowsFor(checkin, checkout, roomId, numRooms, discountPct);
+  const room = ROOMS.find((r) => r.id === roomId)!;
+  const segRoom: SegmentRoom = {
+    id: sid(),
+    roomId,
+    roomName: room.name,
+    numRooms,
+    discountPct,
+    pricingRows: rows,
+    netCharges: rows.reduce((s, r) => s + r.netCharges, 0),
+    gstAmt: rows.reduce((s, r) => s + r.gstAmt, 0),
+    totalAmt: rows.reduce((s, r) => s + r.totalAmt, 0),
+  };
+  return {
+    id: sid(),
+    checkin,
+    checkout,
+    rooms: [segRoom],
+    segmentTotal: segRoom.totalAmt,
+    adults: 2,
+    seniors: 0,
+    kidsAbove10: 0,
+    kids6to10: 0,
+    kids2to6: 0,
+    infantsBelow2: 0,
+    pets: 0,
+    mealOn: false,
+    drivers: 0,
+    driverMealOn: false,
+    mealTotal: 0,
+    mealGst: 0,
+    mealWithGst: 0,
+  };
 }
 
 function totals(rows: PricingRow[], mealTotal: number, mealGst: number, petTotal: number, petGst: number) {
@@ -174,7 +223,8 @@ function buildBooking(s: SeedSpec): Booking {
     const ms = new Date(s.checkout).getTime() - new Date(s.checkin).getTime();
     return Math.round(ms / 86400000);
   })();
-  const rows = pricingRowsFor(s.checkin, s.checkout, s.roomId, s.numRooms, s.discountPct);
+  const segment = buildSegment(s.checkin, s.checkout, s.roomId, s.numRooms, s.discountPct);
+  const rows = segment.rooms.flatMap((r) => r.pricingRows);
   const adultsForMeal = s.adults;
   const mealTotal = s.mealOn ? 2100 * nights * adultsForMeal : 0;
   const mealGst = mealTotal * 0.18;
@@ -204,7 +254,7 @@ function buildBooking(s: SeedSpec): Booking {
     seniors: s.seniors ?? 0,
     pets: petsCount,
 
-    pricingRows: rows,
+    segments: [segment],
 
     mealOn: s.mealOn,
     mealTotal,

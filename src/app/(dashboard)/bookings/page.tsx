@@ -156,8 +156,10 @@ export default function BookingsPage() {
             ) : (
               data.map((b) => {
                 const roomMap = new Map<string, number>();
-                b.pricingRows.forEach((r) => {
-                  roomMap.set(r.roomName, Math.max(roomMap.get(r.roomName) ?? 0, r.numRooms));
+                b.segments.forEach((seg) => {
+                  seg.rooms.forEach((r) => {
+                    if (r.roomName) roomMap.set(r.roomName, Math.max(roomMap.get(r.roomName) ?? 0, r.numRooms));
+                  });
                 });
                 const totalRooms = Array.from(roomMap.values()).reduce((s, n) => s + n, 0);
                 const roomCateg = Array.from(roomMap.keys()).join(", ") || "—";

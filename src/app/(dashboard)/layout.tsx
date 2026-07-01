@@ -16,13 +16,13 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const router = useRouter();
-  const { isAuthed } = useApp();
+  const { isAuthed, sessionChecking } = useApp();
 
   useEffect(() => {
-    if (!isAuthed) router.replace("/login");
-  }, [isAuthed, router]);
+    if (!sessionChecking && !isAuthed) router.replace("/login");
+  }, [isAuthed, sessionChecking, router]);
 
-  if (!isAuthed) return null;
+  if (sessionChecking || !isAuthed) return null;
 
   return (
     <div id="app">

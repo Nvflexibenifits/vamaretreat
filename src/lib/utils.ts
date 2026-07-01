@@ -1,5 +1,6 @@
 import type {
   Booking,
+  BookingSegment,
   BookingStatus,
   BulkRoomBlock,
   DiscountCaps,
@@ -8,6 +9,7 @@ import type {
   Role,
   RoomInventoryItem,
   RoomMaster,
+  SegmentRoom,
 } from "@/types";
 import { ROOM_INVENTORY, ROOMS, SEED_GST_SETTINGS } from "@/lib/data";
 
@@ -162,6 +164,8 @@ export function calcPricingRow(
     rowType,
     roomId,
     roomName: room?.name ?? "",
+    checkin: "",
+    checkout: "",
     tariff,
     nights,
     numRooms,
@@ -173,6 +177,53 @@ export function calcPricingRow(
     gstAmt,
     totalAmt,
   };
+}
+
+export function calcSegmentRoom(
+  checkin: string,
+  checkout: string,
+  roomId: string,
+  numRooms: number,
+  discountPct: number,
+  roomMaster: RoomMaster[] = ROOMS,
+  gstSettings: GstSettings = SEED_GST_SETTINGS
+): Pick<SegmentRoom, "pricingRows" | "netCharges" | "gstAmt" | "totalAmt"> {
+  const room = roomMaster.find((r) => r.id === roomId);
+  if (!room || !checkin || !checkout || checkout <= checkin) {
+    return { pricingRows: [], netCharges: 0, gstAmt: 0, totalAmt: 0 };
+  }
+  const { weekday, friday, saturday } = splitNightsByType(checkin, checkout);
+  const pricingRows: PricingRow[] = [];
+  if (weekday > 0) {
+    pricingRows.push({
+      ...calcPricingRow("sun-thu", roomId, room.price, weekday, numRooms, discountPct, gstSettings, roomMaster),
+      checkin, checkout,
+    });
+  }
+  if (friday > 0) {
+    pricingRows.push({
+      ...calcPricingRow("fri", roomId, room.price, friday, numRooms, discountPct, gstSettings, roomMaster),
+      checkin, checkout,
+    });
+  }
+  if (saturday > 0) {
+    pricingRows.push({
+      ...calcPricingRow("sat", roomId, room.price, saturday, numRooms, discountPct, gstSettings, roomMaster),
+      checkin, checkout,
+    });
+  }
+  const netCharges = pricingRows.reduce((s, r) => s + r.netCharges, 0);
+  const gstAmt = pricingRows.reduce((s, r) => s + r.gstAmt, 0);
+  const totalAmt = pricingRows.reduce((s, r) => s + r.totalAmt, 0);
+  return { pricingRows, netCharges, gstAmt, totalAmt };
+}
+
+export function getBookingPricingRows(b: Booking): PricingRow[] {
+  return b.segments.flatMap((seg) =>
+    seg.rooms.flatMap((r) =>
+      r.pricingRows.map((pr) => ({ ...pr, checkin: seg.checkin, checkout: seg.checkout }))
+    )
+  );
 }
 
 // ─────── ROOM ALLOCATION ───────
@@ -214,7 +265,7 @@ export type AssignmentResult =
   | { ok: false; missingCategoryName: string };
 
 export function tryAssignRooms(
-  pricingRows: PricingRow[],
+  segments: BookingSegment[],
   checkin: string,
   checkout: string,
   bookings: Booking[],
@@ -224,12 +275,14 @@ export function tryAssignRooms(
   roomMaster: RoomMaster[] = ROOMS
 ): AssignmentResult {
   const need = new Map<string, number>();
-  pricingRows
-    .filter((r) => r.roomId)
-    .forEach((r) => {
-      const prev = need.get(r.roomId) || 0;
-      need.set(r.roomId, Math.max(prev, r.numRooms));
-    });
+  segments.forEach((seg) => {
+    seg.rooms
+      .filter((r) => r.roomId)
+      .forEach((r) => {
+        const prev = need.get(r.roomId) || 0;
+        need.set(r.roomId, Math.max(prev, r.numRooms));
+      });
+  });
   const assigned: string[] = [];
   for (const [cat, count] of need.entries()) {
     if (count <= 0) continue;

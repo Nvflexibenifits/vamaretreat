@@ -73,6 +73,8 @@ export type PricingRow = {
   rowType: PricingRowType;
   roomId: string;
   roomName: string;
+  checkin: string;
+  checkout: string;
   tariff: number;
   nights: number;
   numRooms: number;
@@ -83,6 +85,41 @@ export type PricingRow = {
   gstRate: number;
   gstAmt: number;
   totalAmt: number;
+};
+
+export type SegmentRoom = {
+  id: string;
+  roomId: string;
+  roomName: string;
+  numRooms: number;
+  discountPct: number;
+  pricingRows: PricingRow[];
+  netCharges: number;
+  gstAmt: number;
+  totalAmt: number;
+};
+
+export type BookingSegment = {
+  id: string;
+  checkin: string;
+  checkout: string;
+  rooms: SegmentRoom[];
+  segmentTotal: number;
+  // Per-segment guest counts
+  adults: number;
+  seniors: number;
+  kidsAbove10: number;
+  kids6to10: number;
+  kids2to6: number;
+  infantsBelow2: number;
+  pets: number;
+  // Per-segment meal
+  mealOn: boolean;
+  drivers: number;
+  driverMealOn: boolean;
+  mealTotal: number;
+  mealGst: number;
+  mealWithGst: number;
 };
 
 export type AppliedCreditNote = {
@@ -162,7 +199,7 @@ export type Booking = {
   seniors: number;
   pets: number;
 
-  pricingRows: PricingRow[];
+  segments: BookingSegment[];
 
   mealOn: boolean;
   mealTotal: number;
