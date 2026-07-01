@@ -9,6 +9,7 @@ export const users = pgTable("User", {
   color: text("color").notNull(),
   active: boolean("active").notNull(),
   password: text("password"),
+  plainPassword: text("plainPassword"),
 });
 
 export type User = typeof users.$inferSelect;

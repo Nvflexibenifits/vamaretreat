@@ -1937,6 +1937,7 @@ type ApiUser = {
   email: string;
   color: string;
   active: boolean;
+  plainPassword?: string | null;
 };
 
 function UsersTab() {
@@ -1960,6 +1961,16 @@ function UsersTab() {
 
   // Delete
   const [deleteConfirm, setDeleteConfirm] = useState<ApiUser | null>(null);
+
+  // Show/hide password per user
+  const [visiblePasswords, setVisiblePasswords] = useState<Set<string>>(new Set());
+  const togglePasswordVisible = (id: string) => {
+    setVisiblePasswords((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
 
   const fetchUsers = async () => {
     try {
@@ -2182,7 +2193,21 @@ function UsersTab() {
                               autoComplete="new-password"
                             />
                           ) : (
-                            <span style={{ color: "var(--t3)", letterSpacing: 2, fontSize: 13 }}>••••••••</span>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <span style={{ color: "var(--t2)", fontFamily: "monospace", fontSize: 13, letterSpacing: visiblePasswords.has(u.id) ? 0 : 2 }}>
+                                {visiblePasswords.has(u.id)
+                                  ? (u.plainPassword || "••••••••")
+                                  : "••••••••"}
+                              </span>
+                              <button
+                                className="btn btn-ghost btn-xs"
+                                style={{ padding: "2px 7px", fontSize: 11 }}
+                                onClick={() => togglePasswordVisible(u.id)}
+                                title={visiblePasswords.has(u.id) ? "Hide password" : "Show password"}
+                              >
+                                {visiblePasswords.has(u.id) ? "Hide" : "Show"}
+                              </button>
+                            </div>
                           )}
                         </td>
                         <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>

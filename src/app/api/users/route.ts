@@ -16,14 +16,21 @@ function getSession(req: NextRequest): { userId: string } | null {
 }
 
 // GET /api/users — public (login page needs this before auth)
-export async function GET() {
+// When authenticated, also returns plainPassword for admin display
+export async function GET(req: NextRequest) {
+  const session = getSession(req);
   try {
     const result = await db
-      .select({ id: users.id, name: users.name, role: users.role, email: users.email, color: users.color, active: users.active })
+      .select({ id: users.id, name: users.name, role: users.role, email: users.email, color: users.color, active: users.active, plainPassword: users.plainPassword })
       .from(users)
       .orderBy(asc(users.name));
 
-    return NextResponse.json(result.filter((u) => u.active));
+    const active = result.filter((u) => u.active);
+    if (!session) {
+      // Strip plainPassword for unauthenticated requests (login page)
+      return NextResponse.json(active.map(({ plainPassword: _p, ...u }) => u));
+    }
+    return NextResponse.json(active);
   } catch (err) {
     console.error("[GET /api/users]", err);
     return NextResponse.json({ error: "Failed to fetch users" }, { status: 500 });
@@ -60,11 +67,12 @@ export async function POST(req: NextRequest) {
         name: name.trim(),
         email: email.trim().toLowerCase(),
         password: hashed,
+        plainPassword: password.trim(),
         role,
         color: color || "#172f24",
         active: true,
       })
-      .returning({ id: users.id, name: users.name, role: users.role, email: users.email, color: users.color, active: users.active });
+      .returning({ id: users.id, name: users.name, role: users.role, email: users.email, color: users.color, active: users.active, plainPassword: users.plainPassword });
 
     return NextResponse.json(created, { status: 201 });
   } catch (err) {

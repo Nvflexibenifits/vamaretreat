@@ -6,15 +6,17 @@ import { getSessionUserId } from "@/lib/api-auth";
 
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const userId = getSessionUserId(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const { id } = await params;
+
   try {
-    await db.delete(specialDays).where(eq(specialDays.id, params.id));
+    await db.delete(specialDays).where(eq(specialDays.id, id));
 
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (err) {

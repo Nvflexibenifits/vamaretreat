@@ -6,12 +6,14 @@ import { getSessionUserId } from "@/lib/api-auth";
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { code: string } }
+  { params }: { params: Promise<{ code: string }> }
 ) {
   const userId = getSessionUserId(req);
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  const { code } = await params;
 
   try {
     const body = await req.json();
@@ -19,7 +21,7 @@ export async function PATCH(
     const existing = await db
       .select()
       .from(creditNotes)
-      .where(eq(creditNotes.code, params.code))
+      .where(eq(creditNotes.code, code))
       .then((rows) => rows[0] ?? null);
 
     if (!existing) {
@@ -31,7 +33,7 @@ export async function PATCH(
     const [updated] = await db
       .update(creditNotes)
       .set({ data: mergedData })
-      .where(eq(creditNotes.code, params.code))
+      .where(eq(creditNotes.code, code))
       .returning();
 
     return NextResponse.json(updated, { status: 200 });

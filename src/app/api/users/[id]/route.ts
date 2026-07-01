@@ -43,7 +43,8 @@ export async function PATCH(
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    const hashedPassword = password?.trim() ? await bcrypt.hash(password.trim(), 10) : undefined;
+    const plainPwd = password?.trim() || undefined;
+    const hashedPassword = plainPwd ? await bcrypt.hash(plainPwd, 10) : undefined;
 
     const updateData: Record<string, unknown> = {};
     if (name) updateData.name = name.trim();
@@ -52,12 +53,13 @@ export async function PATCH(
     if (color) updateData.color = color;
     if (typeof active === "boolean") updateData.active = active;
     if (hashedPassword) updateData.password = hashedPassword;
+    if (plainPwd) updateData.plainPassword = plainPwd;
 
     const [updated] = await db
       .update(users)
       .set(updateData)
       .where(eq(users.id, id))
-      .returning({ id: users.id, name: users.name, role: users.role, email: users.email, color: users.color, active: users.active });
+      .returning({ id: users.id, name: users.name, role: users.role, email: users.email, color: users.color, active: users.active, plainPassword: users.plainPassword });
 
     return NextResponse.json(updated);
   } catch (err) {
