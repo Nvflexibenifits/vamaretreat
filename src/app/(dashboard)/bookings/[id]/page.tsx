@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { fmt, fmtIN, getBookingPricingRows, todayStr } from "@/lib/utils";
+import { fmt, fmtIN, dayName, getBookingPricingRows, todayStr } from "@/lib/utils";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { CancellationDetails, CancellationPolicy, SpecialDay } from "@/types";
 
@@ -383,8 +383,8 @@ export default function BookingDetailPage() {
               <BkgRow label="Mobile No." value={b.mobile} />
               {b.email && <BkgRow label="Email" value={b.email} />}
               <BkgRow label="Source" value={b.source || "—"} />
-              <BkgRow label="Check-in Date" value={fmtIN(b.checkin)} />
-              <BkgRow label="Check-out Date" value={fmtIN(b.checkout)} />
+              <BkgRow label="Check-in Date" value={fmtIN(b.checkin)} sub={dayName(b.checkin)} />
+              <BkgRow label="Check-out Date" value={fmtIN(b.checkout)} sub={dayName(b.checkout)} />
               <BkgRow label="No. of Nights" value={String(b.nights)} last />
             </div>
             <div style={{ borderLeft: "1px solid var(--bd)" }}>
@@ -435,8 +435,18 @@ export default function BookingDetailPage() {
                     return (
                       <tr key={i} style={{ borderBottom: "1px solid var(--bd)" }}>
                         <td style={{ padding: "8px 10px", fontSize: 12, color: "var(--t1)", fontWeight: 500 }}>{r.roomName}</td>
-                        <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right", whiteSpace: "nowrap" }}>{fmtIN(r.checkin || b.checkin)}</td>
-                        <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right", whiteSpace: "nowrap" }}>{fmtIN(r.checkout || b.checkout)}</td>
+                        <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right", whiteSpace: "nowrap" }}>
+                          <div style={{ lineHeight: 1.3 }}>
+                            <div>{fmtIN(r.checkin || b.checkin)}</div>
+                            <div style={{ fontSize: 10, color: "var(--t3)", fontWeight: 500 }}>{dayName(r.checkin || b.checkin)}</div>
+                          </div>
+                        </td>
+                        <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right", whiteSpace: "nowrap" }}>
+                          <div style={{ lineHeight: 1.3 }}>
+                            <div>{fmtIN(r.checkout || b.checkout)}</div>
+                            <div style={{ fontSize: 10, color: "var(--t3)", fontWeight: 500 }}>{dayName(r.checkout || b.checkout)}</div>
+                          </div>
+                        </td>
                         <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right" }}>{r.nights}</td>
                         <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right" }}>{fmt(r.tariff)}</td>
                         <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right" }}>{r.discountPct > 0 ? `${r.discountPct}%` : "—"}</td>
@@ -674,7 +684,7 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
   );
 }
 
-function BkgRow({ label, value, last }: { label: string; value: string; last?: boolean }) {
+function BkgRow({ label, value, sub, last }: { label: string; value: string; sub?: string; last?: boolean }) {
   return (
     <div style={{
       display: "grid", gridTemplateColumns: "150px 1fr",
@@ -683,8 +693,9 @@ function BkgRow({ label, value, last }: { label: string; value: string; last?: b
       <div style={{ padding: "7px 12px", background: "var(--surf2)", fontSize: 11, fontWeight: 700, color: "var(--t3)", borderRight: "1px solid var(--bd)" }}>
         {label}
       </div>
-      <div style={{ padding: "7px 12px", fontSize: 12, color: "var(--t1)", fontWeight: 500 }}>
+      <div style={{ padding: "7px 12px", fontSize: 12, color: "var(--t1)", fontWeight: 500, lineHeight: 1.3 }}>
         {value}
+        {sub && <div style={{ fontSize: 10, color: "var(--t3)", fontWeight: 500, marginTop: 2 }}>{sub}</div>}
       </div>
     </div>
   );

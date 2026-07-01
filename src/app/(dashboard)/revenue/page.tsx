@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useApp } from "@/lib/store";
-import { fmt, fmtIN, getBookingPricingRows } from "@/lib/utils";
+import { fmt, fmtIN, dayName, getBookingPricingRows } from "@/lib/utils";
 
 export default function RevenuePage() {
   const { bookings, currentRole } = useApp();
@@ -240,8 +240,18 @@ export default function RevenuePage() {
                         )}
                       </td>
                       <td style={{ fontWeight: 500, color: "var(--t1)" }}>{b.guest}</td>
-                      <td style={{ whiteSpace: "nowrap" }}>{fmtIN(b.checkin)}</td>
-                      <td style={{ whiteSpace: "nowrap" }}>{fmtIN(b.checkout)}</td>
+                      <td style={{ whiteSpace: "nowrap" }}>
+                        <div style={{ lineHeight: 1.3 }}>
+                          <div>{fmtIN(b.checkin)}</div>
+                          <div style={{ fontSize: 10, color: "var(--t3)", fontWeight: 500 }}>{dayName(b.checkin)}</div>
+                        </div>
+                      </td>
+                      <td style={{ whiteSpace: "nowrap" }}>
+                        <div style={{ lineHeight: 1.3 }}>
+                          <div>{fmtIN(b.checkout)}</div>
+                          <div style={{ fontSize: 10, color: "var(--t3)", fontWeight: 500 }}>{dayName(b.checkout)}</div>
+                        </div>
+                      </td>
                       <td style={{ textAlign: "right", fontWeight: 500 }}>{fmt(roomNet)}</td>
                       <td style={{ textAlign: "right" }}>{mealNet > 0 ? fmt(mealNet) : "—"}</td>
                       <td style={{ textAlign: "right" }}>{other > 0 ? fmt(other) : "—"}</td>

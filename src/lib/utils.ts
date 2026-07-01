@@ -26,6 +26,13 @@ export function fmtIN(dateStr: string | undefined | null): string {
   return `${dd}/${mm}/${yyyy}`;
 }
 
+export function dayName(dateStr: string | undefined | null): string {
+  if (!dateStr) return "";
+  const d = new Date(dateStr.length === 10 ? dateStr + "T00:00:00" : dateStr);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-IN", { weekday: "short" });
+}
+
 export function isWeekend(dateStr: string): boolean {
   const day = new Date(dateStr).getDay();
   return day === 0 || day === 6;
