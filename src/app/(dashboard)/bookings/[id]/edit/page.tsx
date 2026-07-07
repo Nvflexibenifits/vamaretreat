@@ -1,11 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { useApp } from "@/lib/store";
 import { BookingForm } from "@/components/BookingForm";
-import { fmtIN } from "@/lib/utils";
 
 export default function EditBookingPage() {
   const params = useParams<{ id: string }>();
@@ -36,24 +34,6 @@ export default function EditBookingPage() {
 
   if (!b) return null;
   if (b.status === "Lost" || b.status === "Cancelled") return null;
-
-  // Completed bookings: redirect to detail (no more expenses form)
-  if (b.status === "Completed") {
-    return (
-      <div className="view">
-        <div className="pg-hd">
-          <div>
-            <h2>Edit Booking — {b.id}</h2>
-            <p>{b.guest} · Completed {fmtIN(b.checkout)}</p>
-          </div>
-          <Link href={`/bookings/${b.id}`} className="btn btn-ghost btn-sm">
-            Back to Booking
-          </Link>
-        </div>
-        <BookingForm mode="edit" initial={b} />
-      </div>
-    );
-  }
 
   return <BookingForm mode="edit" initial={b} />;
 }

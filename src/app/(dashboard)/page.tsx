@@ -26,6 +26,8 @@ export default function DashboardPage() {
   const [pendingOpen, setPendingOpen] = useState(false);
   const [foFilter, setFoFilter] = useState<"today" | "tomorrow" | "custom">("today");
   const [foCustomDate, setFoCustomDate] = useState("");
+  // Weekly Room Status: start date of the displayed week ("" = week starting today)
+  const [weekStart, setWeekStart] = useState("");
 
   useEffect(() => {
     setToday(todayStr());
@@ -58,11 +60,12 @@ export default function DashboardPage() {
     [pendingBookings]
   );
 
-  // ───── Room Status (next 7 days) ─────
+  // ───── Room Status (7 days from the selected week start) ─────
   const roomDates = useMemo(() => {
-    if (!today) return [];
-    return sevenDaysFrom(today);
-  }, [today]);
+    const anchor = weekStart || today;
+    if (!anchor) return [];
+    return sevenDaysFrom(anchor);
+  }, [today, weekStart]);
 
   const roomStatus = useMemo(() => {
     return roomCategories.map((cat) => {
@@ -659,12 +662,46 @@ export default function DashboardPage() {
       <div className="tbl-wrap">
         <div className="tbl-hd">
           <h3>Weekly Room Status</h3>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: 14 }}>
+            <button
+              className="btn btn-ghost btn-xs"
+              onClick={() => today && setWeekStart(addDays(weekStart || today, -7))}
+            >
+              &lsaquo; Prev Week
+            </button>
+            <input
+              type="date"
+              value={weekStart || today}
+              onChange={(e) => setWeekStart(e.target.value)}
+              style={{
+                height: 26,
+                padding: "0 8px",
+                fontSize: 12,
+                border: "1px solid var(--bd)",
+                borderRadius: "var(--r3)",
+                background: "var(--surf)",
+                color: "var(--t1)",
+                outline: "none",
+              }}
+            />
+            <button
+              className="btn btn-ghost btn-xs"
+              onClick={() => today && setWeekStart(addDays(weekStart || today, 7))}
+            >
+              Next Week &rsaquo;
+            </button>
+            {weekStart && weekStart !== today && (
+              <button className="btn btn-ghost btn-xs" onClick={() => setWeekStart("")}>
+                Today
+              </button>
+            )}
+          </div>
           <div style={{ fontSize: 11, color: "var(--t3)", display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
-            <strong style={{ color: "var(--amb)" }}>Booked</strong>
+            <strong style={{ color: "var(--grn)" }}>Booked</strong>
             {" / "}
-            <strong style={{ color: "var(--t3)" }}>Tentative</strong>
+            <strong style={{ color: "var(--amb)" }}>Tentative</strong>
             {" / "}
-            <strong style={{ color: "var(--grn)" }}>Available</strong>
+            <strong style={{ color: "var(--t2)" }}>Available</strong>
           </div>
         </div>
         <table>

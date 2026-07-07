@@ -256,6 +256,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .catch(() => setHydrated(true));
   }, []);
 
+  // Auto-mark stale Enquiry/Tentative bookings as Lost when checkin date has passed
+  useEffect(() => {
+    if (!hydrated) return;
+    const today = todayStr();
+    setBookings((prev) => {
+      const stale = prev.filter(
+        (b) => (b.status === "Enquiry" || b.status === "Tentative") && b.checkin < today
+      );
+      if (stale.length === 0) return prev;
+      stale.forEach((b) => {
+        fetch(`/api/app/bookings/${b.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "Lost", lostReason: "Check-in date passed" }),
+        }).catch(console.error);
+      });
+      return prev.map((b) =>
+        (b.status === "Enquiry" || b.status === "Tentative") && b.checkin < today
+          ? { ...b, status: "Lost" as const, lostReason: "Check-in date passed" }
+          : b
+      );
+    });
+  }, [hydrated]);
+
   // Notification auto-dismiss
   useEffect(() => {
     if (!notif) return;

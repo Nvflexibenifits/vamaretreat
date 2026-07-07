@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { fmt, fmtIN, dayName, getBookingPricingRows, todayStr } from "@/lib/utils";
+import { fmt, fmtIN, dayName, getBookingPricingRows, todayStr, tryAssignRooms } from "@/lib/utils";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { CancellationDetails, CancellationPolicy, SpecialDay } from "@/types";
 
@@ -80,7 +80,10 @@ export default function BookingDetailPage() {
   const id = params?.id;
   const {
     bookings,
+    rooms,
     roomInventory,
+    bulkRoomBlocks,
+    updateBooking,
     openModal,
     cancelBooking,
     hydrated,
@@ -146,9 +149,30 @@ export default function BookingDetailPage() {
   if (!b) return null;
 
   const canEdit = !isFrontOffice && (b.status === "Enquiry" || b.status === "Tentative" || b.status === "Confirmed" || b.status === "Completed");
-  const showMarkLost = !isFrontOffice && (b.status === "Enquiry" || b.status === "Tentative");
+  const showBookTentative = !isFrontOffice && b.status === "Enquiry";
+  const showConfirm = !isFrontOffice && (b.status === "Tentative");
 
-  const totalKids = b.kidsAbove10 + b.kids6to10 + b.kids2to6;
+  const handleBookTentative = () => {
+    const result = tryAssignRooms(b.segments, b.checkin, b.checkout, bookings, roomInventory, b.id, bulkRoomBlocks, rooms);
+    if (!result.ok) {
+      showNotif(`No ${result.missingCategoryName} available for selected dates`, "error");
+      return;
+    }
+    updateBooking(b.id, { status: "Tentative", allocatedRooms: result.rooms });
+    showNotif(`Booking ${b.id} marked Tentative`, "success");
+  };
+
+  const handleConfirm = () => {
+    const result = tryAssignRooms(b.segments, b.checkin, b.checkout, bookings, roomInventory, b.id, bulkRoomBlocks, rooms);
+    if (!result.ok) {
+      showNotif(`No ${result.missingCategoryName} available for selected dates`, "error");
+      return;
+    }
+    updateBooking(b.id, { status: "Confirmed", allocatedRooms: result.rooms });
+    showNotif(`Booking ${b.id} confirmed`, "success");
+  };
+
+  const totalKids = b.kidsAbove10 + b.kids6to10;
   const pricingRows = getBookingPricingRows(b);
   const totalRoomBaseCharges = pricingRows.reduce((s, r) => s + r.roomCharges, 0);
   const totalDiscount = pricingRows.reduce((s, r) => s + r.discountAmt, 0);
@@ -294,12 +318,20 @@ export default function BookingDetailPage() {
             >
               View Pricing
             </a>
-            {showMarkLost && (
+            {showBookTentative && (
               <button
-                className="btn btn-danger btn-sm"
-                onClick={() => openModal({ kind: "lost", bookingId: b.id })}
+                className="btn btn-primary btn-sm"
+                onClick={handleBookTentative}
               >
-                Mark Lost
+                Book Tentatively
+              </button>
+            )}
+            {showConfirm && (
+              <button
+                className="btn btn-accent btn-sm"
+                onClick={handleConfirm}
+              >
+                Confirm Booking
               </button>
             )}
             {showCancel && (
@@ -390,10 +422,9 @@ export default function BookingDetailPage() {
             <div style={{ borderLeft: "1px solid var(--bd)" }}>
               <BkgRow label="Sr. Citizens" value={String(b.seniors)} />
               <BkgRow label="Adults" value={String(b.adults)} />
-              <BkgRow label="Kids > 10 Yrs" value={String(b.kidsAbove10)} />
+              <BkgRow label="Kids 10-16 Yrs" value={String(b.kidsAbove10)} />
               <BkgRow label="Kids 6-10 Yrs" value={String(b.kids6to10)} />
-              <BkgRow label="Kids 2-6 Yrs" value={String(b.kids2to6)} />
-              <BkgRow label="Infants < 2 Yrs" value={String(b.infantsBelow2)} />
+              <BkgRow label="Infants (0-6 Yrs)" value={String(b.infantsBelow2 + b.kids2to6)} />
               <BkgRow label="Pets" value={String(b.pets)} last />
             </div>
           </div>
@@ -461,7 +492,7 @@ export default function BookingDetailPage() {
                   })
                 )}
                 <tr style={{ background: "var(--surf2)", fontWeight: 700, borderTop: "2px solid var(--bd)" }}>
-                  <td style={{ padding: "9px 10px", fontSize: 12, color: "var(--t1)" }}>Total Room Charges (A)</td>
+                  <td style={{ padding: "9px 10px", fontSize: 12, color: "var(--t1)" }}>Total Room Charges</td>
                   <td colSpan={7} style={{ padding: "9px 10px" }}></td>
                   <td style={{ padding: "9px 10px", fontSize: 12, textAlign: "right" }}>{fmt(totalNet)}</td>
                   <td style={{ padding: "9px 10px" }}></td>
@@ -482,7 +513,7 @@ export default function BookingDetailPage() {
                     <tr style={{ background: "var(--surf2)", borderBottom: "2px solid var(--bd)" }}>
                       {[
                         { h: "Meal / Charge Type", left: true  },
-                        { h: "Meal Tariff",         left: false },
+                        { h: "Meal Rate",           left: false },
                         { h: "No. of Nights",       left: false },
                         { h: "No. of Pax",          left: false },
                         { h: "Meal Chgs",           left: false },
@@ -550,7 +581,7 @@ export default function BookingDetailPage() {
                       );
                     })()}
                     <tr style={{ background: "var(--surf2)", fontWeight: 700, borderTop: "2px solid var(--bd)" }}>
-                      <td colSpan={4} style={{ padding:"9px 10px",fontSize:12,color:"var(--t1)" }}>Total Meal Charges (B)</td>
+                      <td colSpan={4} style={{ padding:"9px 10px",fontSize:12,color:"var(--t1)" }}>Total Meal Charges</td>
                       <td style={{ padding:"9px 10px",fontSize:12,textAlign:"right" }}>{fmt((b.mealOn?b.mealTotal:0)+(b.petTotal||0)+(b.driverMealTotal??0))}</td>
                       <td></td><td></td><td></td><td></td>
                       <td></td>

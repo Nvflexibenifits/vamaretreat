@@ -259,10 +259,9 @@ export default function ConfirmationPage() {
           </div>
           <div style={{ borderLeft: "1px solid #d0c9bc" }}>
             <GuestRow label="Adults" value={String(b.adults)} />
-            <GuestRow label="Kids > 10 Yrs" value={String(b.kidsAbove10)} />
+            <GuestRow label="Kids 10-16 Yrs" value={String(b.kidsAbove10)} />
             <GuestRow label="Kids 6-10 Yrs" value={String(b.kids6to10)} />
-            <GuestRow label="Kids 2-6 Yrs" value={String(b.kids2to6)} />
-            <GuestRow label="Infant < 2 Yrs" value={String(b.infantsBelow2)} />
+            <GuestRow label="Infants (0-6 Yrs)" value={String(b.infantsBelow2 + b.kids2to6)} />
             <GuestRow label="Senior Citizens" value={String(b.seniors)} />
             <GuestRow label="Pets" value={String(b.pets)} last />
           </div>
@@ -334,7 +333,7 @@ export default function ConfirmationPage() {
               })
             )}
             <tr>
-              <td style={TD_HEAD}>Total Room Charges (A)</td>
+              <td style={TD_HEAD}>Total Room Charges</td>
               <td style={TD_HEAD} colSpan={7}></td>
               <td style={TD_HEAD_NUM}>{fmt(totalNet)}</td>
               <td style={TD_HEAD}></td>
@@ -350,7 +349,7 @@ export default function ConfirmationPage() {
             <thead>
               <tr>
                 <th style={TH}>Meal / Charge Type</th>
-                <th style={{ ...TH, textAlign: "right" }}>Meal Tariff</th>
+                <th style={{ ...TH, textAlign: "right" }}>Meal Rate</th>
                 <th style={{ ...TH, textAlign: "right" }}>No. of Nights</th>
                 <th style={{ ...TH, textAlign: "right" }}>No. of Pax</th>
                 <th style={{ ...TH, textAlign: "right" }}>Meal Chgs</th>
@@ -404,7 +403,7 @@ export default function ConfirmationPage() {
                 </tr>
               )}
               <tr>
-                <td style={TD_HEAD} colSpan={4}>Total Meal Charges (B)</td>
+                <td style={TD_HEAD} colSpan={4}>Total Meal Charges</td>
                 <td style={TD_HEAD_NUM}>{fmt(totalMealPetCharges)}</td>
                 <td style={TD_HEAD}></td><td style={TD_HEAD}></td><td style={TD_HEAD}></td><td style={TD_HEAD}></td>
                 <td style={TD_HEAD}></td>

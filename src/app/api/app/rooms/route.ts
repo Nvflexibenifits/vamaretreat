@@ -14,14 +14,12 @@ export async function PUT(req: NextRequest) {
     const body = await req.json();
     const roomList = body as { id: string; [key: string]: unknown }[];
 
-    await db.transaction(async (tx) => {
-      await tx.delete(rooms);
-      if (roomList.length > 0) {
-        await tx.insert(rooms).values(
-          roomList.map((r) => ({ id: r.id, data: r }))
-        );
-      }
-    });
+    await db.delete(rooms);
+    if (roomList.length > 0) {
+      await db.insert(rooms).values(
+        roomList.map((r) => ({ id: r.id, data: r }))
+      );
+    }
 
     return NextResponse.json({ ok: true });
   } catch (err) {

@@ -14,7 +14,7 @@ import {
   todayStr,
   tryAssignRooms,
 } from "@/lib/utils";
-import type { Booking, BookingSegment, BookingStatus, PricingRow, PricingRowType, SegmentRoom } from "@/types";
+import type { Booking, BookingSegment, BookingStatus, PackageRates, PricingRow, PricingRowType, SegmentRoom } from "@/types";
 
 type FormRow = {
   uid: string;
@@ -35,10 +35,12 @@ type FormSeg = {
   seniors: string;
   kidsAbove10: string;
   kids6to10: string;
-  kids2to6: string;
   infants: string;
   pets: string;
   mealOn: boolean;
+  mealRate: string;
+  petRate: string;
+  driverMealRate: string;
   drivers: string;
   driverMealOn: boolean;
 };
@@ -72,7 +74,7 @@ function getInitialDates() {
   };
 }
 
-function segsFromBooking(b: Booking): FormSeg[] {
+function segsFromBooking(b: Booking, rates: PackageRates): FormSeg[] {
   return b.segments.map((seg) => ({
     id: seg.id,
     checkin: seg.checkin,
@@ -92,10 +94,13 @@ function segsFromBooking(b: Booking): FormSeg[] {
     seniors: String(seg.seniors ?? b.seniors ?? 0),
     kidsAbove10: String(seg.kidsAbove10 ?? b.kidsAbove10 ?? 0),
     kids6to10: String(seg.kids6to10 ?? b.kids6to10 ?? 0),
-    kids2to6: String(seg.kids2to6 ?? b.kids2to6 ?? 0),
-    infants: String(seg.infantsBelow2 ?? b.infantsBelow2 ?? 0),
+    // Legacy 2–6 bucket folds into the Infants (0–6) bucket
+    infants: String((seg.infantsBelow2 ?? b.infantsBelow2 ?? 0) + (seg.kids2to6 ?? b.kids2to6 ?? 0)),
     pets: String(seg.pets ?? b.pets ?? 0),
     mealOn: seg.mealOn ?? b.mealOn ?? false,
+    mealRate: String(seg.mealRate ?? rates.mealPerAdultPerNight),
+    petRate: String(seg.petRate ?? rates.petPerPetPerNight),
+    driverMealRate: String(seg.driverMealRate ?? rates.mealPerAdultPerNight),
     drivers: String(seg.drivers ?? b.driverCount ?? 0),
     driverMealOn: seg.driverMealOn ?? b.driverMealOn ?? false,
   }));
@@ -147,11 +152,14 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
 
   const defaultSegGuests = {
     adults: "2", seniors: "0", kidsAbove10: "0", kids6to10: "0",
-    kids2to6: "0", infants: "0", pets: "0", mealOn: false, drivers: "0", driverMealOn: false,
+    infants: "0", pets: "0", mealOn: false, drivers: "0", driverMealOn: false,
+    mealRate: String(packageRates.mealPerAdultPerNight),
+    petRate: String(packageRates.petPerPetPerNight),
+    driverMealRate: String(packageRates.mealPerAdultPerNight),
   };
 
   const [formSegs, setFormSegs] = useState<FormSeg[]>(() => {
-    if (initial) return segsFromBooking(initial);
+    if (initial) return segsFromBooking(initial, packageRates);
     const { ci, co } = getInitialDates();
     const { weekday, friday, saturday } = splitNightsByType(ci, co);
     const initRows: FormRow[] = [];
@@ -162,8 +170,6 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   });
 
   const initialAdvance = initial?.advance ?? 0;
-  const [advance, setAdvance] = useState(String(initialAdvance));
-  const [paymode, setPaymode] = useState(initial?.payments?.[0]?.mode ?? "Bank Transfer");
 
   const [errors, setErrors] = useState<FieldErrors>({});
 
@@ -368,10 +374,13 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
           seniors: parseInt(seg.seniors) || 0,
           kidsAbove10: parseInt(seg.kidsAbove10) || 0,
           kids6to10: parseInt(seg.kids6to10) || 0,
-          kids2to6: parseInt(seg.kids2to6) || 0,
+          kids2to6: 0,
           infantsBelow2: parseInt(seg.infants) || 0,
           pets: parseInt(seg.pets) || 0,
           mealOn: seg.mealOn,
+          mealRate: parseFloat(seg.mealRate) || 0,
+          petRate: parseFloat(seg.petRate) || 0,
+          driverMealRate: parseFloat(seg.driverMealRate) || 0,
           drivers: parseInt(seg.drivers) || 0,
           driverMealOn: seg.driverMealOn,
           mealTotal: 0,
@@ -390,9 +399,12 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     const adultsN = parseInt(seg.adults) || 0;
     const petsN = parseInt(seg.pets) || 0;
     const driversN = parseInt(seg.drivers) || 0;
-    const meal = seg.mealOn ? packageRates.mealPerAdultPerNight * nights * adultsN : 0;
-    const pet = petsN > 0 ? packageRates.petPerPetPerNight * nights * petsN : 0;
-    const drvMeal = seg.driverMealOn && driversN > 0 ? packageRates.mealPerAdultPerNight * nights * driversN : 0;
+    const mealRate = parseFloat(seg.mealRate) || 0;
+    const petRate = parseFloat(seg.petRate) || 0;
+    const driverMealRate = parseFloat(seg.driverMealRate) || 0;
+    const meal = seg.mealOn ? mealRate * nights * adultsN : 0;
+    const pet = petsN > 0 ? petRate * nights * petsN : 0;
+    const drvMeal = seg.driverMealOn && driversN > 0 ? driverMealRate * nights * driversN : 0;
     const base = meal + pet + drvMeal;
     const gst = base * 0.18;
     return { meal, pet, drvMeal, base, gst, total: base + gst, adultsN, petsN, driversN, nights };
@@ -400,7 +412,8 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   const totalMealPet = segMealCalcs.reduce((s, c) => s + c.total, 0);
 
   const createAdvance = newPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
-  const advN = isEdit ? initialAdvance : createAdvance;
+  // Cumulative payments: previously recorded (edit mode) plus rows entered in this form
+  const totalReceived = (isEdit ? initialAdvance : 0) + createAdvance;
 
   const addOnTotals = addOnRows.map(r => {
     const amt = parseFloat(r.amount) || 0;
@@ -413,7 +426,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   const totalAddOn = addOnTotals.reduce((s, r) => s + r.total, 0);
 
   const grandTotal = totalRoomCharges + totalMealPet + totalAddOn;
-  const balance = Math.max(0, grandTotal - advN);
+  const balance = Math.max(0, grandTotal - totalReceived);
 
   // ─── Validation ───
   const validate = (): boolean => {
@@ -452,7 +465,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
           seniors: parseInt(fs?.seniors ?? "0") || 0,
           kidsAbove10: parseInt(fs?.kidsAbove10 ?? "0") || 0,
           kids6to10: parseInt(fs?.kids6to10 ?? "0") || 0,
-          kids2to6: parseInt(fs?.kids2to6 ?? "0") || 0,
+          kids2to6: 0,
           infantsBelow2: parseInt(fs?.infants ?? "0") || 0,
           pets: mc?.petsN ?? 0,
           mealOn: fs?.mealOn ?? false,
@@ -556,7 +569,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
           seniors: parseInt(fs?.seniors ?? "0") || 0,
           kidsAbove10: parseInt(fs?.kidsAbove10 ?? "0") || 0,
           kids6to10: parseInt(fs?.kids6to10 ?? "0") || 0,
-          kids2to6: parseInt(fs?.kids2to6 ?? "0") || 0,
+          kids2to6: 0,
           infantsBelow2: parseInt(fs?.infants ?? "0") || 0,
           pets: mc?.petsN ?? 0,
           mealOn: fs?.mealOn ?? false,
@@ -624,7 +637,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   // ─── Save handlers ───
   const saveCreate = (intent: "Enquiry" | "Tentative" | "Confirmed") => {
     if (!validate()) return;
-    if (intent === "Confirmed" && (parseInt(advance) || 0) <= 0) {
+    if (intent === "Confirmed" && createAdvance <= 0) {
       showNotif("Enter advance amount to confirm", "error");
       return;
     }
@@ -701,16 +714,12 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     <div className="view">
       <div className="pg-hd">
         <div>
-          <h2>{isEdit ? `Edit Booking — ${initial!.id}` : "New B2C Booking"}</h2>
-          <p>
-            {isEdit
-              ? "All fields editable. Add payment rows below to record new payments."
-              : "Pricing auto-calculates as you fill the form"}
-          </p>
+          <h2>{isEdit ? `Edit Booking — ${initial!.id}` : "New Booking"}</h2>
+          {!isEdit && <p>Pricing auto-calculates as you fill the form</p>}
         </div>
         {isEdit ? (
           <Link href={`/bookings/${initial!.id}`} className="btn btn-ghost btn-sm">
-            Back to Booking
+            View Booking
           </Link>
         ) : (
           <Link href="/bookings" className="btn btn-ghost btn-sm">
@@ -781,13 +790,13 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
           <div className="form-sec-title" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span><span className="form-sec-num">2</span>Accommodation</span>
             <button type="button" className="btn btn-sm" onClick={addSegment} style={{ fontSize: 12 }}>
-              + Add Segment
+              + Add New Date
             </button>
           </div>
 
           {formSegs.length === 0 ? (
             <div className="empty-state" style={{ padding: 20 }}>
-              <p>Click &quot;+ Add Segment&quot; to add dates and rooms.</p>
+              <p>Click &quot;+ Add New Date&quot; to add dates and rooms.</p>
             </div>
           ) : (
             formSegs.map((seg, segIdx) => {
@@ -867,23 +876,22 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                         className="btn btn-ghost btn-xs"
                         onClick={() => removeSegment(seg.id)}
                       >
-                        Remove Segment
+                        Remove Date
                       </button>
                     )}
                   </div>
 
                   {/* Guest counts for this segment */}
                   <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--bd)", background: "var(--surf)" }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", marginBottom: 7, textTransform: "uppercase", letterSpacing: "0.04em" }}>Guest Count</div>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", marginBottom: 7, textTransform: "uppercase", letterSpacing: "0.04em" }}>Guest Packs Count</div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
                       {[
                         { label: "Adults", field: "adults" as keyof FormSeg, min: 1 },
                         { label: "Sr. Citizens", field: "seniors" as keyof FormSeg, min: 0 },
-                        { label: "Kids >10", field: "kidsAbove10" as keyof FormSeg, min: 0 },
+                        { label: "Kids 10–16", field: "kidsAbove10" as keyof FormSeg, min: 0 },
                         { label: "Kids 6–10", field: "kids6to10" as keyof FormSeg, min: 0 },
-                        { label: "Kids 2–6", field: "kids2to6" as keyof FormSeg, min: 0 },
-                        { label: "Infants <2", field: "infants" as keyof FormSeg, min: 0 },
-                        { label: "Pets (max 2)", field: "pets" as keyof FormSeg, min: 0 },
+                        { label: "Infants (0–6)", field: "infants" as keyof FormSeg, min: 0 },
+                        { label: "Pets", field: "pets" as keyof FormSeg, min: 0 },
                       ].map(({ label, field, min }) => (
                         <div key={field} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
                           <span style={{ fontSize: 10, color: "var(--t3)", fontWeight: 500, whiteSpace: "nowrap" }}>{label}</span>
@@ -891,11 +899,9 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                             type="number"
                             value={seg[field] as string}
                             min={min}
-                            max={field === "pets" ? 2 : undefined}
                             onChange={(e) => {
                               let v = parseInt(e.target.value) || 0;
                               if (v < min) v = min;
-                              if (field === "pets" && v > 2) v = 2;
                               updateSegField(seg.id, field, String(v));
                             }}
                             style={{ width: 52, padding: "4px 6px", border: "1px solid var(--bd)", borderRadius: "var(--r3)", fontSize: 13, textAlign: "center", background: "var(--surf)", outline: "none" }}
@@ -910,13 +916,13 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                     <table style={{ minWidth: 1100 }}>
                       <thead>
                         <tr>
-                          <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 90 }}>Day Type</th>
                           <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 180 }}>Room Category</th>
                           <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 100, textAlign: "right" }}>Tariff</th>
                           <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 60, textAlign: "right" }}>Nights</th>
                           <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 60, textAlign: "right" }}>Rooms</th>
                           <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 110, textAlign: "right" }}>Charges</th>
                           <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 70, textAlign: "right" }}>Disc %</th>
+                          <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 90 }}>Date Type</th>
                           <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 100, textAlign: "right" }}>Disc Amt</th>
                           <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 110, textAlign: "right" }}>Net</th>
                           <th style={{ whiteSpace: "nowrap", verticalAlign: "middle", width: 60, textAlign: "right" }}>GST %</th>
@@ -942,23 +948,6 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                             const overCap = (parseFloat(row.discountPct) || 0) > cap;
                             return (
                               <tr key={row.uid} style={{ cursor: "default" }}>
-                                <td style={{ verticalAlign: "middle" }}>
-                                  <span
-                                    className="badge"
-                                    style={{
-                                      background:
-                                        row.rowType === "sat" || row.rowType === "fri-sat" ? "var(--acc-bg)"
-                                        : row.rowType === "fri" ? "var(--amb-bg)"
-                                        : "var(--bd)",
-                                      color:
-                                        row.rowType === "sat" || row.rowType === "fri-sat" ? "var(--acc)"
-                                        : row.rowType === "fri" ? "var(--amb)"
-                                        : "var(--t2)",
-                                    }}
-                                  >
-                                    {ROW_LABEL[row.rowType]}
-                                  </span>
-                                </td>
                                 <td style={{ verticalAlign: "middle" }}>
                                   <select
                                     value={row.roomId}
@@ -1023,6 +1012,23 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                                     </div>
                                   )}
                                 </td>
+                                <td style={{ verticalAlign: "middle" }}>
+                                  <span
+                                    className="badge"
+                                    style={{
+                                      background:
+                                        row.rowType === "sat" || row.rowType === "fri-sat" ? "var(--acc-bg)"
+                                        : row.rowType === "fri" ? "var(--amb-bg)"
+                                        : "var(--bd)",
+                                      color:
+                                        row.rowType === "sat" || row.rowType === "fri-sat" ? "var(--acc)"
+                                        : row.rowType === "fri" ? "var(--amb)"
+                                        : "var(--t2)",
+                                    }}
+                                  >
+                                    {ROW_LABEL[row.rowType]}
+                                  </span>
+                                </td>
                                 <td style={{ textAlign: "right", verticalAlign: "middle", color: "var(--amb)" }}>
                                   {calc.discountAmt > 0 ? `− ${fmt(calc.discountAmt)}` : "—"}
                                 </td>
@@ -1080,9 +1086,9 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
 
                   {/* Meal package for this segment */}
                   <div style={{ padding: "12px 14px", borderTop: "1px solid var(--bd)", background: "var(--surf)" }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.04em" }}>Meal Package</div>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.04em" }}>Meal Charges</div>
                     <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 18, marginBottom: 10 }}>
-                      <span style={{ fontSize: 13, fontWeight: 500, color: "var(--t1)" }}>Include Meal Package?</span>
+                      <span style={{ fontSize: 13, fontWeight: 500, color: "var(--t1)" }}>Include Meal Charges?</span>
                       <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13 }}>
                         <input type="radio" name={`meal-${seg.id}`} checked={seg.mealOn} onChange={() => updateSegField(seg.id, "mealOn", true)} /> Yes
                       </label>
@@ -1118,7 +1124,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                         <thead>
                           <tr>
                             <th style={{ whiteSpace: "nowrap" }}>Charge</th>
-                            <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Tariff</th>
+                            <th style={{ whiteSpace: "nowrap", textAlign: "right", width: 110 }}>Rate</th>
                             <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Nights</th>
                             <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Pax</th>
                             <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Charges</th>
@@ -1131,7 +1137,15 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                           {seg.mealOn && (
                             <tr style={{ cursor: "default" }}>
                               <td><strong>Meal &amp; Activity Package</strong></td>
-                              <td style={{ textAlign: "right" }}>{fmt(packageRates.mealPerAdultPerNight)}</td>
+                              <td style={{ verticalAlign: "middle" }}>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={seg.mealRate}
+                                  onChange={(e) => updateSegField(seg.id, "mealRate", e.target.value)}
+                                  style={cellInputStyle}
+                                />
+                              </td>
                               <td style={{ textAlign: "right" }}>{segMeal.nights}</td>
                               <td style={{ textAlign: "right" }}>{segMeal.adultsN}</td>
                               <td style={{ textAlign: "right" }}>{fmt(segMeal.meal)}</td>
@@ -1143,7 +1157,15 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                           {segMeal.petsN > 0 && (
                             <tr style={{ cursor: "default" }}>
                               <td><strong>Pet Package</strong></td>
-                              <td style={{ textAlign: "right" }}>{fmt(packageRates.petPerPetPerNight)}</td>
+                              <td style={{ verticalAlign: "middle" }}>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={seg.petRate}
+                                  onChange={(e) => updateSegField(seg.id, "petRate", e.target.value)}
+                                  style={cellInputStyle}
+                                />
+                              </td>
                               <td style={{ textAlign: "right" }}>{segMeal.nights}</td>
                               <td style={{ textAlign: "right" }}>{segMeal.petsN}</td>
                               <td style={{ textAlign: "right" }}>{fmt(segMeal.pet)}</td>
@@ -1155,7 +1177,15 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                           {seg.driverMealOn && segMeal.driversN > 0 && (
                             <tr style={{ cursor: "default" }}>
                               <td><strong>Driver / Attendant Meal</strong></td>
-                              <td style={{ textAlign: "right" }}>{fmt(packageRates.mealPerAdultPerNight)}</td>
+                              <td style={{ verticalAlign: "middle" }}>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={seg.driverMealRate}
+                                  onChange={(e) => updateSegField(seg.id, "driverMealRate", e.target.value)}
+                                  style={cellInputStyle}
+                                />
+                              </td>
                               <td style={{ textAlign: "right" }}>{segMeal.nights}</td>
                               <td style={{ textAlign: "right" }}>{segMeal.driversN}</td>
                               <td style={{ textAlign: "right" }}>{fmt(segMeal.drvMeal)}</td>
@@ -1176,7 +1206,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                       </table>
                     ) : (
                       <div style={{ fontSize: 12, color: "var(--t3)" }}>
-                        No meal package selected. Toggle Yes above to include meal, or add pets to show pet charges.
+                        No meal charges added. Toggle Yes above to include meals, or add pets to show pet charges.
                       </div>
                     )}
                   </div>
@@ -1202,7 +1232,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                 <tbody>
                   <tr style={{ background: "var(--surf2)" }}>
                     <td colSpan={11} style={{ textAlign: "right", fontWeight: 700, color: "var(--t1)", padding: "8px 12px" }}>
-                      Total Room Charges (A)
+                      Total Room Charges
                     </td>
                     <td style={{ textAlign: "right", fontWeight: 800, color: "var(--sb)", fontSize: 14, padding: "8px 12px" }}>
                       {fmt(totalRoomCharges)}
@@ -1219,7 +1249,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       <div className="form-panel">
         <div className="form-sec">
           <div className="form-sec-title">
-            <span className="form-sec-num">3</span>Add On Charges
+            <span className="form-sec-num">3</span>Add-on Charges
           </div>
 
           <button
@@ -1354,7 +1384,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
               </thead>
               <tbody>
                 <tr style={{ cursor: "default" }}>
-                  <td>Room Charges (A)</td>
+                  <td>Room Charges</td>
                   <td style={{ textAlign: "right" }}>
                     {fmt(computedRows.reduce((s, r) => s + r.netCharges, 0))}
                   </td>
@@ -1365,7 +1395,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                 </tr>
                 {totalMealPet > 0 && (
                   <tr style={{ cursor: "default" }}>
-                    <td>Meal Charges (B)</td>
+                    <td>Meal Charges</td>
                     <td style={{ textAlign: "right" }}>
                       {fmt(segMealCalcs.reduce((s, c) => s + c.base, 0))}
                     </td>
@@ -1377,7 +1407,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                 )}
                 {totalAddOn > 0 && (
                   <tr style={{ cursor: "default" }}>
-                    <td>Add On Charges (C)</td>
+                    <td>Add-on Charges</td>
                     <td style={{ textAlign: "right" }}>{fmt(totalAddOnBasic)}</td>
                     <td style={{ textAlign: "right" }}>{fmt(totalAddOnGst)}</td>
                     <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(totalAddOn)}</td>
@@ -1405,11 +1435,11 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
         </div>
       </div>
 
-      {/* §5 Record Payments */}
+      {/* §5 Payment Received */}
       <div className="form-panel">
         <div className="form-sec">
           <div className="form-sec-title">
-            <span className="form-sec-num">5</span>Record Payments
+            <span className="form-sec-num">5</span>Payment Received
           </div>
           <table className="pricing-tbl" style={{ marginBottom: 8 }}>
             <thead>
@@ -1486,6 +1516,20 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
             className="detail-row"
             style={{
               marginTop: 14,
+              background: "var(--surf2)",
+              padding: "10px 12px",
+              borderRadius: "var(--r2)",
+            }}
+          >
+            <span className="detail-key" style={{ fontWeight: 600 }}>Total Payment Received</span>
+            <span className="detail-val" style={{ fontWeight: 800, fontSize: 16 }}>
+              {fmt(totalReceived)}
+            </span>
+          </div>
+          <div
+            className="detail-row"
+            style={{
+              marginTop: 8,
               background: balance > 0 ? "var(--amb-lt)" : "var(--grn-lt)",
               padding: "10px 12px",
               borderRadius: "var(--r2)",

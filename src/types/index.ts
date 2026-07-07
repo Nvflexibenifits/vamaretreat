@@ -117,6 +117,10 @@ export type BookingSegment = {
   mealOn: boolean;
   drivers: number;
   driverMealOn: boolean;
+  // Editable per-segment rates (fall back to master package rates when absent)
+  mealRate?: number;
+  petRate?: number;
+  driverMealRate?: number;
   mealTotal: number;
   mealGst: number;
   mealWithGst: number;

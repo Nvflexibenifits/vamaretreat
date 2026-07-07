@@ -25,6 +25,8 @@
   --amb: #a05e0a;
   --amb-bg: #fde8c8;
   --amb-lt: #fff6ea;
+  --yel: #8a6d00;
+  --yel-bg: #faf0bd;
   --red: #b83232;
   --red-bg: #fde0e0;
   --red-lt: #fff4f4;
@@ -177,10 +179,10 @@ button { cursor: pointer; }
 /* BADGES */
 .badge { display: inline-flex; align-items: center; font-size: 10px; font-weight: 700; padding: 3px 9px; border-radius: 20px; gap: 3px; white-space: nowrap; }
 .bd-draft { background: var(--bd); color: var(--t2); }
-.bd-confirmed { background: var(--amb-bg); color: var(--amb); }
-.bd-completed { background: var(--grn-bg); color: var(--grn); }
+.bd-confirmed { background: var(--grn-bg); color: var(--grn); }
+.bd-completed { background: var(--yel-bg); color: var(--yel); }
 .bd-lost { background: var(--red-bg); color: var(--red); }
-.bd-active { background: var(--blu-bg); color: var(--blu); }
+.bd-active { background: var(--amb-bg); color: var(--amb); }
 .bd-pending { background: var(--amb-bg); color: var(--amb); }
 .bd-cancelled { background: #5a1818; color: #fff; }
 
@@ -343,23 +345,23 @@ input[type=range] { width: 100%; accent-color: var(--acc); height: 4px; cursor: 
 .rc-table { border-collapse: collapse; min-width: 100%; table-layout: fixed; }
 .rc-table th { padding: 7px 4px; font-size: 10px; font-weight: 700; color: var(--t3); text-align: center; border-bottom: 1px solid var(--bd); border-right: 1px solid var(--bd); background: var(--surf2); white-space: nowrap; width: 48px; }
 .rc-table th.rc-room-col { width: 90px; text-align: left; padding: 7px 12px; font-size: 11px; }
-.rc-table td { padding: 4px; border-bottom: 1px solid var(--bd); border-right: 1px solid var(--bd); vertical-align: middle; height: 32px; }
+.rc-table td { padding: 4px; border-bottom: 1px solid var(--bd); border-right: 1px solid var(--bd); vertical-align: middle; height: 32px; background: #ffffff; }
 .rc-table td.rc-room-label { padding: 4px 12px; font-size: 12px; font-weight: 500; color: var(--t1); background: var(--surf2); white-space: nowrap; border-right: 2px solid var(--bd); }
 .rc-table td.rc-room-label small { display: block; font-size: 10px; color: var(--t3); font-weight: 400; }
 .rc-table td.rc-today { background: rgba(201, 135, 58, .05); }
 .rc-table th.rc-today-hd { background: var(--acc-bg); color: var(--acc); }
-.rc-cell-booked { background: var(--amb-bg); border-radius: 2px; height: 22px; display: flex; align-items: center; padding: 0 5px; font-size: 9px; font-weight: 600; color: var(--amb); overflow: hidden; white-space: nowrap; cursor: pointer; transition: opacity .1s; }
+.rc-cell-booked { background: var(--grn-bg); border-radius: 2px; height: 22px; display: flex; align-items: center; padding: 0 5px; font-size: 9px; font-weight: 600; color: var(--grn); overflow: hidden; white-space: nowrap; cursor: pointer; transition: opacity .1s; }
 .rc-cell-booked:hover { opacity: .8; }
-.rc-cell-booked.status-completed { background: var(--grn-bg); color: var(--grn); }
-.rc-cell-booked.status-tentative { background: var(--blu-bg); color: var(--blu); }
-.rc-cell-booked.status-pet { background: #ede9fe; color: #5b21b6; }
+.rc-cell-booked.status-completed { background: var(--yel-bg); color: var(--yel); }
+.rc-cell-booked.status-tentative { background: var(--amb-bg); color: var(--amb); }
+.rc-cell-booked.status-pet { background: var(--pur-bg); color: var(--pur); }
 .rc-table tr:last-child td { border-bottom: none; }
 
 /* ROOM STATUS DASHBOARD CELL */
 .rs-cell { display: flex; gap: 4px; justify-content: center; align-items: center; font-size: 11px; font-weight: 600; }
-.rs-cell .rs-b { color: var(--amb); }
-.rs-cell .rs-t { color: var(--t3); }
-.rs-cell .rs-a { color: var(--grn); }
+.rs-cell .rs-b { color: var(--grn); }
+.rs-cell .rs-t { color: var(--amb); }
+.rs-cell .rs-a { color: var(--t2); }
 .rs-cell .rs-sep { color: var(--bd2); font-weight: 400; }
 
 /* UNALLOC BANNER */

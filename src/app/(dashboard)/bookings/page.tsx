@@ -133,8 +133,6 @@ export default function BookingsPage() {
               <th>Check-in</th>
               <th>Check-out</th>
               <th>Nights</th>
-              <th>No. of Rooms</th>
-              <th>Room Categ.</th>
               <th>Amount Due</th>
               <th>Amount Received</th>
               <th>Balance Amount</th>
@@ -146,7 +144,7 @@ export default function BookingsPage() {
           <tbody>
             {data.length === 0 ? (
               <tr>
-                <td colSpan={14}>
+                <td colSpan={12}>
                   <div className="empty-state">
                     <h3>No bookings found</h3>
                     <p>Try adjusting your filters</p>
@@ -155,15 +153,6 @@ export default function BookingsPage() {
               </tr>
             ) : (
               data.map((b) => {
-                const roomMap = new Map<string, number>();
-                b.segments.forEach((seg) => {
-                  seg.rooms.forEach((r) => {
-                    if (r.roomName) roomMap.set(r.roomName, Math.max(roomMap.get(r.roomName) ?? 0, r.numRooms));
-                  });
-                });
-                const totalRooms = Array.from(roomMap.values()).reduce((s, n) => s + n, 0);
-                const roomCateg = Array.from(roomMap.keys()).join(", ") || "—";
-
                 return (
                   <tr key={b.id} onClick={() => router.push(`/bookings/${b.id}`)}>
                     <td>
@@ -181,8 +170,6 @@ export default function BookingsPage() {
                     <td>{fmtIN(b.checkin)}</td>
                     <td>{fmtIN(b.checkout)}</td>
                     <td>{b.nights}</td>
-                    <td style={{ textAlign: "center" }}>{totalRooms || "—"}</td>
-                    <td style={{ fontSize: 12 }}>{roomCateg}</td>
                     <td style={{ fontWeight: 600 }}>{fmt(b.grandTotal)}</td>
                     <td style={{ fontWeight: 500, color: "var(--grn)" }}>{fmt(b.grandTotal - b.balance)}</td>
                     <td style={{ fontWeight: 500, color: b.balance > 0 ? "var(--amb)" : "var(--grn)" }}>

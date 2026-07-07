@@ -713,26 +713,19 @@ export default function RoomChartPage() {
             style={{ marginLeft: "auto", padding: 0, border: "none", background: "transparent", gap: 12 }}
           >
             <div className="rc-legend-item">
-              <div className="rc-legend-dot" style={{ background: "var(--blu-bg)", border: "1px solid var(--blu)" }}></div>
-              Tentative
-            </div>
-            <div className="rc-legend-item">
-              <div className="rc-legend-dot" style={{ background: "var(--amb-bg)", border: "1px solid var(--amb)" }}></div>
+              <div className="rc-legend-dot" style={{ background: "var(--grn-bg)", border: "1px solid var(--grn)" }}></div>
               Confirmed
             </div>
             <div className="rc-legend-item">
-              <div className="rc-legend-dot" style={{ background: "var(--grn-bg)", border: "1px solid var(--grn)" }}></div>
+              <div className="rc-legend-dot" style={{ background: "var(--amb-bg)", border: "1px solid var(--amb)" }}></div>
+              Tentative
+            </div>
+            <div className="rc-legend-item">
+              <div className="rc-legend-dot" style={{ background: "var(--yel-bg)", border: "1px solid var(--yel)" }}></div>
               Completed
             </div>
             <div className="rc-legend-item">
-              <div
-                className="rc-legend-dot"
-                style={{ background: "#ede9fe", border: "1px solid #7c3aed" }}
-              ></div>
-              Pets
-            </div>
-            <div className="rc-legend-item">
-              <div className="rc-legend-dot" style={{ background: "var(--bd)" }}></div>
+              <div className="rc-legend-dot" style={{ background: "#ffffff", border: "1px solid var(--bd2)" }}></div>
               Available
             </div>
             <div className="rc-legend-item">
@@ -745,6 +738,14 @@ export default function RoomChartPage() {
                 }}
               ></div>
               Blocked
+            </div>
+            <div style={{ width: 1, height: 16, background: "var(--bd2)", margin: "0 6px" }}></div>
+            <div className="rc-legend-item">
+              <div
+                className="rc-legend-dot"
+                style={{ background: "var(--pur-bg)", border: "1px solid var(--pur)" }}
+              ></div>
+              Pets
             </div>
           </div>
         </div>
@@ -1250,7 +1251,7 @@ export default function RoomChartPage() {
               </div>
               <span
                 className="badge"
-                style={{ background: bulkDetail.status === "Tentative" ? "var(--blu-bg)" : "var(--amb-bg)", color: bulkDetail.status === "Tentative" ? "var(--blu)" : "var(--amb)" }}
+                style={{ background: bulkDetail.status === "Tentative" ? "var(--amb-bg)" : "var(--grn-bg)", color: bulkDetail.status === "Tentative" ? "var(--amb)" : "var(--grn)" }}
               >
                 {bulkDetail.status}
               </span>
@@ -1441,16 +1442,16 @@ function BookingHoverCard({
 
   const statusColor =
     booking.status === "Confirmed"
-      ? "var(--amb)"
+      ? "var(--grn)"
       : booking.status === "Tentative"
-      ? "var(--blu)"
-      : "var(--grn)";
+      ? "var(--amb)"
+      : "var(--yel)";
   const statusBg =
     booking.status === "Confirmed"
-      ? "var(--amb-bg)"
+      ? "var(--grn-bg)"
       : booking.status === "Tentative"
-      ? "var(--blu-bg)"
-      : "var(--grn-bg)";
+      ? "var(--amb-bg)"
+      : "var(--yel-bg)";
 
   return (
     <div
@@ -1644,7 +1645,7 @@ function BulkHoverCard({ block, rect, rooms }: { block: BulkRoomBlock; rect: DOM
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
         <div style={{ fontWeight: 700, fontSize: 13 }}>{block.label}</div>
-        <span className="badge" style={{ background: block.status === "Tentative" ? "var(--blu-bg)" : "var(--amb-bg)", color: block.status === "Tentative" ? "var(--blu)" : "var(--amb)", fontSize: 10 }}>
+        <span className="badge" style={{ background: block.status === "Tentative" ? "var(--amb-bg)" : "var(--grn-bg)", color: block.status === "Tentative" ? "var(--amb)" : "var(--grn)", fontSize: 10 }}>
           {block.status}
         </span>
       </div>

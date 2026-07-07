@@ -1,15 +1,164 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { fmt, fmtIN, dayName, getBookingPricingRows } from "@/lib/utils";
+import { fmt, getBookingPricingRows, todayStr } from "@/lib/utils";
+
+// dd/mm/yy
+function fmtShort(d: string): string {
+  if (!d) return "—";
+  const [y, m, dd] = d.split("-");
+  return `${dd}/${m}/${y.slice(2)}`;
+}
+
+function nfmt(v: number): string {
+  return Math.round(v).toLocaleString("en-IN");
+}
+
+function lastDayOfMonth(ym: string): string {
+  const [y, m] = ym.split("-").map(Number);
+  return `${ym}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
+}
+
+const groupHdStyle: React.CSSProperties = {
+  padding: "6px 10px",
+  fontSize: 10,
+  fontWeight: 700,
+  textTransform: "uppercase",
+  letterSpacing: ".5px",
+  color: "var(--t2)",
+  background: "var(--surf3)",
+  textAlign: "left",
+  borderBottom: "1px solid var(--bd)",
+};
+
+const sectionBorder: React.CSSProperties = { borderLeft: "2px solid var(--bd)" };
 
 export default function RevenuePage() {
   const { bookings, currentRole } = useApp();
   const [search, setSearch] = useState("");
+  const [today, setToday] = useState("");
+  // "" = current month, "custom" = manual range, otherwise "YYYY-MM"
+  const [month, setMonth] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+
+  useEffect(() => {
+    setToday(todayStr());
+  }, []);
+
+  const effMonth = month || (today ? today.slice(0, 7) : "");
+  const rangeFrom = month === "custom" ? dateFrom : effMonth ? `${effMonth}-01` : "";
+  const rangeTo = month === "custom" ? dateTo : effMonth ? lastDayOfMonth(effMonth) : "";
+
+  // Month options: 3 months ahead down to 12 months back
+  const monthOptions = useMemo(() => {
+    if (!today) return [];
+    const base = new Date(today + "T00:00:00");
+    return Array.from({ length: 16 }, (_, i) => {
+      const d = new Date(base.getFullYear(), base.getMonth() + 3 - i, 1);
+      return {
+        value: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`,
+        label: d.toLocaleDateString("en-IN", { month: "long", year: "numeric" }),
+      };
+    });
+  }, [today]);
+
+  // Only Confirmed + Cancelled count as revenue
+  const tableRows = useMemo(() => {
+    return bookings
+      .filter((b) => b.status === "Confirmed" || b.status === "Cancelled")
+      .filter((b) => {
+        if (search.trim()) {
+          const q = search.toLowerCase();
+          if (!b.id.toLowerCase().includes(q) && !b.guest.toLowerCase().includes(q)) return false;
+        }
+        if (rangeFrom && b.checkin < rangeFrom) return false;
+        if (rangeTo && b.checkin > rangeTo) return false;
+        return true;
+      })
+      .sort((a, b) => a.checkin.localeCompare(b.checkin))
+      .map((b) => {
+        const pricingRows = getBookingPricingRows(b);
+        const roomNet = pricingRows.reduce((s, r) => s + r.netCharges, 0);
+        // Room GST split by the actual rate applied on each pricing row
+        const roomGstByRate: Record<number, number> = {};
+        pricingRows.forEach((r) => {
+          if (r.gstAmt > 0) roomGstByRate[r.gstRate] = (roomGstByRate[r.gstRate] ?? 0) + r.gstAmt;
+        });
+        const mealNet = b.mealTotal + b.petTotal + (b.driverMealTotal ?? 0);
+        const mealGst = b.mealGst + b.petGst + (b.driverMealGst ?? 0);
+        // Add-on charges are stored rolled into grandTotal (incl. their GST)
+        const other = Math.max(0, b.grandTotal - b.totalRoomCharges - b.totalMealCharges);
+        const isCancelled = b.status === "Cancelled";
+        const total = isCancelled && b.cancellationDetails
+          ? b.cancellationDetails.cancellationCharge
+          : b.grandTotal;
+
+        let bank = 0, cash = 0, crNote = 0;
+        (b.payments ?? []).forEach((p) => {
+          const m = (p.mode || "").toLowerCase();
+          if (m.includes("cash")) cash += p.amount;
+          else if (m.includes("credit note")) crNote += p.amount;
+          else bank += p.amount;
+        });
+        // Legacy bookings may carry an advance without itemized payments
+        if (bank + cash + crNote === 0 && b.advance > 0) bank = b.advance;
+
+        // A cancellation settled with a credit note returns value to the guest
+        // already, so it doesn't remain as a cash refund due.
+        const settledViaCreditNote =
+          isCancelled && b.cancellationDetails?.resolution === "credit-note"
+            ? b.cancellationDetails.creditNoteAmount
+            : 0;
+        const bal = bank + cash + crNote - settledViaCreditNote - total;
+        return { b, roomNet, roomGstByRate, mealNet, mealGst, other, total, bank, cash, crNote, bal, isCancelled };
+      });
+  }, [bookings, search, rangeFrom, rangeTo]);
+
+  // One column per distinct room-GST rate present in the filtered data
+  const gstRates = useMemo(() => {
+    const rates = [...new Set(tableRows.flatMap((r) => Object.keys(r.roomGstByRate).map(Number)))];
+    rates.sort((a, b) => a - b);
+    return rates.length > 0 ? rates : [5];
+  }, [tableRows]);
+
+  const totals = useMemo(() => {
+    const gstByRate: Record<number, number> = {};
+    const acc = tableRows.reduce(
+      (t, r) => {
+        Object.entries(r.roomGstByRate).forEach(([rate, amt]) => {
+          gstByRate[Number(rate)] = (gstByRate[Number(rate)] ?? 0) + amt;
+        });
+        return {
+          roomNet: t.roomNet + r.roomNet,
+          mealNet: t.mealNet + r.mealNet,
+          mealGst: t.mealGst + r.mealGst,
+          other: t.other + r.other,
+          total: t.total + r.total,
+          bank: t.bank + r.bank,
+          cash: t.cash + r.cash,
+          crNote: t.crNote + r.crNote,
+          bal: t.bal + r.bal,
+        };
+      },
+      { roomNet: 0, mealNet: 0, mealGst: 0, other: 0, total: 0, bank: 0, cash: 0, crNote: 0, bal: 0 }
+    );
+    return { ...acc, gstByRate };
+  }, [tableRows]);
+
+  // Pending payments (global, unaffected by filters)
+  const pendingBookings = useMemo(
+    () => bookings.filter((b) => b.status === "Confirmed" && b.balance > 0),
+    [bookings]
+  );
+  const pendingPayments = pendingBookings.reduce((s, b) => s + b.balance, 0);
+
+  const refundsDue = useMemo(
+    () => tableRows.filter((r) => r.bal > 0).reduce((s, r) => s + r.bal, 0),
+    [tableRows]
+  );
 
   if (currentRole === "Front Office") {
     return (
@@ -21,290 +170,270 @@ export default function RevenuePage() {
     );
   }
 
-  // Only Confirmed + Cancelled count as revenue
-  const revenueBookings = bookings.filter(
-    (b) => b.status === "Confirmed" || b.status === "Cancelled"
-  );
+  const rangeLabel = month === "custom"
+    ? [dateFrom, dateTo].filter(Boolean).map(fmtShort).join(" – ") || "Custom"
+    : monthOptions.find((o) => o.value === effMonth)?.label ?? effMonth;
 
-  // Summary card data (global, not affected by filters)
-  const thisMonth = new Date().toISOString().slice(0, 7);
-  const thisMonthBookings = revenueBookings.filter((b) => b.checkin.startsWith(thisMonth));
-  const revenueThisMonth = thisMonthBookings.reduce((s, b) => s + b.grandTotal, 0);
+  const exportExcel = () => {
+    const headers = [
+      "SL No.", "Check-in", "Check-out", "Guest Name", "Mobile", "Booking ID", "Status",
+      "Room Charges",
+      ...gstRates.map((r) => `GST ${r}% (Room)`),
+      "Meal Charges", "Other Charges", "GST 18%", "Total Charges",
+      "Received - Bank", "Received - Cash", "Credit Note", "Balance",
+    ];
+    const lines = tableRows.map((r, i) => [
+      i + 1, fmtShort(r.b.checkin), fmtShort(r.b.checkout), r.b.guest, r.b.mobile, r.b.id, r.b.status,
+      Math.round(r.roomNet),
+      ...gstRates.map((rate) => Math.round(r.roomGstByRate[rate] ?? 0)),
+      Math.round(r.mealNet), Math.round(r.other), Math.round(r.mealGst), Math.round(r.total),
+      Math.round(r.bank), Math.round(r.cash), Math.round(r.crNote), Math.round(r.bal),
+    ]);
+    lines.push([
+      "", "", "", "", "", "Total", "",
+      Math.round(totals.roomNet),
+      ...gstRates.map((rate) => Math.round(totals.gstByRate[rate] ?? 0)),
+      Math.round(totals.mealNet), Math.round(totals.other), Math.round(totals.mealGst), Math.round(totals.total),
+      Math.round(totals.bank), Math.round(totals.cash), Math.round(totals.crNote), Math.round(totals.bal),
+    ]);
+    const csv = [headers, ...lines]
+      .map((cols) => cols.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `revenue_${month === "custom" ? "custom-range" : effMonth || "all"}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
-  const pendingBookings = bookings.filter((b) => b.status === "Confirmed" && b.balance > 0);
-  const pendingPayments = pendingBookings.reduce((s, b) => s + b.balance, 0);
-
-  const cancelledBookings = bookings.filter((b) => b.status === "Cancelled");
-  const refundsPending = cancelledBookings.reduce((s, b) => s + b.advance, 0);
-
-  // Table filter: search + date range on checkin
-  const filtered = revenueBookings.filter((b) => {
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      if (!b.guest.toLowerCase().includes(q) && !b.id.toLowerCase().includes(q)) return false;
-    }
-    if (dateFrom && b.checkin < dateFrom) return false;
-    if (dateTo && b.checkin > dateTo) return false;
-    return true;
-  });
-
-  // Footer totals from filtered rows
-  const totals = filtered.reduce(
-    (acc, b) => {
-      const rows = getBookingPricingRows(b);
-      const roomNet = rows.reduce((s, r) => s + r.netCharges, 0);
-      const roomGst = rows.reduce((s, r) => s + r.gstAmt, 0);
-      const mealNet = b.mealTotal + b.petTotal + (b.driverMealTotal ?? 0);
-      const mealGst = b.mealGst + b.petGst + (b.driverMealGst ?? 0);
-      const other = Math.max(0, b.grandTotal - b.totalRoomCharges - b.totalMealCharges);
-      return {
-        roomNet: acc.roomNet + roomNet,
-        roomGst: acc.roomGst + roomGst,
-        mealNet: acc.mealNet + mealNet,
-        mealGst: acc.mealGst + mealGst,
-        other: acc.other + other,
-        grandTotal: acc.grandTotal + b.grandTotal,
-        paid: acc.paid + b.advance,
-        balance: acc.balance + b.balance,
-      };
-    },
-    { roomNet: 0, roomGst: 0, mealNet: 0, mealGst: 0, other: 0, grandTotal: 0, paid: 0, balance: 0 }
-  );
-
-  const hasFilter = search.trim() || dateFrom || dateTo;
+  const numTd: React.CSSProperties = { textAlign: "right", whiteSpace: "nowrap", fontSize: 12 };
+  const chargesCols = 5 + gstRates.length;
+  const allCols = 6 + chargesCols + 3 + 2;
 
   return (
     <div className="view">
       <div className="pg-hd">
         <div>
           <h2>Revenue</h2>
-          <p>Confirmed and cancelled bookings only</p>
+        </div>
+        <div className="pg-hd-actions" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <select
+            value={month === "custom" ? "custom" : effMonth}
+            onChange={(e) => {
+              const v = e.target.value;
+              setMonth(v);
+              if (v !== "custom") { setDateFrom(""); setDateTo(""); }
+            }}
+            style={{ height: 32, padding: "0 10px", fontSize: 13, border: "1px solid var(--bd)", borderRadius: "var(--r2)", background: "var(--surf)", color: "var(--t1)", cursor: "pointer" }}
+          >
+            {monthOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+            <option value="custom">Custom Range</option>
+          </select>
+          {month === "custom" && (
+            <>
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                style={{ height: 32, padding: "0 8px", fontSize: 12, border: "1px solid var(--bd)", borderRadius: "var(--r2)", background: "var(--surf)", color: "var(--t1)", outline: "none" }}
+              />
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                style={{ height: 32, padding: "0 8px", fontSize: 12, border: "1px solid var(--bd)", borderRadius: "var(--r2)", background: "var(--surf)", color: "var(--t1)", outline: "none" }}
+              />
+            </>
+          )}
+          <input
+            type="search"
+            placeholder="Search booking ID"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{ width: 160, height: 32, padding: "0 10px", border: "1px solid var(--bd)", borderRadius: "var(--r2)", fontSize: 13, background: "var(--surf)", outline: "none" }}
+          />
+          <button className="btn btn-primary btn-sm" onClick={exportExcel} disabled={tableRows.length === 0}>
+            Export to Excel
+          </button>
         </div>
       </div>
 
-      {/* 3-column summary cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginBottom: 20 }}>
-        <div style={{ background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r4)", padding: "16px 20px" }}>
+      {/* Summary cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 18 }}>
+        <div style={{ background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r4)", padding: "14px 18px" }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>
-            Revenue This Month
+            Total Charges ({rangeLabel})
           </div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: "var(--sb)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>
-            {fmt(revenueThisMonth)}
-          </div>
-          <div style={{ fontSize: 12, color: "var(--t3)", marginTop: 4 }}>
-            {thisMonthBookings.length} booking{thisMonthBookings.length !== 1 ? "s" : ""} checking in this month
+          <div style={{ fontSize: 22, fontWeight: 800, color: "var(--sb)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>
+            {fmt(totals.total)}
           </div>
         </div>
-
-        <div style={{ background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r4)", padding: "16px 20px" }}>
+        <div style={{ background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r4)", padding: "14px 18px" }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>
+            Received
+          </div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: "var(--grn)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>
+            {fmt(totals.bank + totals.cash + totals.crNote)}
+          </div>
+        </div>
+        <div style={{ background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r4)", padding: "14px 18px" }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>
             Pending Payments
           </div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: "var(--amb)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>
+          <div style={{ fontSize: 22, fontWeight: 800, color: "var(--amb)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>
             {fmt(pendingPayments)}
           </div>
-          <div style={{ fontSize: 12, color: "var(--t3)", marginTop: 4 }}>
-            {pendingBookings.length} confirmed booking{pendingBookings.length !== 1 ? "s" : ""} with balance due
+        </div>
+        <div style={{ background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r4)", padding: "14px 18px" }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>
+            Refunds Due ({rangeLabel})
+          </div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: refundsDue > 0 ? "var(--pur)" : "var(--t2)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>
+            {fmt(refundsDue)}
           </div>
         </div>
-
-        <div style={{
-          background: refundsPending > 0 ? "var(--red-lt, #fff5f5)" : "var(--surf2)",
-          border: `1px solid ${refundsPending > 0 ? "var(--red)" : "var(--bd)"}`,
-          borderRadius: "var(--r4)",
-          padding: "16px 20px",
-        }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: refundsPending > 0 ? "var(--red)" : "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>
-            Refunds Pending
-          </div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: refundsPending > 0 ? "var(--red)" : "var(--t2)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>
-            {fmt(refundsPending)}
-          </div>
-          <div style={{ fontSize: 12, color: "var(--t3)", marginTop: 4 }}>
-            {cancelledBookings.length} cancelled booking{cancelledBookings.length !== 1 ? "s" : ""}
-          </div>
-        </div>
-      </div>
-
-      {/* Filters row */}
-      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
-        <input
-          type="search"
-          placeholder="Search by guest name or booking ID..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{
-            flex: "1 1 200px",
-            minWidth: 180,
-            maxWidth: 320,
-            padding: "7px 12px",
-            border: "1px solid var(--bd)",
-            borderRadius: "var(--r3)",
-            fontSize: 13,
-            background: "var(--surf)",
-            outline: "none",
-          }}
-        />
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <label style={{ fontSize: 12, color: "var(--t3)", whiteSpace: "nowrap" }}>Check-in from</label>
-          <input
-            type="date"
-            value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
-            style={{
-              padding: "7px 10px",
-              border: "1px solid var(--bd)",
-              borderRadius: "var(--r3)",
-              fontSize: 13,
-              background: "var(--surf)",
-              outline: "none",
-              color: "var(--t1)",
-            }}
-          />
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <label style={{ fontSize: 12, color: "var(--t3)", whiteSpace: "nowrap" }}>to</label>
-          <input
-            type="date"
-            value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
-            style={{
-              padding: "7px 10px",
-              border: "1px solid var(--bd)",
-              borderRadius: "var(--r3)",
-              fontSize: 13,
-              background: "var(--surf)",
-              outline: "none",
-              color: "var(--t1)",
-            }}
-          />
-        </div>
-        {hasFilter && (
-          <button
-            onClick={() => { setSearch(""); setDateFrom(""); setDateTo(""); }}
-            className="btn btn-ghost btn-sm"
-            style={{ fontSize: 12, whiteSpace: "nowrap" }}
-          >
-            Clear filters
-          </button>
-        )}
       </div>
 
       {/* Revenue Table */}
       <div className="tbl-wrap">
         <div className="tbl-hd">
           <h3>Revenue Table</h3>
-          <span style={{ fontSize: 12, color: "var(--t3)" }}>
-            {filtered.length} booking{filtered.length !== 1 ? "s" : ""}{hasFilter ? " (filtered)" : ""}
+          <span style={{ fontSize: 12, color: "var(--t3)", marginLeft: "auto" }}>
+            {tableRows.length} booking{tableRows.length !== 1 ? "s" : ""}
           </span>
         </div>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ minWidth: 900 }}>
+          <table style={{ minWidth: 1260 }}>
             <thead>
               <tr>
-                <th style={{ width: 48, textAlign: "center" }}>Sr.No.</th>
-                <th style={{ whiteSpace: "nowrap" }}>B.ID</th>
-                <th>Guest Name</th>
-                <th style={{ whiteSpace: "nowrap" }}>Check-in</th>
-                <th style={{ whiteSpace: "nowrap" }}>Check-out</th>
-                <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>Room Charges</th>
-                <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>Meal Charges</th>
-                <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>Other Charges</th>
-                <th style={{ textAlign: "center", width: 70 }}>Action</th>
+                <th colSpan={6} style={groupHdStyle}>Booking Info</th>
+                <th colSpan={chargesCols} style={{ ...groupHdStyle, ...sectionBorder }}>Charges</th>
+                <th colSpan={3} style={{ ...groupHdStyle, ...sectionBorder }}>Payments Received</th>
+                <th style={{ ...groupHdStyle, ...sectionBorder, textAlign: "right" }}>Bal</th>
+                <th style={{ ...groupHdStyle, ...sectionBorder }}></th>
+              </tr>
+              <tr>
+                <th style={{ width: 36 }}>SL</th>
+                <th style={{ whiteSpace: "nowrap" }}>C-in</th>
+                <th style={{ whiteSpace: "nowrap" }}>C-out</th>
+                <th>Guest</th>
+                <th style={{ whiteSpace: "nowrap" }}>Mobile</th>
+                <th style={{ whiteSpace: "nowrap" }}>Bkg ID</th>
+                <th style={{ textAlign: "right", ...sectionBorder }}>Room</th>
+                {gstRates.map((r) => (
+                  <th key={r} style={{ textAlign: "right", whiteSpace: "nowrap" }}>GST {r}%</th>
+                ))}
+                <th style={{ textAlign: "right" }}>Meal</th>
+                <th style={{ textAlign: "right" }}>Other</th>
+                <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>GST 18%</th>
+                <th style={{ textAlign: "right" }}>Total</th>
+                <th style={{ textAlign: "right", ...sectionBorder }}>Bank</th>
+                <th style={{ textAlign: "right" }}>Cash</th>
+                <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>Cr Note</th>
+                <th style={{ textAlign: "right", ...sectionBorder }}>₹</th>
+                <th style={{ textAlign: "center", width: 60, ...sectionBorder }}></th>
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 ? (
+              {tableRows.length === 0 ? (
                 <tr>
-                  <td colSpan={9}>
+                  <td colSpan={allCols}>
                     <div className="empty-state" style={{ padding: 32 }}>
-                      <p>{hasFilter ? "No bookings match the current filters." : "No confirmed or cancelled bookings yet."}</p>
+                      <p>No confirmed or cancelled bookings in this period.</p>
                     </div>
                   </td>
                 </tr>
               ) : (
-                filtered.map((b, i) => {
-                  const rows = getBookingPricingRows(b);
-                  const roomNet = rows.reduce((s, r) => s + r.netCharges, 0);
-                  const mealNet = b.mealTotal + b.petTotal + (b.driverMealTotal ?? 0);
-                  const other = Math.max(0, b.grandTotal - b.totalRoomCharges - b.totalMealCharges);
-                  return (
-                    <tr key={b.id}>
-                      <td style={{ textAlign: "center", color: "var(--t3)", fontSize: 12 }}>{i + 1}</td>
-                      <td>
-                        <span style={{ fontSize: 11, fontFamily: "var(--font-outfit), Outfit, sans-serif", color: "var(--t2)", fontWeight: 700 }}>
-                          {b.id}
-                        </span>
-                        {b.status === "Cancelled" && (
-                          <span className="badge bd-lost" style={{ marginLeft: 6, fontSize: 9 }}>Cancelled</span>
+                <>
+                  {tableRows.map((r, i) => (
+                    <tr key={r.b.id}>
+                      <td style={{ color: "var(--t3)", fontSize: 12 }}>{i + 1}</td>
+                      <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{fmtShort(r.b.checkin)}</td>
+                      <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{fmtShort(r.b.checkout)}</td>
+                      <td style={{ fontWeight: 500, color: "var(--t1)", fontSize: 12, whiteSpace: "nowrap" }}>{r.b.guest}</td>
+                      <td style={{ fontSize: 12, whiteSpace: "nowrap" }}>{r.b.mobile || "—"}</td>
+                      <td style={{ whiteSpace: "nowrap" }}>
+                        <Link
+                          href={`/bookings/${r.b.id}`}
+                          style={{ fontSize: 11, fontFamily: "var(--font-outfit), Outfit, sans-serif", color: "var(--acc)", fontWeight: 700, textDecoration: "none" }}
+                        >
+                          {r.b.id}
+                        </Link>
+                        {r.isCancelled && (
+                          <span className="badge bd-lost" style={{ marginLeft: 5, fontSize: 8 }}>Cancelled</span>
                         )}
                       </td>
-                      <td style={{ fontWeight: 500, color: "var(--t1)" }}>{b.guest}</td>
-                      <td style={{ whiteSpace: "nowrap" }}>
-                        <div style={{ lineHeight: 1.3 }}>
-                          <div>{fmtIN(b.checkin)}</div>
-                          <div style={{ fontSize: 10, color: "var(--t3)", fontWeight: 500 }}>{dayName(b.checkin)}</div>
-                        </div>
+                      <td style={{ ...numTd, ...sectionBorder }}>{nfmt(r.roomNet)}</td>
+                      {gstRates.map((rate) => (
+                        <td key={rate} style={{ ...numTd, color: "var(--t3)" }}>
+                          {(r.roomGstByRate[rate] ?? 0) > 0 ? nfmt(r.roomGstByRate[rate]) : "—"}
+                        </td>
+                      ))}
+                      <td style={numTd}>{r.mealNet > 0 ? nfmt(r.mealNet) : "—"}</td>
+                      <td style={numTd}>{r.other > 0 ? nfmt(r.other) : "—"}</td>
+                      <td style={{ ...numTd, color: "var(--t3)" }}>{r.mealGst > 0 ? nfmt(r.mealGst) : "—"}</td>
+                      <td style={{ ...numTd, fontWeight: 700 }}>{nfmt(r.total)}</td>
+                      <td style={{ ...numTd, ...sectionBorder }}>{r.bank > 0 ? nfmt(r.bank) : "—"}</td>
+                      <td style={numTd}>{r.cash > 0 ? nfmt(r.cash) : "—"}</td>
+                      <td style={numTd}>{r.crNote > 0 ? nfmt(r.crNote) : "—"}</td>
+                      <td
+                        style={{
+                          ...numTd,
+                          ...sectionBorder,
+                          fontWeight: 700,
+                          background: r.bal < 0 ? "var(--amb-lt)" : r.bal > 0 ? "var(--pur-lt)" : undefined,
+                          color: r.bal < 0 ? "var(--amb)" : r.bal > 0 ? "var(--pur)" : "var(--grn)",
+                        }}
+                        title={r.bal < 0 ? "Amount pending from guest" : r.bal > 0 ? "Excess received — refund due to guest" : "Settled"}
+                      >
+                        {r.bal === 0 ? "0" : r.bal > 0 ? `+${nfmt(r.bal)}` : `−${nfmt(-r.bal)}`}
                       </td>
-                      <td style={{ whiteSpace: "nowrap" }}>
-                        <div style={{ lineHeight: 1.3 }}>
-                          <div>{fmtIN(b.checkout)}</div>
-                          <div style={{ fontSize: 10, color: "var(--t3)", fontWeight: 500 }}>{dayName(b.checkout)}</div>
-                        </div>
-                      </td>
-                      <td style={{ textAlign: "right", fontWeight: 500 }}>{fmt(roomNet)}</td>
-                      <td style={{ textAlign: "right" }}>{mealNet > 0 ? fmt(mealNet) : "—"}</td>
-                      <td style={{ textAlign: "right" }}>{other > 0 ? fmt(other) : "—"}</td>
-                      <td style={{ textAlign: "center" }}>
-                        <Link href={`/bookings/${b.id}`} className="btn btn-ghost btn-xs">View</Link>
+                      <td style={{ textAlign: "center", ...sectionBorder }}>
+                        <Link href={`/bookings/${r.b.id}`} className="btn btn-ghost btn-xs">View</Link>
                       </td>
                     </tr>
-                  );
-                })
+                  ))}
+                  <tr style={{ background: "var(--surf2)", fontWeight: 700 }}>
+                    <td colSpan={6} style={{ textAlign: "right", fontSize: 12, color: "var(--t2)" }}>Total</td>
+                    <td style={{ ...numTd, ...sectionBorder, fontWeight: 700 }}>{nfmt(totals.roomNet)}</td>
+                    {gstRates.map((rate) => (
+                      <td key={rate} style={{ ...numTd, fontWeight: 700, color: "var(--t3)" }}>
+                        {nfmt(totals.gstByRate[rate] ?? 0)}
+                      </td>
+                    ))}
+                    <td style={{ ...numTd, fontWeight: 700 }}>{nfmt(totals.mealNet)}</td>
+                    <td style={{ ...numTd, fontWeight: 700 }}>{nfmt(totals.other)}</td>
+                    <td style={{ ...numTd, fontWeight: 700, color: "var(--t3)" }}>{nfmt(totals.mealGst)}</td>
+                    <td style={{ ...numTd, fontWeight: 800 }}>{nfmt(totals.total)}</td>
+                    <td style={{ ...numTd, ...sectionBorder, fontWeight: 700 }}>{nfmt(totals.bank)}</td>
+                    <td style={{ ...numTd, fontWeight: 700 }}>{nfmt(totals.cash)}</td>
+                    <td style={{ ...numTd, fontWeight: 700 }}>{nfmt(totals.crNote)}</td>
+                    <td style={{ ...numTd, ...sectionBorder, fontWeight: 800, color: totals.bal < 0 ? "var(--amb)" : totals.bal > 0 ? "var(--pur)" : "var(--grn)" }}>
+                      {totals.bal === 0 ? "0" : totals.bal > 0 ? `+${nfmt(totals.bal)}` : `−${nfmt(-totals.bal)}`}
+                    </td>
+                    <td style={sectionBorder}></td>
+                  </tr>
+                </>
               )}
             </tbody>
           </table>
         </div>
+      </div>
 
-        {/* Footer totals */}
-        {filtered.length > 0 && (
-          <div style={{ borderTop: "2px solid var(--bd)", display: "flex", justifyContent: "flex-end", padding: "16px 12px" }}>
-            <table style={{ minWidth: 340 }}>
-              <tbody>
-                <tr>
-                  <td style={{ padding: "4px 16px 4px 0", color: "var(--t2)", fontSize: 13 }}>Total Charges (Room + Meal + Other)</td>
-                  <td style={{ textAlign: "right", fontWeight: 600, fontSize: 13 }}>{fmt(totals.roomNet + totals.mealNet + totals.other)}</td>
-                </tr>
-                <tr>
-                  <td style={{ padding: "4px 16px 4px 0", color: "var(--t3)", fontSize: 12 }}>GST on Room Charges</td>
-                  <td style={{ textAlign: "right", color: "var(--t3)", fontSize: 12 }}>+ {fmt(totals.roomGst)}</td>
-                </tr>
-                <tr>
-                  <td style={{ padding: "4px 16px 4px 0", color: "var(--t3)", fontSize: 12 }}>GST on Meal Charges</td>
-                  <td style={{ textAlign: "right", color: "var(--t3)", fontSize: 12 }}>+ {fmt(totals.mealGst)}</td>
-                </tr>
-                <tr>
-                  <td style={{ padding: "4px 16px 4px 0", color: "var(--t3)", fontSize: 12 }}>GST on Other Charges</td>
-                  <td style={{ textAlign: "right", color: "var(--t3)", fontSize: 12 }}>—</td>
-                </tr>
-                <tr style={{ borderTop: "1px solid var(--bd)" }}>
-                  <td style={{ padding: "8px 16px 4px 0", fontWeight: 700, color: "var(--t1)", fontSize: 14 }}>Grand Total</td>
-                  <td style={{ textAlign: "right", fontWeight: 800, fontSize: 18, color: "var(--sb)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>{fmt(totals.grandTotal)}</td>
-                </tr>
-                <tr>
-                  <td style={{ padding: "4px 16px 4px 0", color: "var(--t2)", fontSize: 13 }}>Amount Paid</td>
-                  <td style={{ textAlign: "right", fontWeight: 600, color: "var(--grn)", fontSize: 13 }}>{fmt(totals.paid)}</td>
-                </tr>
-                <tr>
-                  <td style={{ padding: "4px 16px 4px 0", color: "var(--t2)", fontSize: 13 }}>Balance Amount</td>
-                  <td style={{ textAlign: "right", fontWeight: 700, color: totals.balance > 0 ? "var(--amb)" : "var(--grn)", fontSize: 14 }}>
-                    {totals.balance > 0 ? fmt(totals.balance) : "Fully Paid"}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        )}
+      {/* Balance legend */}
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 10, fontSize: 12, color: "var(--t3)" }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ display: "inline-block", width: 10, height: 10, background: "var(--amb-lt)", border: "1px solid var(--amb)", borderRadius: 2 }}></span>
+          Amount pending from guest
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ display: "inline-block", width: 10, height: 10, background: "var(--pur-lt)", border: "1px solid var(--pur)", borderRadius: 2 }}></span>
+          Excess received, refund due to guest
+        </span>
       </div>
     </div>
   );
