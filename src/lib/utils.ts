@@ -51,6 +51,12 @@ export function addDays(dateStr: string, n: number): string {
   return d.toISOString().split("T")[0];
 }
 
+// Indian fiscal year code (April–March), e.g. July 2026 -> "2627" (FY 2026-27)
+export function fiscalYearCode(now: Date = new Date()): string {
+  const startYear = now.getMonth() + 1 >= 4 ? now.getFullYear() : now.getFullYear() - 1;
+  return `${String(startYear % 100).padStart(2, "0")}${String((startYear + 1) % 100).padStart(2, "0")}`;
+}
+
 export function getTimeOfDay(now: Date = new Date()): "morning" | "afternoon" | "evening" {
   const h = now.getHours();
   return h < 12 ? "morning" : h < 17 ? "afternoon" : "evening";

@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
 import {
   calcPricingRow,
+  fiscalYearCode,
   fmt,
   maxDiscountForRowAndRole,
   nightsBetween,
@@ -641,11 +642,13 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       showNotif("Enter advance amount to confirm", "error");
       return;
     }
-    const id =
-      "VR-" +
-      new Date().getFullYear() +
-      "-" +
-      String(bookings.length + 1).padStart(3, "0");
+    // B2C-<fiscal year>-<sequence>, e.g. B2C-2627-001. Sequence is the highest
+    // existing number for the prefix + 1, so deletions never cause ID reuse.
+    const idPrefix = `B2C-${fiscalYearCode()}-`;
+    const maxSeq = bookings
+      .filter((b) => b.id.startsWith(idPrefix))
+      .reduce((m, b) => Math.max(m, parseInt(b.id.slice(idPrefix.length), 10) || 0), 0);
+    const id = idPrefix + String(maxSeq + 1).padStart(3, "0");
     let allocatedRooms: string[] = [];
     if (intent === "Tentative" || intent === "Confirmed") {
       const result = tryAssignRooms(

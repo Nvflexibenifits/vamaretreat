@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -35,7 +36,6 @@ import type {
 } from "@/types";
 import {
   ROOMS as SEED_ROOMS,
-  SEED_BOOKINGS,
   SEED_CANCELLATION_POLICY,
   SEED_CREDIT_NOTE_SETTINGS,
   SEED_DISCOUNT_CAPS,
@@ -190,7 +190,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [currentRole, setCurrentRole] = useState<Role>("Sales");
   const [currentUser, setCurrentUser] = useState<string>("Sales User");
 
-  const [bookings, setBookings] = useState<Booking[]>(SEED_BOOKINGS);
+  const [bookings, setBookings] = useState<Booking[]>([]);
   const [guestNotes, setGuestNotes] = useState<Record<string, string>>({});
   const [rooms, setRooms] = useState<RoomMaster[]>(SEED_ROOMS);
   const [roomInventory, setRoomInventory] = useState<RoomInventoryItem[]>(SEED_ROOM_INVENTORY);
@@ -230,31 +230,70 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .finally(() => setSessionChecking(false));
   }, []);
 
+  // Timestamp of the last local mutation. Server refreshes are skipped for a
+  // short window afterwards so a fire-and-forget write isn't clobbered by a
+  // refetch that raced ahead of it.
+  const lastMutationRef = useRef(0);
+
+  // Server payload is dynamic JSON; fields are validated before use.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const applyServerState = useCallback((data: any) => {
+    if (Array.isArray(data.bookings))
+      setBookings((data.bookings as Partial<Booking>[]).map(normalizeBooking));
+    if (Array.isArray(data.rooms) && data.rooms.length > 0) setRooms(data.rooms);
+    if (Array.isArray(data.roomInventory) && data.roomInventory.length > 0) setRoomInventory(data.roomInventory);
+    if (Array.isArray(data.venues)) setVenues(data.venues);
+    if (Array.isArray(data.venueBlocks)) setVenueBlocks(data.venueBlocks);
+    if (Array.isArray(data.bulkRoomBlocks)) setBulkRoomBlocks(data.bulkRoomBlocks);
+    if (Array.isArray(data.specialDays)) setSpecialDays(data.specialDays);
+    if (Array.isArray(data.creditNotes)) setCreditNotes(data.creditNotes);
+    if (data.guestNotes && typeof data.guestNotes === "object") setGuestNotes(data.guestNotes);
+    if (data.gstSettings) setGstSettings(data.gstSettings);
+    if (data.cancellationPolicy && "standardThreshold" in data.cancellationPolicy) setCancellationPolicy(data.cancellationPolicy);
+    if (data.packageRates) setPackageRatesState({ ...SEED_PACKAGE_RATES, ...data.packageRates });
+    if (data.discountCaps) setDiscountCapsState({ sales: (data.discountCaps.sales as number) ?? SEED_DISCOUNT_CAPS.sales, admin: (data.discountCaps.admin as number | null) ?? SEED_DISCOUNT_CAPS.admin });
+    if (data.creditNoteSettings) setCreditNoteSettings(data.creditNoteSettings);
+  }, []);
+
   // Hydrate from Neon DB via API on mount.
   useEffect(() => {
     fetch("/api/app/state")
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (!data) { setHydrated(true); return; }
-        if (Array.isArray(data.bookings) && data.bookings.length > 0)
-          setBookings((data.bookings as Partial<Booking>[]).map(normalizeBooking));
-        if (Array.isArray(data.rooms) && data.rooms.length > 0) setRooms(data.rooms);
-        if (Array.isArray(data.roomInventory) && data.roomInventory.length > 0) setRoomInventory(data.roomInventory);
-        if (Array.isArray(data.venues)) setVenues(data.venues);
-        if (Array.isArray(data.venueBlocks)) setVenueBlocks(data.venueBlocks);
-        if (Array.isArray(data.bulkRoomBlocks)) setBulkRoomBlocks(data.bulkRoomBlocks);
-        if (Array.isArray(data.specialDays)) setSpecialDays(data.specialDays);
-        if (Array.isArray(data.creditNotes)) setCreditNotes(data.creditNotes);
-        if (data.guestNotes && typeof data.guestNotes === "object") setGuestNotes(data.guestNotes);
-        if (data.gstSettings) setGstSettings(data.gstSettings);
-        if (data.cancellationPolicy && "standardThreshold" in data.cancellationPolicy) setCancellationPolicy(data.cancellationPolicy);
-        if (data.packageRates) setPackageRatesState({ ...SEED_PACKAGE_RATES, ...data.packageRates });
-        if (data.discountCaps) setDiscountCapsState({ sales: (data.discountCaps.sales as number) ?? SEED_DISCOUNT_CAPS.sales, admin: (data.discountCaps.admin as number | null) ?? SEED_DISCOUNT_CAPS.admin });
-        if (data.creditNoteSettings) setCreditNoteSettings(data.creditNoteSettings);
+        if (data) applyServerState(data);
         setHydrated(true);
       })
       .catch(() => setHydrated(true));
-  }, []);
+  }, [applyServerState]);
+
+  // Live refresh: re-pull server state on window focus and every 30s so
+  // master-setup and booking changes made in other tabs, devices, or sessions
+  // show up without a manual reload.
+  useEffect(() => {
+    if (!hydrated || !isAuthed) return;
+    let cancelled = false;
+    const refresh = () => {
+      if (document.visibilityState === "hidden") return;
+      if (Date.now() - lastMutationRef.current < 5000) return;
+      fetch("/api/app/state")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (!data || cancelled) return;
+          if (Date.now() - lastMutationRef.current < 5000) return;
+          applyServerState(data);
+        })
+        .catch(() => {});
+    };
+    const iv = setInterval(refresh, 30000);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      cancelled = true;
+      clearInterval(iv);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [hydrated, isAuthed, applyServerState]);
 
   // Auto-mark stale Enquiry/Tentative bookings as Lost when checkin date has passed
   useEffect(() => {
@@ -265,6 +304,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         (b) => (b.status === "Enquiry" || b.status === "Tentative") && b.checkin < today
       );
       if (stale.length === 0) return prev;
+      lastMutationRef.current = Date.now();
       stale.forEach((b) => {
         fetch(`/api/app/bookings/${b.id}`, {
           method: "PATCH",
@@ -289,11 +329,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Fire-and-forget sync helper for mutations with a body.
   const sync = (url: string, method: string, body: unknown) => {
+    lastMutationRef.current = Date.now();
     fetch(url, {
       method,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }).catch(console.error);
+  };
+
+  // Fire-and-forget DELETE helper.
+  const del = (url: string) => {
+    lastMutationRef.current = Date.now();
+    fetch(url, { method: "DELETE" }).catch(console.error);
   };
 
   const showNotif = useCallback((msg: string, kind: NotifKind = "success") => {
@@ -411,7 +458,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const removeRoomInventoryItem = useCallback((id: string) => {
     setRoomInventory((prev) => prev.filter((r) => r.id !== id));
-    fetch(`/api/app/room-inventory/${id}`, { method: "DELETE" }).catch(console.error);
+    del(`/api/app/room-inventory/${id}`);
   }, []);
 
   const updateDiscountCaps = useCallback(
@@ -437,7 +484,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const removeSpecialDay = useCallback((id: string) => {
     setSpecialDays((prev) => prev.filter((sd) => sd.id !== id));
-    fetch(`/api/app/special-days/${id}`, { method: "DELETE" }).catch(console.error);
+    del(`/api/app/special-days/${id}`);
   }, []);
 
   const updateCreditNoteSettings = useCallback(
@@ -489,7 +536,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const removeVenue = useCallback((id: string) => {
     setVenues((prev) => prev.filter((v) => v.id !== id));
-    fetch(`/api/app/venues/${id}`, { method: "DELETE" }).catch(console.error);
+    del(`/api/app/venues/${id}`);
   }, []);
 
   const addVenueBlock = useCallback((vb: VenueBlock) => {
@@ -509,7 +556,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const removeVenueBlock = useCallback((id: string) => {
     setVenueBlocks((prev) => prev.filter((vb) => vb.id !== id));
-    fetch(`/api/app/venue-blocks/${id}`, { method: "DELETE" }).catch(console.error);
+    del(`/api/app/venue-blocks/${id}`);
   }, []);
 
   const addBulkRoomBlock = useCallback((b: BulkRoomBlock) => {
@@ -524,7 +571,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const removeBulkRoomBlock = useCallback((id: string) => {
     setBulkRoomBlocks((prev) => prev.filter((b) => b.id !== id));
-    fetch(`/api/app/bulk-blocks/${id}`, { method: "DELETE" }).catch(console.error);
+    del(`/api/app/bulk-blocks/${id}`);
   }, []);
 
   const markLost = useCallback(
