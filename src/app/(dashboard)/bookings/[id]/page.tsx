@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { fmt, fmtIN, dayName, getBookingPricingRows, todayStr, tryAssignRooms } from "@/lib/utils";
+import { fmt, fmtIN, dayName, getBookingPricingRows, nightsBetween, todayStr, tryAssignRooms } from "@/lib/utils";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { CancellationDetails, CancellationPolicy, SpecialDay } from "@/types";
 
@@ -152,28 +152,38 @@ export default function BookingDetailPage() {
   const showBookTentative = !isFrontOffice && b.status === "Enquiry";
   const showConfirm = !isFrontOffice && (b.status === "Tentative");
 
-  const handleBookTentative = () => {
+  const allocateAndSetStatus = (status: "Tentative" | "Confirmed") => {
     const result = tryAssignRooms(b.segments, b.checkin, b.checkout, bookings, roomInventory, b.id, bulkRoomBlocks, rooms);
     if (!result.ok) {
       showNotif(`No ${result.missingCategoryName} available for selected dates`, "error");
       return;
     }
-    updateBooking(b.id, { status: "Tentative", allocatedRooms: result.rooms });
-    showNotif(`Booking ${b.id} marked Tentative`, "success");
+    const segments = b.segments.map((s) => ({ ...s, allocatedRooms: result.perSegment[s.id] ?? [] }));
+    updateBooking(b.id, { status, allocatedRooms: result.rooms, segments });
+    showNotif(status === "Confirmed" ? `Booking ${b.id} confirmed` : `Booking ${b.id} marked Tentative`, "success");
   };
 
-  const handleConfirm = () => {
-    const result = tryAssignRooms(b.segments, b.checkin, b.checkout, bookings, roomInventory, b.id, bulkRoomBlocks, rooms);
-    if (!result.ok) {
-      showNotif(`No ${result.missingCategoryName} available for selected dates`, "error");
-      return;
-    }
-    updateBooking(b.id, { status: "Confirmed", allocatedRooms: result.rooms });
-    showNotif(`Booking ${b.id} confirmed`, "success");
-  };
+  const handleBookTentative = () => allocateAndSetStatus("Tentative");
+  const handleConfirm = () => allocateAndSetStatus("Confirmed");
 
   const totalKids = b.kidsAbove10 + b.kids6to10;
   const pricingRows = getBookingPricingRows(b);
+
+  // Per-segment meal rows (new bookings store rates per segment); legacy
+  // bookings without stored rates fall back to booking-level derived rows.
+  const segMealRows = (b.segments ?? []).flatMap((seg) => {
+    const segNights = nightsBetween(seg.checkin, seg.checkout);
+    const dates = `${fmtIN(seg.checkin)} → ${fmtIN(seg.checkout)}`;
+    const rows: { key: string; label: string; dates: string; rate: number; nights: number; pax: number; chg: number }[] = [];
+    if (segNights <= 0) return rows;
+    if (seg.mealOn && (seg.mealRate ?? 0) > 0 && seg.adults > 0)
+      rows.push({ key: `${seg.id}-meal`, label: "Meal & Activity Package", dates, rate: seg.mealRate ?? 0, nights: segNights, pax: seg.adults, chg: (seg.mealRate ?? 0) * segNights * seg.adults });
+    if ((seg.pets ?? 0) > 0 && (seg.petRate ?? 0) > 0)
+      rows.push({ key: `${seg.id}-pet`, label: "Pet Package", dates, rate: seg.petRate ?? 0, nights: segNights, pax: seg.pets, chg: (seg.petRate ?? 0) * segNights * seg.pets });
+    if (seg.driverMealOn && (seg.drivers ?? 0) > 0 && (seg.driverMealRate ?? 0) > 0)
+      rows.push({ key: `${seg.id}-drv`, label: "Driver / Attendant Meal", dates, rate: seg.driverMealRate ?? 0, nights: segNights, pax: seg.drivers ?? 0, chg: (seg.driverMealRate ?? 0) * segNights * (seg.drivers ?? 0) });
+    return rows;
+  });
   const totalRoomBaseCharges = pricingRows.reduce((s, r) => s + r.roomCharges, 0);
   const totalDiscount = pricingRows.reduce((s, r) => s + r.discountAmt, 0);
   const totalNet = pricingRows.reduce((s, r) => s + r.netCharges, 0);
@@ -408,29 +418,61 @@ export default function BookingDetailPage() {
         {/* ── Booking Confirmation Layout ── */}
         <div className="detail-panel" style={{ marginTop: 16 }}>
 
-          {/* Guest & Stay Info — two-column grid matching Excel layout */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
-            <div>
-              <BkgRow label="Guest Name" value={b.guest} />
-              <BkgRow label="Mobile No." value={b.mobile} />
-              {b.email && <BkgRow label="Email" value={b.email} />}
-              <BkgRow label="Source" value={b.source || "—"} />
-              <BkgRow label="Check-in Date" value={fmtIN(b.checkin)} sub={dayName(b.checkin)} />
-              <BkgRow label="Check-out Date" value={fmtIN(b.checkout)} sub={dayName(b.checkout)} />
-              <BkgRow label="No. of Nights" value={String(b.nights)} last />
-            </div>
-            <div style={{ borderLeft: "1px solid var(--bd)" }}>
-              <BkgRow label="Sr. Citizens" value={String(b.seniors)} />
-              <BkgRow label="Adults" value={String(b.adults)} />
-              <BkgRow label="Kids 10-16 Yrs" value={String(b.kidsAbove10)} />
-              <BkgRow label="Kids 6-10 Yrs" value={String(b.kids6to10)} />
-              <BkgRow label="Infants (0-6 Yrs)" value={String(b.infantsBelow2 + b.kids2to6)} />
-              <BkgRow label="Pets" value={String(b.pets)} last />
-            </div>
+          {/* Guest Info — stay dates, nights, and pax live in Accommodation Charges below */}
+          <div>
+            <BkgRow label="Guest Name" value={b.guest} />
+            <BkgRow label="Mobile No." value={b.mobile} />
+            {b.email && <BkgRow label="Email" value={b.email} />}
+            <BkgRow label="Source" value={b.source || "—"} last />
           </div>
 
           {/* Accommodation Charges — exact Excel column order */}
           <SectionHeader>Accommodation Charges</SectionHeader>
+          {(b.segments?.length ? b.segments : [null]).map((seg, i) => {
+            const counts = seg
+              ? {
+                  adults: seg.adults, seniors: seg.seniors, kidsAbove10: seg.kidsAbove10,
+                  kids6to10: seg.kids6to10, infants: seg.infantsBelow2 + seg.kids2to6, pets: seg.pets,
+                }
+              : {
+                  adults: b.adults, seniors: b.seniors, kidsAbove10: b.kidsAbove10,
+                  kids6to10: b.kids6to10, infants: b.infantsBelow2 + b.kids2to6, pets: b.pets,
+                };
+            return (
+              <div
+                key={seg?.id ?? i}
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 18,
+                  alignItems: "center",
+                  padding: "7px 12px",
+                  background: "var(--surf2)",
+                  borderBottom: "1px solid var(--bd)",
+                  fontSize: 12,
+                }}
+              >
+                {seg && (
+                  <span style={{ fontWeight: 700, color: "var(--acc)", whiteSpace: "nowrap" }}>
+                    {fmtIN(seg.checkin)} → {fmtIN(seg.checkout)}
+                  </span>
+                )}
+                {[
+                  { label: "Adults", v: counts.adults },
+                  { label: "Sr. Citizens", v: counts.seniors },
+                  { label: "Kids 10-16 Yrs", v: counts.kidsAbove10 },
+                  { label: "Kids 6-10 Yrs", v: counts.kids6to10 },
+                  { label: "Infants (0-6 Yrs)", v: counts.infants },
+                  { label: "Pets", v: counts.pets },
+                ].map(({ label, v }) => (
+                  <span key={label} style={{ whiteSpace: "nowrap" }}>
+                    <span style={{ color: "var(--t3)" }}>{label}: </span>
+                    <span style={{ fontWeight: 700, color: "var(--t1)" }}>{v}</span>
+                  </span>
+                ))}
+              </div>
+            );
+          })}
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1000 }}>
               <thead>
@@ -532,7 +574,23 @@ export default function BookingDetailPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {b.mealOn && (() => {
+                    {segMealRows.length > 0 && segMealRows.map((row) => (
+                      <tr key={row.key} style={{ borderBottom: "1px solid var(--bd)" }}>
+                        <td style={{ padding:"8px 10px",fontSize:12,color:"var(--t1)",fontWeight:500 }}>
+                          {row.label}
+                          <div style={{ fontSize: 10, color: "var(--t3)", fontWeight: 500 }}>{row.dates}</div>
+                        </td>
+                        <td style={{ padding:"8px 10px",fontSize:12,textAlign:"right" }}>{fmt(row.rate)}</td>
+                        <td style={{ padding:"8px 10px",fontSize:12,textAlign:"right" }}>{row.nights}</td>
+                        <td style={{ padding:"8px 10px",fontSize:12,textAlign:"right" }}>{row.pax}</td>
+                        <td style={{ padding:"8px 10px",fontSize:12,textAlign:"right" }}>{fmt(row.chg)}</td>
+                        <td></td><td></td><td></td><td></td>
+                        <td style={{ padding:"8px 10px",fontSize:12,textAlign:"right" }}>18%</td>
+                        <td style={{ padding:"8px 10px",fontSize:12,textAlign:"right" }}>{fmt(row.chg*0.18)}</td>
+                        <td style={{ padding:"8px 10px",fontSize:12,textAlign:"right",fontWeight:700 }}>{fmt(row.chg*1.18)}</td>
+                      </tr>
+                    ))}
+                    {segMealRows.length === 0 && b.mealOn && (() => {
                       const chg = b.mealTotal; const gst = b.mealGst;
                       return (
                         <tr style={{ borderBottom: "1px solid var(--bd)" }}>
@@ -548,7 +606,7 @@ export default function BookingDetailPage() {
                         </tr>
                       );
                     })()}
-                    {(b.pets||0)>0 && (() => {
+                    {segMealRows.length === 0 && (b.pets||0)>0 && (() => {
                       const chg = b.petTotal||0; const gst = b.petGst||0;
                       return (
                         <tr style={{ borderBottom: "1px solid var(--bd)" }}>
@@ -564,7 +622,7 @@ export default function BookingDetailPage() {
                         </tr>
                       );
                     })()}
-                    {(b.driverMealOn??false)&&(b.driverCount??0)>0 && (() => {
+                    {segMealRows.length === 0 && (b.driverMealOn??false)&&(b.driverCount??0)>0 && (() => {
                       const chg = b.driverMealTotal??0; const gst = b.driverMealGst??0;
                       return (
                         <tr style={{ borderBottom: "1px solid var(--bd)" }}>

@@ -104,6 +104,10 @@ export type BookingSegment = {
   checkin: string;
   checkout: string;
   rooms: SegmentRoom[];
+  // Physical room ids held for THIS segment's date range only. Bookings saved
+  // before per-segment allocation lack this and fall back to the booking-level
+  // allocatedRooms across the whole stay.
+  allocatedRooms?: string[];
   segmentTotal: number;
   // Per-segment guest counts
   adults: number;

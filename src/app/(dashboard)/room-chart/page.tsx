@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "@/lib/store";
-import { findAvailableRoomIds, fmt, fmtIN, todayStr } from "@/lib/utils";
+import { findAvailableRoomIds, fmt, fmtIN, roomsHeldOnDate, todayStr } from "@/lib/utils";
 import type {
   Booking,
   BulkRoomBlock,
@@ -25,7 +25,7 @@ const VENUE_TYPE_ORDER: VenueType[] = [
 ];
 
 type HoverState =
-  | { kind: "booking"; booking: Booking; rect: DOMRect }
+  | { kind: "booking"; booking: Booking; date: string; rect: DOMRect }
   | { kind: "venue"; block: VenueBlock; venue: Venue; rect: DOMRect }
   | { kind: "bulk"; block: BulkRoomBlock; rect: DOMRect };
 
@@ -165,7 +165,7 @@ export default function RoomChartPage() {
     return Array.from({ length: 13 }, (_, i) => {
       const d = new Date(base.getFullYear(), base.getMonth() + i, 1);
       return {
-        value: d.toISOString().slice(0, 7),
+        value: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`,
         label: d.toLocaleDateString("en-IN", { month: "long", year: "numeric" }),
       };
     });
@@ -175,7 +175,7 @@ export default function RoomChartPage() {
     if (!today) return "";
     const d = new Date(today + "T00:00:00");
     d.setDate(d.getDate() + offset);
-    return d.toISOString().slice(0, 7);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
   }, [today, offset]);
 
   const goToMonth = (ym: string) => {
@@ -210,24 +210,32 @@ export default function RoomChartPage() {
             b.status === "Completed")
       )
       .forEach((b) => {
-        const cur = new Date(b.checkin);
-        const end = new Date(b.checkout);
-        while (cur < end) {
-          const ds = cur.toISOString().split("T")[0];
-          b.allocatedRooms.forEach((origRoomId) => {
-            const override = b.nightOverrides?.find(
-              (o) => o.date === ds && o.fromRoomId === origRoomId
-            );
-            const effectiveRoomId = override ? override.toRoomId : origRoomId;
-            map[`${effectiveRoomId}|${ds}`] = {
-              kind: "booking",
-              booking: b,
-              fromRoomId: origRoomId,
-              isOverridden: !!override,
-            };
-          });
-          cur.setDate(cur.getDate() + 1);
-        }
+        // Per-segment allocations paint each room only for its segment's date
+        // range; legacy bookings paint all rooms across the whole stay.
+        const segsWithAlloc = (b.segments ?? []).filter((s) => Array.isArray(s.allocatedRooms));
+        const spans = segsWithAlloc.length > 0
+          ? segsWithAlloc.map((s) => ({ checkin: s.checkin, checkout: s.checkout, roomIds: s.allocatedRooms ?? [] }))
+          : [{ checkin: b.checkin, checkout: b.checkout, roomIds: b.allocatedRooms }];
+        spans.forEach((span) => {
+          const cur = new Date(span.checkin);
+          const end = new Date(span.checkout);
+          while (cur < end) {
+            const ds = cur.toISOString().split("T")[0];
+            span.roomIds.forEach((origRoomId) => {
+              const override = b.nightOverrides?.find(
+                (o) => o.date === ds && o.fromRoomId === origRoomId
+              );
+              const effectiveRoomId = override ? override.toRoomId : origRoomId;
+              map[`${effectiveRoomId}|${ds}`] = {
+                kind: "booking",
+                booking: b,
+                fromRoomId: origRoomId,
+                isOverridden: !!override,
+              };
+            });
+            cur.setDate(cur.getDate() + 1);
+          }
+        });
       });
     bulkRoomBlocks.forEach((blk) => {
       const cur = new Date(blk.checkin);
@@ -476,9 +484,8 @@ export default function RoomChartPage() {
         b.status !== "Completed"
       )
         continue;
-      // Does this booking occupy this room on this date?
-      if (date < b.checkin || date >= b.checkout) continue;
-      for (const origRoomId of b.allocatedRooms) {
+      // Rooms this booking actually holds on this date (per-segment aware)
+      for (const origRoomId of roomsHeldOnDate(b, date)) {
         const override = b.nightOverrides?.find(
           (o) => o.date === date && o.fromRoomId === origRoomId
         );
@@ -988,6 +995,7 @@ export default function RoomChartPage() {
                               showHover({
                                 kind: "booking",
                                 booking,
+                                date: d,
                                 rect: e.currentTarget.getBoundingClientRect(),
                               })
                             }
@@ -1054,7 +1062,7 @@ export default function RoomChartPage() {
       </div>
 
       {hover?.kind === "booking" && (
-        <BookingHoverCard booking={hover.booking} rect={hover.rect} />
+        <BookingHoverCard booking={hover.booking} date={hover.date} rect={hover.rect} />
       )}
       {hover?.kind === "venue" && (
         <VenueHoverCard block={hover.block} venue={hover.venue} rect={hover.rect} />
@@ -1422,20 +1430,27 @@ function positionForCard(rect: DOMRect, cardW: number) {
 
 function BookingHoverCard({
   booking,
+  date,
   rect,
 }: {
   booking: Booking;
+  date: string;
   rect: DOMRect;
 }) {
-  const kids =
-    (booking.kidsAbove10 || 0) +
-    (booking.kids6to10 || 0) +
-    (booking.kids2to6 || 0) +
-    (booking.infantsBelow2 || 0);
-  const pax =
-    (booking.adults || 0) +
-    kids +
-    (booking.seniors || 0);
+  // Counts for the hovered night's segment; booking-level fallback for
+  // legacy bookings without per-segment data.
+  const seg = booking.segments?.find((s) => s.checkin <= date && date < s.checkout);
+  const adults = seg?.adults ?? booking.adults ?? 0;
+  const seniors = seg?.seniors ?? booking.seniors ?? 0;
+  const pets = seg?.pets ?? booking.pets ?? 0;
+  const mealOn = seg?.mealOn ?? booking.mealOn;
+  const kids = seg
+    ? (seg.kidsAbove10 || 0) + (seg.kids6to10 || 0) + (seg.kids2to6 || 0) + (seg.infantsBelow2 || 0)
+    : (booking.kidsAbove10 || 0) +
+      (booking.kids6to10 || 0) +
+      (booking.kids2to6 || 0) +
+      (booking.infantsBelow2 || 0);
+  const pax = adults + kids + seniors;
 
   const cardW = 260;
   const { top, left, placeAbove } = positionForCard(rect, cardW);
@@ -1496,18 +1511,21 @@ function BookingHoverCard({
         {booking.nights} {booking.nights === 1 ? "night" : "nights"}
       </div>
 
+      <div style={{ fontSize: 10, color: "var(--t3)", marginBottom: 4, fontWeight: 600 }}>
+        Guests on {fmtIN(date)}
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
         <HoverRow label="Pax" value={String(pax)} />
-        <HoverRow label="Adults" value={String(booking.adults || 0)} />
+        <HoverRow label="Adults" value={String(adults)} />
         <HoverRow label="Kids" value={String(kids)} />
-        <HoverRow label="Sr. Citizens" value={String(booking.seniors || 0)} />
-        {booking.pets > 0 && (
-          <HoverRow label="Pets" value={String(booking.pets)} />
+        <HoverRow label="Sr. Citizens" value={String(seniors)} />
+        {pets > 0 && (
+          <HoverRow label="Pets" value={String(pets)} />
         )}
         <HoverRow
           label="Meal Pkg"
-          value={booking.mealOn ? "Yes" : "No"}
-          highlight={booking.mealOn ? "var(--grn)" : undefined}
+          value={mealOn ? "Yes" : "No"}
+          highlight={mealOn ? "var(--grn)" : undefined}
         />
       </div>
 

@@ -454,7 +454,8 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   const buildNewBooking = (
     id: string,
     status: BookingStatus,
-    allocatedRooms: string[]
+    allocatedRooms: string[],
+    segAlloc: Record<string, string[]> = {}
   ): Booking => {
     const validSegments = computedSegments
       .map((cs, i) => {
@@ -462,6 +463,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
         const mc = segMealCalcs[i];
         return {
           ...cs,
+          allocatedRooms: segAlloc[cs.id] ?? [],
           adults: mc?.adultsN ?? 2,
           seniors: parseInt(fs?.seniors ?? "0") || 0,
           kidsAbove10: parseInt(fs?.kidsAbove10 ?? "0") || 0,
@@ -542,7 +544,10 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     };
   };
 
-  const buildEditPatch = (allocatedRooms: string[]): Partial<Booking> => {
+  const buildEditPatch = (
+    allocatedRooms: string[],
+    segAlloc: Record<string, string[]> = {}
+  ): Partial<Booking> => {
     const validSegments = computedSegments.filter((s) => s.rooms.length > 0);
     const validNewPayments = newPaymentRows
       .filter((p) => p.date && (parseFloat(p.amount) || 0) > 0)
@@ -566,6 +571,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
         const mc = segMealCalcs[i];
         return {
           ...cs,
+          allocatedRooms: segAlloc[cs.id] ?? [],
           adults: mc?.adultsN ?? 2,
           seniors: parseInt(fs?.seniors ?? "0") || 0,
           kidsAbove10: parseInt(fs?.kidsAbove10 ?? "0") || 0,
@@ -650,6 +656,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       .reduce((m, b) => Math.max(m, parseInt(b.id.slice(idPrefix.length), 10) || 0), 0);
     const id = idPrefix + String(maxSeq + 1).padStart(3, "0");
     let allocatedRooms: string[] = [];
+    let segAlloc: Record<string, string[]> = {};
     if (intent === "Tentative" || intent === "Confirmed") {
       const result = tryAssignRooms(
         computedSegments,
@@ -666,8 +673,9 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
         return;
       }
       allocatedRooms = result.rooms;
+      segAlloc = result.perSegment;
     }
-    const booking = buildNewBooking(id, intent, allocatedRooms);
+    const booking = buildNewBooking(id, intent, allocatedRooms, segAlloc);
     createBooking(booking);
     showNotif(`Booking ${id} saved — ${intent}`, "success");
     if (typeof window !== "undefined") {
@@ -679,6 +687,10 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   const saveEdit = (alsoOpenConfirmation: boolean) => {
     if (!validate() || !initial) return;
     let allocatedRooms = initial.allocatedRooms;
+    // Default: carry over each segment's existing allocation (matched by id)
+    let segAlloc: Record<string, string[]> = Object.fromEntries(
+      (initial.segments ?? []).map((s) => [s.id, s.allocatedRooms ?? []])
+    );
     if (initial.status === "Tentative" || initial.status === "Confirmed") {
       const result = tryAssignRooms(
         computedSegments,
@@ -695,10 +707,12 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
         return;
       }
       allocatedRooms = result.rooms;
+      segAlloc = result.perSegment;
     } else if (initial.status === "Enquiry") {
       allocatedRooms = [];
+      segAlloc = {};
     }
-    updateBooking(initial.id, buildEditPatch(allocatedRooms));
+    updateBooking(initial.id, buildEditPatch(allocatedRooms, segAlloc));
     showNotif(`Booking ${initial.id} updated`, "success");
     if (alsoOpenConfirmation && typeof window !== "undefined") {
       window.open(`/bookings/${initial.id}/confirmation`, "_blank");

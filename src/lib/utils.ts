@@ -248,6 +248,22 @@ function rangesOverlap(aStart: string, aEnd: string, bStart: string, bEnd: strin
   return aStart < bEnd && bStart < aEnd;
 }
 
+// Physical rooms a booking holds on a given date. Bookings allocated per
+// segment hold only that segment's rooms for its date range; legacy bookings
+// (no per-segment allocation) hold all allocated rooms for the whole stay.
+export function roomsHeldOnDate(b: Booking, date: string): string[] {
+  if (!bookingOccupiesDate(b, date)) return [];
+  const segsWithAlloc = (b.segments ?? []).filter((s) => Array.isArray(s.allocatedRooms));
+  if (segsWithAlloc.length === 0) return b.allocatedRooms;
+  const held = new Set<string>();
+  segsWithAlloc.forEach((s) => {
+    if (s.checkin <= date && date < s.checkout) {
+      (s.allocatedRooms ?? []).forEach((r) => held.add(r));
+    }
+  });
+  return [...held];
+}
+
 export function findAvailableRoomIds(
   category: string,
   checkin: string,
@@ -263,7 +279,16 @@ export function findAvailableRoomIds(
     .filter((b) => b.id !== ignoreBookingId)
     .filter((b) => b.status === "Tentative" || b.status === "Confirmed" || b.status === "Completed")
     .filter((b) => rangesOverlap(b.checkin, b.checkout, checkin, checkout))
-    .forEach((b) => b.allocatedRooms.forEach((r) => occupied.add(r)));
+    .forEach((b) => {
+      const segsWithAlloc = (b.segments ?? []).filter((s) => Array.isArray(s.allocatedRooms));
+      if (segsWithAlloc.length === 0) {
+        b.allocatedRooms.forEach((r) => occupied.add(r));
+      } else {
+        segsWithAlloc
+          .filter((s) => rangesOverlap(s.checkin, s.checkout, checkin, checkout))
+          .forEach((s) => (s.allocatedRooms ?? []).forEach((r) => occupied.add(r)));
+      }
+    });
   bulkBlocks
     .filter((blk) => blk.id !== ignoreBlockId)
     .filter((blk) => rangesOverlap(blk.checkin, blk.checkout, checkin, checkout))
@@ -274,39 +299,60 @@ export function findAvailableRoomIds(
 }
 
 export type AssignmentResult =
-  | { ok: true; rooms: string[] }
+  | { ok: true; rooms: string[]; perSegment: Record<string, string[]> }
   | { ok: false; missingCategoryName: string };
 
+// Allocates physical rooms per segment against each segment's own date range,
+// so a room needed only for part of the stay stays sellable for the rest.
+// Prefers keeping the same physical room across segments of the same category
+// so guests don't switch rooms unnecessarily.
 export function tryAssignRooms(
   segments: BookingSegment[],
-  checkin: string,
-  checkout: string,
+  _checkin: string,
+  _checkout: string,
   bookings: Booking[],
   inventory: RoomInventoryItem[] = ROOM_INVENTORY,
   ignoreBookingId?: string,
   bulkBlocks: BulkRoomBlock[] = [],
   roomMaster: RoomMaster[] = ROOMS
 ): AssignmentResult {
-  const need = new Map<string, number>();
-  segments.forEach((seg) => {
+  const union = new Set<string>();
+  const perSegment: Record<string, string[]> = {};
+  // Rooms this allocation has already claimed, with their date ranges, so
+  // overlapping segments of the same booking don't double-book a room.
+  const claimed: { checkin: string; checkout: string; roomId: string }[] = [];
+  const usedByCat = new Map<string, string[]>();
+
+  for (const seg of segments) {
+    const segAssigned: string[] = [];
+    const need = new Map<string, number>();
     seg.rooms
       .filter((r) => r.roomId)
       .forEach((r) => {
-        const prev = need.get(r.roomId) || 0;
-        need.set(r.roomId, Math.max(prev, r.numRooms));
+        need.set(r.roomId, Math.max(need.get(r.roomId) || 0, r.numRooms));
       });
-  });
-  const assigned: string[] = [];
-  for (const [cat, count] of need.entries()) {
-    if (count <= 0) continue;
-    const free = findAvailableRoomIds(cat, checkin, checkout, bookings, inventory, ignoreBookingId, bulkBlocks);
-    if (free.length < count) {
-      const room = roomMaster.find((r) => r.id === cat);
-      return { ok: false, missingCategoryName: room?.name ?? cat };
+    for (const [cat, count] of need.entries()) {
+      if (count <= 0) continue;
+      const free = findAvailableRoomIds(cat, seg.checkin, seg.checkout, bookings, inventory, ignoreBookingId, bulkBlocks)
+        .filter((id) => !claimed.some((c) => c.roomId === id && rangesOverlap(c.checkin, c.checkout, seg.checkin, seg.checkout)));
+      if (free.length < count) {
+        const room = roomMaster.find((r) => r.id === cat);
+        return { ok: false, missingCategoryName: room?.name ?? cat };
+      }
+      const previouslyUsed = usedByCat.get(cat) ?? [];
+      const ordered = [...free].sort(
+        (a, b) => (previouslyUsed.includes(b) ? 1 : 0) - (previouslyUsed.includes(a) ? 1 : 0)
+      );
+      ordered.slice(0, count).forEach((id) => {
+        segAssigned.push(id);
+        union.add(id);
+        claimed.push({ checkin: seg.checkin, checkout: seg.checkout, roomId: id });
+        if (!previouslyUsed.includes(id)) usedByCat.set(cat, [...previouslyUsed, id]);
+      });
     }
-    assigned.push(...free.slice(0, count));
+    perSegment[seg.id] = segAssigned;
   }
-  return { ok: true, rooms: assigned };
+  return { ok: true, rooms: [...union], perSegment };
 }
 
 // Marker so the helper above doesn't get treated as dead code by tree shakers

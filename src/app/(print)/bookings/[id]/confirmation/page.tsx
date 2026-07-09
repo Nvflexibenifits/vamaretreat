@@ -2,19 +2,8 @@
 
 import { useParams } from "next/navigation";
 import { useApp } from "@/lib/store";
-import { fmt, fmtIN, getBookingPricingRows } from "@/lib/utils";
+import { fmt, fmtIN, getBookingPricingRows, nightsBetween } from "@/lib/utils";
 import type { PricingRow } from "@/types";
-
-function formatLongPretty(dateStr: string): string {
-  if (!dateStr) return "—";
-  const d = new Date(dateStr + "T00:00:00");
-  return d.toLocaleDateString("en-IN", {
-    weekday: "long",
-    day: "2-digit",
-    month: "long",
-    year: "numeric",
-  });
-}
 
 const TH: React.CSSProperties = {
   background: "#0f2318",
@@ -116,6 +105,22 @@ export default function ConfirmationPage() {
   const grandRaw = totalRoomBaseCharges + totalMealPetCharges;
 
   const showMealTable = b.mealOn || (b.pets || 0) > 0 || (b.driverMealOn ?? false);
+
+  // Per-segment meal rows (new bookings store rates per segment); legacy
+  // bookings without stored rates fall back to booking-level derived rows.
+  const segMealRows = (b.segments ?? []).flatMap((seg) => {
+    const segNights = nightsBetween(seg.checkin, seg.checkout);
+    const dates = `${fmtIN(seg.checkin)} → ${fmtIN(seg.checkout)}`;
+    const rows: { key: string; label: string; dates: string; rate: number; nights: number; pax: number; chg: number }[] = [];
+    if (segNights <= 0) return rows;
+    if (seg.mealOn && (seg.mealRate ?? 0) > 0 && seg.adults > 0)
+      rows.push({ key: `${seg.id}-meal`, label: "Meal & Activity Package", dates, rate: seg.mealRate ?? 0, nights: segNights, pax: seg.adults, chg: (seg.mealRate ?? 0) * segNights * seg.adults });
+    if ((seg.pets ?? 0) > 0 && (seg.petRate ?? 0) > 0)
+      rows.push({ key: `${seg.id}-pet`, label: "Pet Package", dates, rate: seg.petRate ?? 0, nights: segNights, pax: seg.pets, chg: (seg.petRate ?? 0) * segNights * seg.pets });
+    if (seg.driverMealOn && (seg.drivers ?? 0) > 0 && (seg.driverMealRate ?? 0) > 0)
+      rows.push({ key: `${seg.id}-drv`, label: "Driver / Attendant Meal", dates, rate: seg.driverMealRate ?? 0, nights: segNights, pax: seg.drivers ?? 0, chg: (seg.driverMealRate ?? 0) * segNights * (seg.drivers ?? 0) });
+    return rows;
+  });
 
   return (
     <div className="confirmation-root" style={{ background: "#fff", minHeight: "100vh" }}>
@@ -235,36 +240,20 @@ export default function ConfirmationPage() {
           </div>
         </div>
 
-        {/* Guest info block */}
+        {/* Guest info block — stay dates, nights, and pax live in Accommodation Charges below */}
         <div
           style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: 0,
             border: "1px solid #d0c9bc",
             marginBottom: 14,
           }}
         >
-          <div>
-            <GuestRow label="Guest Name" value={b.guest} />
-            <GuestRow label="Mobile No." value={b.mobile} />
-            <GuestRow label="Check-In Date" value={formatLongPretty(b.checkin)} />
-            <GuestRow label="Check-Out Date" value={formatLongPretty(b.checkout)} />
-            <GuestRow label="No. Of Nights" value={String(b.nights)} />
-            <GuestRow
-              label="Room Discount"
-              value={`${b.nights} Nights | ${overallDiscPct}%`}
-              last
-            />
-          </div>
-          <div style={{ borderLeft: "1px solid #d0c9bc" }}>
-            <GuestRow label="Adults" value={String(b.adults)} />
-            <GuestRow label="Kids 10-16 Yrs" value={String(b.kidsAbove10)} />
-            <GuestRow label="Kids 6-10 Yrs" value={String(b.kids6to10)} />
-            <GuestRow label="Infants (0-6 Yrs)" value={String(b.infantsBelow2 + b.kids2to6)} />
-            <GuestRow label="Senior Citizens" value={String(b.seniors)} />
-            <GuestRow label="Pets" value={String(b.pets)} last />
-          </div>
+          <GuestRow label="Guest Name" value={b.guest} />
+          <GuestRow label="Mobile No." value={b.mobile} />
+          <GuestRow
+            label="Room Discount"
+            value={`${b.nights} Nights | ${overallDiscPct}%`}
+            last
+          />
         </div>
 
         {/* Accommodation Charges */}
@@ -283,6 +272,52 @@ export default function ConfirmationPage() {
           }}
         >
           <span>Accomodation Charges</span>
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 16,
+            padding: "6px 12px",
+            border: "1px solid #d0c9bc",
+            borderTop: "none",
+            fontSize: 11,
+          }}
+        >
+          {(b.segments?.length ? b.segments : [null]).map((seg, i) => {
+            const counts = seg
+              ? {
+                  adults: seg.adults, seniors: seg.seniors, kidsAbove10: seg.kidsAbove10,
+                  kids6to10: seg.kids6to10, infants: seg.infantsBelow2 + seg.kids2to6, pets: seg.pets,
+                }
+              : {
+                  adults: b.adults, seniors: b.seniors, kidsAbove10: b.kidsAbove10,
+                  kids6to10: b.kids6to10, infants: b.infantsBelow2 + b.kids2to6, pets: b.pets,
+                };
+            return (
+              <div key={seg?.id ?? i} style={{ display: "flex", flexWrap: "wrap", gap: 16, width: "100%" }}>
+                {seg && (
+                  <span style={{ fontWeight: 700, whiteSpace: "nowrap" }}>
+                    {fmtIN(seg.checkin)} → {fmtIN(seg.checkout)}
+                  </span>
+                )}
+                {[
+                  { label: "Adults", v: counts.adults },
+                  { label: "Senior Citizens", v: counts.seniors },
+                  { label: "Kids 10-16 Yrs", v: counts.kidsAbove10 },
+                  { label: "Kids 6-10 Yrs", v: counts.kids6to10 },
+                  { label: "Infants (0-6 Yrs)", v: counts.infants },
+                  { label: "Pets", v: counts.pets },
+                ].map(({ label, v }) => (
+                  <span key={label} style={{ whiteSpace: "nowrap" }}>
+                    <span style={{ color: "#52524a" }}>{label}: </span>
+                    <span style={{ fontWeight: 700 }}>{v}</span>
+                  </span>
+                ))}
+              </div>
+            );
+          })}
         </div>
 
         <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 4 }}>
@@ -363,7 +398,23 @@ export default function ConfirmationPage() {
               </tr>
             </thead>
             <tbody>
-              {b.mealOn && (
+              {segMealRows.length > 0 && segMealRows.map((row) => (
+                <tr key={row.key}>
+                  <td style={TD}>
+                    {row.label}
+                    <div style={{ fontSize: 10, color: "#52524a" }}>{row.dates}</div>
+                  </td>
+                  <td style={TD_NUM}>{fmt(row.rate)}</td>
+                  <td style={TD_NUM}>{row.nights}</td>
+                  <td style={TD_NUM}>{row.pax}</td>
+                  <td style={TD_NUM}>{fmt(row.chg)}</td>
+                  <td style={TD}></td><td style={TD}></td><td style={TD}></td><td style={TD}></td>
+                  <td style={TD_NUM}>18%</td>
+                  <td style={TD_NUM}>{fmt(row.chg * 0.18)}</td>
+                  <td style={TD_NUM}>{fmt(row.chg * 1.18)}</td>
+                </tr>
+              ))}
+              {segMealRows.length === 0 && b.mealOn && (
                 <tr>
                   <td style={TD}>Meal &amp; Activity Package</td>
                   <td style={TD_NUM}>{b.adults && b.nights ? fmt(Math.round(mealCharges / b.nights / b.adults)) : "—"}</td>
@@ -376,7 +427,7 @@ export default function ConfirmationPage() {
                   <td style={TD_NUM}>{fmt(totalMealAmt)}</td>
                 </tr>
               )}
-              {(b.pets || 0) > 0 && (
+              {segMealRows.length === 0 && (b.pets || 0) > 0 && (
                 <tr>
                   <td style={TD}>Pet Package</td>
                   <td style={TD_NUM}>{b.pets && b.nights ? fmt(Math.round(petCharges / b.nights / b.pets)) : "—"}</td>
@@ -389,7 +440,7 @@ export default function ConfirmationPage() {
                   <td style={TD_NUM}>{fmt(totalPetAmt)}</td>
                 </tr>
               )}
-              {(b.driverMealOn ?? false) && (b.driverCount ?? 0) > 0 && (
+              {segMealRows.length === 0 && (b.driverMealOn ?? false) && (b.driverCount ?? 0) > 0 && (
                 <tr>
                   <td style={TD}>Driver / Attendant Meal</td>
                   <td style={TD_NUM}>{b.driverCount && b.nights ? fmt(Math.round(driverMealCharges / b.nights / b.driverCount)) : "—"}</td>
