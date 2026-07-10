@@ -17,13 +17,6 @@ import type {
 
 const DAYS_WINDOW = 30;
 
-const VENUE_TYPE_ORDER: VenueType[] = [
-  "Conference Room",
-  "Seminar Room",
-  "Garden Venue",
-  "Event Place",
-];
-
 type HoverState =
   | { kind: "booking"; booking: Booking; date: string; rect: DOMRect }
   | { kind: "venue"; block: VenueBlock; venue: Venue; rect: DOMRect }
@@ -84,6 +77,7 @@ export default function RoomChartPage() {
     rooms,
     roomInventory,
     venues,
+    venueTypes,
     venueBlocks,
     addVenueBlock,
     updateVenueBlock,
@@ -267,17 +261,30 @@ export default function RoomChartPage() {
     return map;
   }, [venueBlocks]);
 
+  // Categories in master-setup order, plus any type still referenced by a venue
+  const allVenueTypes = useMemo(() => {
+    const out = [...venueTypes];
+    venues.forEach((v) => {
+      if (!out.includes(v.type)) out.push(v.type);
+    });
+    return out;
+  }, [venueTypes, venues]);
+
   // Venues sorted by type then name for stable row order
   const sortedVenues = useMemo(() => {
+    const orderOf = (t: VenueType) => {
+      const i = allVenueTypes.indexOf(t);
+      return i === -1 ? allVenueTypes.length : i;
+    };
     return [...venues]
       .filter((v) => v.active)
       .sort((a, b) => {
-        const ai = VENUE_TYPE_ORDER.indexOf(a.type);
-        const bi = VENUE_TYPE_ORDER.indexOf(b.type);
+        const ai = orderOf(a.type);
+        const bi = orderOf(b.type);
         if (ai !== bi) return ai - bi;
         return a.name.localeCompare(b.name);
       });
-  }, [venues]);
+  }, [venues, allVenueTypes]);
 
   const venueById = useMemo(() => {
     const m: Record<string, Venue> = {};
@@ -1207,7 +1214,7 @@ export default function RoomChartPage() {
                     <label>Venue *</label>
                     <select value={uVenueId} onChange={(e) => setUVenueId(e.target.value)}>
                       <option value="">— Select venue —</option>
-                      {VENUE_TYPE_ORDER.map((type) => {
+                      {allVenueTypes.map((type) => {
                         const items = venues.filter((v) => v.type === type && v.active);
                         if (items.length === 0) return null;
                         return (

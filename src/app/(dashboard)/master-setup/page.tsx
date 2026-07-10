@@ -44,13 +44,6 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "users", label: "Users" },
 ];
 
-const VENUE_TYPES: string[] = [
-  "Conference Room",
-  "Seminar Room",
-  "Garden Venue",
-  "Event Place",
-];
-
 const COLOR_PALETTE = [
   "#172f24",
   "#5b21b6",
@@ -122,9 +115,8 @@ export default function MasterSetupPage() {
 
 // ─────────── Venue Master (B2B placeholder — names only, pricing in Phase 2) ───────────
 function VenueMasterTab() {
-  const { venues, addVenue, updateVenue, removeVenue, showNotif } = useApp();
+  const { venues, venueTypes, updateVenueTypes, addVenue, updateVenue, removeVenue, showNotif } = useApp();
 
-  const [venueTypes, setVenueTypes] = useState<string[]>(VENUE_TYPES);
   const [addOpen, setAddOpen] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const [newCatName, setNewCatName] = useState("");
@@ -135,7 +127,13 @@ function VenueMasterTab() {
   } | null>(null);
 
   const grouped = useMemo(() => {
-    return venueTypes.map((type) => ({
+    // Include any type still referenced by a venue so venues never disappear
+    // from the UI even if their category was removed from the list.
+    const allTypes = [...venueTypes];
+    venues.forEach((v) => {
+      if (!allTypes.includes(v.type)) allTypes.push(v.type);
+    });
+    return allTypes.map((type) => ({
       type,
       items: venues.filter((v) => v.type === type),
     }));
@@ -227,7 +225,7 @@ function VenueMasterTab() {
                     const name = newCatName.trim();
                     if (!name) { showNotif("Enter a category name", "error"); return; }
                     if (venueTypes.includes(name)) { showNotif(`${name} already exists`, "error"); return; }
-                    setVenueTypes((prev) => [...prev, name]);
+                    updateVenueTypes([...venueTypes, name]);
                     showNotif(`${name} added`, "success");
                     setNewCatName("");
                     setAddCatOpen(false);
@@ -243,7 +241,7 @@ function VenueMasterTab() {
                 const name = newCatName.trim();
                 if (!name) { showNotif("Enter a category name", "error"); return; }
                 if (venueTypes.includes(name)) { showNotif(`${name} already exists`, "error"); return; }
-                setVenueTypes((prev) => [...prev, name]);
+                updateVenueTypes([...venueTypes, name]);
                 showNotif(`${name} added`, "success");
                 setNewCatName("");
                 setAddCatOpen(false);
@@ -287,7 +285,10 @@ function VenueMasterTab() {
                 <button
                   className="btn btn-ghost btn-xs"
                   style={{ color: "var(--red)" }}
-                  onClick={() => setVenueTypes((prev) => prev.filter((t) => t !== type))}
+                  onClick={() => {
+                    updateVenueTypes(venueTypes.filter((t) => t !== type));
+                    showNotif("Category removed", "success");
+                  }}
                 >
                   Remove Category
                 </button>

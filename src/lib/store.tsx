@@ -45,6 +45,7 @@ import {
   SEED_SPECIAL_DAYS,
   SEED_USERS,
   SEED_VENUES,
+  SEED_VENUE_TYPES,
   SEED_VENUE_BLOCKS,
   SEED_BULK_ROOM_BLOCKS,
 } from "@/lib/data";
@@ -113,6 +114,8 @@ type AppContextValue = {
   cancellationPolicy: CancellationPolicy;
   users: User[];
   venues: Venue[];
+  venueTypes: string[];
+  updateVenueTypes: (types: string[]) => void;
   venueBlocks: VenueBlock[];
   updateRooms: (rooms: RoomMaster[]) => void;
   addRoomInventoryItem: (item: RoomInventoryItem) => void;
@@ -208,6 +211,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     useState<CancellationPolicy>(SEED_CANCELLATION_POLICY);
   const [users, setUsers] = useState<User[]>(SEED_USERS);
   const [venues, setVenues] = useState<Venue[]>(SEED_VENUES);
+  const [venueTypes, setVenueTypesState] = useState<string[]>(SEED_VENUE_TYPES);
   const [venueBlocks, setVenueBlocks] = useState<VenueBlock[]>(SEED_VENUE_BLOCKS);
   const [bulkRoomBlocks, setBulkRoomBlocks] = useState<BulkRoomBlock[]>(SEED_BULK_ROOM_BLOCKS);
   const [hydrated, setHydrated] = useState(false);
@@ -243,6 +247,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (Array.isArray(data.rooms) && data.rooms.length > 0) setRooms(data.rooms);
     if (Array.isArray(data.roomInventory) && data.roomInventory.length > 0) setRoomInventory(data.roomInventory);
     if (Array.isArray(data.venues)) setVenues(data.venues);
+    if (Array.isArray(data.venueTypes)) setVenueTypesState(data.venueTypes);
     if (Array.isArray(data.venueBlocks)) setVenueBlocks(data.venueBlocks);
     if (Array.isArray(data.bulkRoomBlocks)) setBulkRoomBlocks(data.bulkRoomBlocks);
     if (Array.isArray(data.specialDays)) setSpecialDays(data.specialDays);
@@ -522,6 +527,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const removeUser = useCallback((id: string) => {
     setUsers((prev) => prev.filter((u) => u.id !== id));
+  }, []);
+
+  const updateVenueTypes = useCallback((types: string[]) => {
+    setVenueTypesState(types);
+    sync("/api/app/settings", "PUT", { venueTypes: types });
   }, []);
 
   const addVenue = useCallback((v: Venue) => {
@@ -863,6 +873,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       cancellationPolicy,
       users,
       venues,
+      venueTypes,
+      updateVenueTypes,
       venueBlocks,
       updateRooms,
       addRoomInventoryItem,
@@ -927,6 +939,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       cancellationPolicy,
       users,
       venues,
+      venueTypes,
+      updateVenueTypes,
       venueBlocks,
       updateRooms,
       addRoomInventoryItem,

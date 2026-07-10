@@ -562,6 +562,15 @@ export const SEED_CREDIT_NOTE_SETTINGS: CreditNoteSettings = {
 // ─────────── Venues (B2B Phase 2 — name-only catalog for now) ───────────
 export const SEED_VENUES: Venue[] = [];
 
+// Default venue categories; the live list is editable in Master Setup and
+// persisted in app settings.
+export const SEED_VENUE_TYPES: string[] = [
+  "Conference Room",
+  "Seminar Room",
+  "Garden Venue",
+  "Event Place",
+];
+
 // ─────────── Venue Blocks (manual reservations on the room chart) ───────────
 export const SEED_VENUE_BLOCKS: VenueBlock[] = [];
 
