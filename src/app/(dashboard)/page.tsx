@@ -726,7 +726,6 @@ export default function DashboardPage() {
               <tr key={row.name} style={{ cursor: "default" }}>
                 <td>
                   <div style={{ fontWeight: 500, color: "var(--t1)" }}>{row.name}</div>
-                  <div style={{ fontSize: 10, color: "var(--t3)" }}>{row.total} total</div>
                 </td>
                 {row.cells.map((c) => (
                   <td key={c.date} style={{ textAlign: "center" }}>
