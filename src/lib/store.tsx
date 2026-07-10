@@ -30,7 +30,6 @@ import type {
   RoomMaster,
   RoomNightUpgrade,
   SpecialDay,
-  User,
   Venue,
   VenueBlock,
 } from "@/types";
@@ -43,7 +42,6 @@ import {
   SEED_PACKAGE_RATES,
   SEED_ROOM_INVENTORY,
   SEED_SPECIAL_DAYS,
-  SEED_USERS,
   SEED_VENUES,
   SEED_VENUE_TYPES,
   SEED_VENUE_BLOCKS,
@@ -112,10 +110,11 @@ type AppContextValue = {
   creditNoteSettings: CreditNoteSettings;
   gstSettings: GstSettings;
   cancellationPolicy: CancellationPolicy;
-  users: User[];
   venues: Venue[];
   venueTypes: string[];
   updateVenueTypes: (types: string[]) => void;
+  userRoles: string[];
+  updateUserRoles: (roles: string[]) => void;
   venueBlocks: VenueBlock[];
   updateRooms: (rooms: RoomMaster[]) => void;
   addRoomInventoryItem: (item: RoomInventoryItem) => void;
@@ -130,9 +129,6 @@ type AppContextValue = {
   updateCreditNoteSettings: (s: CreditNoteSettings) => void;
   updateGstSettings: (s: GstSettings) => void;
   updateCancellationPolicy: (p: CancellationPolicy) => void;
-  addUser: (u: User) => void;
-  updateUser: (id: string, patch: Partial<User>) => void;
-  removeUser: (id: string) => void;
   addVenue: (v: Venue) => void;
   updateVenue: (id: string, patch: Partial<Venue>) => void;
   removeVenue: (id: string) => void;
@@ -209,9 +205,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     useState<GstSettings>(SEED_GST_SETTINGS);
   const [cancellationPolicy, setCancellationPolicy] =
     useState<CancellationPolicy>(SEED_CANCELLATION_POLICY);
-  const [users, setUsers] = useState<User[]>(SEED_USERS);
   const [venues, setVenues] = useState<Venue[]>(SEED_VENUES);
   const [venueTypes, setVenueTypesState] = useState<string[]>(SEED_VENUE_TYPES);
+  const [userRoles, setUserRolesState] = useState<string[]>(["Admin", "Front Office", "Sales"]);
   const [venueBlocks, setVenueBlocks] = useState<VenueBlock[]>(SEED_VENUE_BLOCKS);
   const [bulkRoomBlocks, setBulkRoomBlocks] = useState<BulkRoomBlock[]>(SEED_BULK_ROOM_BLOCKS);
   const [hydrated, setHydrated] = useState(false);
@@ -248,6 +244,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (Array.isArray(data.roomInventory) && data.roomInventory.length > 0) setRoomInventory(data.roomInventory);
     if (Array.isArray(data.venues)) setVenues(data.venues);
     if (Array.isArray(data.venueTypes)) setVenueTypesState(data.venueTypes);
+    if (Array.isArray(data.userRoles)) setUserRolesState(data.userRoles);
     if (Array.isArray(data.venueBlocks)) setVenueBlocks(data.venueBlocks);
     if (Array.isArray(data.bulkRoomBlocks)) setBulkRoomBlocks(data.bulkRoomBlocks);
     if (Array.isArray(data.specialDays)) setSpecialDays(data.specialDays);
@@ -516,22 +513,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     []
   );
 
-  // Users are managed purely in local state; auth is handled by /api/auth/users separately.
-  const addUser = useCallback((u: User) => {
-    setUsers((prev) => [...prev, u]);
-  }, []);
-
-  const updateUser = useCallback((id: string, patch: Partial<User>) => {
-    setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, ...patch } : u)));
-  }, []);
-
-  const removeUser = useCallback((id: string) => {
-    setUsers((prev) => prev.filter((u) => u.id !== id));
-  }, []);
-
   const updateVenueTypes = useCallback((types: string[]) => {
     setVenueTypesState(types);
     sync("/api/app/settings", "PUT", { venueTypes: types });
+  }, []);
+
+  const updateUserRoles = useCallback((roles: string[]) => {
+    setUserRolesState(roles);
+    sync("/api/app/settings", "PUT", { userRoles: roles });
   }, []);
 
   const addVenue = useCallback((v: Venue) => {
@@ -871,10 +860,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       creditNotes,
       gstSettings,
       cancellationPolicy,
-      users,
       venues,
       venueTypes,
       updateVenueTypes,
+      userRoles,
+      updateUserRoles,
       venueBlocks,
       updateRooms,
       addRoomInventoryItem,
@@ -887,9 +877,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updateCreditNoteSettings,
       updateGstSettings,
       updateCancellationPolicy,
-      addUser,
-      updateUser,
-      removeUser,
       addVenue,
       updateVenue,
       removeVenue,
@@ -937,10 +924,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       cancelBooking,
       gstSettings,
       cancellationPolicy,
-      users,
       venues,
       venueTypes,
       updateVenueTypes,
+      userRoles,
+      updateUserRoles,
       venueBlocks,
       updateRooms,
       addRoomInventoryItem,
@@ -953,9 +941,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updateCreditNoteSettings,
       updateGstSettings,
       updateCancellationPolicy,
-      addUser,
-      updateUser,
-      removeUser,
       addVenue,
       updateVenue,
       removeVenue,

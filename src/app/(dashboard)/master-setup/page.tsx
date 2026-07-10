@@ -1942,13 +1942,20 @@ type ApiUser = {
 };
 
 function UsersTab() {
-  const { showNotif } = useApp();
+  const { showNotif, userRoles, updateUserRoles } = useApp();
   const [apiUsers, setApiUsers] = useState<ApiUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  // Role management
-  const [roles, setRoles] = useState<string[]>(["Admin", "Front Office", "Sales"]);
+  // Role list is persisted in app settings; also show any role still
+  // referenced by an existing user.
+  const roles = useMemo(() => {
+    const out = [...userRoles];
+    apiUsers.forEach((u) => {
+      if (!out.includes(u.role)) out.push(u.role);
+    });
+    return out;
+  }, [userRoles, apiUsers]);
   const [addRoleOpen, setAddRoleOpen] = useState(false);
   const [newRoleName, setNewRoleName] = useState("");
 
@@ -1979,10 +1986,6 @@ function UsersTab() {
       const data = await res.json();
       if (Array.isArray(data)) {
         setApiUsers(data);
-        setRoles((prev) => {
-          const fromApi = (data as ApiUser[]).map((u) => u.role);
-          return [...new Set([...prev, ...fromApi])];
-        });
       }
     } catch {
       showNotif("Failed to load users", "error");
@@ -2009,7 +2012,7 @@ function UsersTab() {
     if (roles.some((r) => r.toLowerCase() === name.toLowerCase())) {
       showNotif(`${name} already exists`, "error"); return;
     }
-    setRoles((prev) => [...prev, name]);
+    updateUserRoles([...userRoles, name]);
     setNewRoleName("");
     setAddRoleOpen(false);
     showNotif(`${name} role created`, "success");
