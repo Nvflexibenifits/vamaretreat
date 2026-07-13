@@ -24,6 +24,7 @@ import type {
   GstSettings,
   NotifKind,
   PackageRates,
+  RefundPayout,
   RevenueEntry,
   Role,
   RoomInventoryItem,
@@ -132,6 +133,7 @@ type AppContextValue = {
   removeSpecialDay: (id: string) => void;
   creditNotes: CreditNote[];
   cancelBooking: (bookingId: string, details: CancellationDetails) => void;
+  recordRefund: (bookingId: string, payout: RefundPayout) => void;
   updateCreditNoteSettings: (s: CreditNoteSettings) => void;
   updateGstSettings: (s: GstSettings) => void;
   updateCancellationPolicy: (p: CancellationPolicy) => void;
@@ -453,6 +455,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
     },
     []
   );
+
+  // Record a cash/bank refund payout against a cancelled booking's refund due.
+  const recordRefund = useCallback((bookingId: string, payout: RefundPayout) => {
+    setBookings((prev) =>
+      prev.map((b) => {
+        if (b.id !== bookingId || !b.cancellationDetails) return b;
+        const details: CancellationDetails = {
+          ...b.cancellationDetails,
+          refundPayouts: [...(b.cancellationDetails.refundPayouts ?? []), payout],
+        };
+        sync(`/api/app/bookings/${bookingId}`, "PATCH", { cancellationDetails: details });
+        return { ...b, cancellationDetails: details };
+      })
+    );
+  }, []);
 
   // Redeem part (or all) of a credit note against a booking. Validates the
   // code and remaining balance, records the transaction, and persists.
@@ -911,6 +928,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updateBooking,
       cancelBooking,
       redeemCreditNote,
+      recordRefund,
       addExtras,
       markLost,
       recordPayment,
@@ -990,6 +1008,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       creditNotes,
       cancelBooking,
       redeemCreditNote,
+      recordRefund,
       gstSettings,
       cancellationPolicy,
       venues,

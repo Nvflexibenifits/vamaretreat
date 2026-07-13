@@ -107,12 +107,16 @@ export default function RevenuePage() {
         if (bank + cash + crNote === 0 && b.advance > 0) bank = b.advance;
 
         // A cancellation settled with a credit note returns value to the guest
-        // already, so it doesn't remain as a cash refund due.
+        // already, so it doesn't remain as a cash refund due. Cash refunds
+        // recorded on the booking page count as paid out the same way.
         const settledViaCreditNote =
           isCancelled && b.cancellationDetails?.resolution === "credit-note"
             ? b.cancellationDetails.creditNoteAmount
             : 0;
-        const bal = bank + cash + crNote - settledViaCreditNote - total;
+        const refundsPaid = isCancelled
+          ? (b.cancellationDetails?.refundPayouts ?? []).reduce((s, p) => s + p.amount, 0)
+          : 0;
+        const bal = bank + cash + crNote - settledViaCreditNote - refundsPaid - total;
         return { b, roomNet, roomGstByRate, mealNet, mealGst, other, total, bank, cash, crNote, bal, isCancelled };
       });
   }, [bookings, search, rangeFrom, rangeTo]);

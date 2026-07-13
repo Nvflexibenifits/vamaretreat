@@ -86,6 +86,7 @@ export default function BookingDetailPage() {
     updateBooking,
     openModal,
     cancelBooking,
+    recordRefund,
     hydrated,
     currentRole,
     currentUser,
@@ -99,6 +100,13 @@ export default function BookingDetailPage() {
   const b = bookings.find((x) => x.id === id);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [today] = useState(() => todayStr());
+
+  // Record Refund modal (cancelled bookings with a cash refund due)
+  const [showRefundModal, setShowRefundModal] = useState(false);
+  const [refAmount, setRefAmount] = useState("");
+  const [refDate, setRefDate] = useState("");
+  const [refMode, setRefMode] = useState("Bank Transfer");
+  const [refNote, setRefNote] = useState("");
 
   useEffect(() => {
     if (!hydrated) return;
@@ -218,8 +226,93 @@ export default function BookingDetailPage() {
     showNotif("Booking cancelled", "success");
   };
 
+  const onConfirmRefund = () => {
+    if (!b.cancellationDetails) return;
+    const amt = parseFloat(refAmount);
+    if (!amt || amt <= 0) {
+      showNotif("Enter a valid refund amount", "error");
+      return;
+    }
+    if (!refDate) {
+      showNotif("Pick the payout date", "error");
+      return;
+    }
+    const paidOut = (b.cancellationDetails.refundPayouts ?? []).reduce((s, p) => s + p.amount, 0);
+    const remaining = Math.max(0, b.cancellationDetails.refundAmount - paidOut);
+    if (amt > remaining) {
+      showNotif(`Only ${fmt(remaining)} is due to the guest`, "error");
+      return;
+    }
+    recordRefund(b.id, {
+      date: refDate,
+      amount: amt,
+      mode: refMode,
+      reference: refNote.trim() || undefined,
+      by: currentUser,
+    });
+    setShowRefundModal(false);
+    showNotif(`Refund of ${fmt(amt)} recorded`, "success");
+  };
+
   return (
     <div className="view">
+      {/* Record Refund Modal */}
+      {showRefundModal && (
+        <div
+          className="modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowRefundModal(false);
+          }}
+        >
+          <div className="modal modal-sm">
+            <h3>Record Refund</h3>
+            <p className="modal-desc">
+              {b.guest} · {b.id}
+            </p>
+            <div className="fg" style={{ marginBottom: 12 }}>
+              <div className="field">
+                <label>Amount (₹) *</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={refAmount}
+                  onChange={(e) => setRefAmount(e.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label>Payout Date *</label>
+                <input
+                  type="date"
+                  value={refDate}
+                  onChange={(e) => setRefDate(e.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label>Mode</label>
+                <select value={refMode} onChange={(e) => setRefMode(e.target.value)}>
+                  <option>Bank Transfer</option>
+                  <option>UPI / QR</option>
+                  <option>Cash</option>
+                </select>
+              </div>
+              <div className="field">
+                <label>Reference</label>
+                <input
+                  type="text"
+                  value={refNote}
+                  onChange={(e) => setRefNote(e.target.value)}
+                  placeholder="UTR / note (optional)"
+                />
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button className="btn btn-ghost" onClick={() => setShowRefundModal(false)}>Cancel</button>
+              <button className="btn btn-success" onClick={onConfirmRefund}>Record Refund</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Cancel Modal */}
       {showCancelModal && cancelCalc && (
         <div
@@ -386,14 +479,61 @@ export default function BookingDetailPage() {
                   </span>
                 </div>
               )}
-              {b.cancellationDetails.refundAmount > 0 && (
-                <div className="detail-row">
-                  <span className="detail-key">Refund to Guest</span>
-                  <span className="detail-val" style={{ color: "var(--grn)", fontWeight: 700 }}>
-                    {fmt(b.cancellationDetails.refundAmount)}
-                  </span>
-                </div>
-              )}
+              {b.cancellationDetails.refundAmount > 0 && (() => {
+                const payouts = b.cancellationDetails.refundPayouts ?? [];
+                const paidOut = payouts.reduce((s, p) => s + p.amount, 0);
+                const remaining = Math.max(0, b.cancellationDetails.refundAmount - paidOut);
+                return (
+                  <>
+                    <div className="detail-row">
+                      <span className="detail-key">Refund to Guest</span>
+                      <span className="detail-val" style={{ color: "var(--grn)", fontWeight: 700 }}>
+                        {fmt(b.cancellationDetails.refundAmount)}
+                      </span>
+                    </div>
+                    {payouts.map((p, i) => (
+                      <div className="detail-row" key={i}>
+                        <span className="detail-key">Refund Paid</span>
+                        <span className="detail-val">
+                          {fmt(p.amount)}
+                          <span style={{ fontSize: 11, marginLeft: 8, color: "var(--t3)" }}>
+                            {fmtIN(p.date)} · {p.mode} · by {p.by}
+                            {p.reference ? ` · ${p.reference}` : ""}
+                          </span>
+                        </span>
+                      </div>
+                    ))}
+                    <div className="detail-row">
+                      <span className="detail-key">Refund Status</span>
+                      <span className="detail-val" style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                        {remaining > 0 ? (
+                          <>
+                            <span style={{ color: "var(--amb)", fontWeight: 700 }}>
+                              Pending · {fmt(remaining)} due
+                            </span>
+                            {!isFrontOffice && (
+                              <button
+                                className="btn btn-primary btn-xs"
+                                onClick={() => {
+                                  setRefAmount(String(remaining));
+                                  setRefDate(today);
+                                  setRefMode("Bank Transfer");
+                                  setRefNote("");
+                                  setShowRefundModal(true);
+                                }}
+                              >
+                                Record Refund
+                              </button>
+                            )}
+                          </>
+                        ) : (
+                          <span style={{ color: "var(--grn)", fontWeight: 700 }}>Paid</span>
+                        )}
+                      </span>
+                    </div>
+                  </>
+                );
+              })()}
               {b.cancellationDetails.creditNoteAmount > 0 && (
                 <div className="detail-row">
                   <span className="detail-key">Credit Note</span>

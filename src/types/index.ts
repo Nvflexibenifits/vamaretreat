@@ -137,6 +137,14 @@ export type AppliedCreditNote = {
   amount: number;
 };
 
+export type RefundPayout = {
+  date: string;
+  amount: number;
+  mode: string;
+  reference?: string;
+  by: string;
+};
+
 export type CancellationDetails = {
   cancellationDate: string;
   daysBeforeCheckin: number;
@@ -147,6 +155,8 @@ export type CancellationDetails = {
   resolution: "refund" | "credit-note";
   creditNoteCode?: string;
   processedBy: string;
+  // Actual payouts made against refundAmount, recorded from the booking page
+  refundPayouts?: RefundPayout[];
 };
 
 export type CreditNoteTransaction = {
