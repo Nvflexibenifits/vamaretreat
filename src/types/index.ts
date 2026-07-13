@@ -56,6 +56,8 @@ export type Payment = {
   amount: number;
   mode: string;
   by: string;
+  // Set when mode is "Credit Note" — the code of the redeemed note
+  creditNoteCode?: string;
 };
 
 export type Extra = {

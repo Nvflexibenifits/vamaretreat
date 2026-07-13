@@ -5,13 +5,18 @@ import { useApp } from "@/lib/store";
 import { fmt } from "@/lib/utils";
 
 export function PaymentModal() {
-  const { modal, closeModal, recordPayment, showNotif, bookings } = useApp();
+  const { modal, closeModal, recordPayment, redeemCreditNote, creditNotes, showNotif, bookings } = useApp();
   const [amount, setAmount] = useState("");
   const [mode, setMode] = useState("UPI / QR");
   const [type, setType] = useState("Balance Payment");
+  const [cnCode, setCnCode] = useState("");
 
   if (modal.kind !== "payment" || !modal.bookingId) return null;
   const b = bookings.find((x) => x.id === modal.bookingId);
+
+  const matchedNote = cnCode.trim()
+    ? creditNotes.find((c) => c.code.toLowerCase() === cnCode.trim().toLowerCase())
+    : undefined;
 
   const onConfirm = () => {
     const amt = parseInt(amount);
@@ -19,9 +24,23 @@ export function PaymentModal() {
       showNotif("Enter a valid amount", "error");
       return;
     }
-    recordPayment(modal.bookingId!, amt, mode, type);
+    if (mode === "Credit Note") {
+      if (!cnCode.trim()) {
+        showNotif("Enter the credit note code", "error");
+        return;
+      }
+      const result = redeemCreditNote(cnCode, modal.bookingId!, amt);
+      if (!result.ok) {
+        showNotif(result.error, "error");
+        return;
+      }
+      recordPayment(modal.bookingId!, amt, mode, type, result.note.code);
+    } else {
+      recordPayment(modal.bookingId!, amt, mode, type);
+    }
     closeModal();
     setAmount("");
+    setCnCode("");
     if (b) showNotif(`${fmt(amt)} recorded for ${b.guest}`, "success");
   };
 
@@ -54,9 +73,32 @@ export function PaymentModal() {
               <option>UPI / QR</option>
               <option>Cash</option>
               <option>Bank Transfer</option>
+              <option>Credit Note</option>
             </select>
           </div>
         </div>
+        {mode === "Credit Note" && (
+          <div className="field" style={{ marginBottom: 12 }}>
+            <label>Credit Note Code *</label>
+            <input
+              type="text"
+              value={cnCode}
+              onChange={(e) => setCnCode(e.target.value)}
+              placeholder="e.g. CN-2026-001"
+              autoFocus
+            />
+            {cnCode.trim() && (
+              <div
+                className="field-hint"
+                style={{ color: matchedNote ? (matchedNote.remainingAmount > 0 ? "var(--grn)" : "var(--red)") : "var(--red)" }}
+              >
+                {matchedNote
+                  ? `${matchedNote.guestName} · ${fmt(matchedNote.remainingAmount)} available`
+                  : "Code not found"}
+              </div>
+            )}
+          </div>
+        )}
         <div className="field">
           <label>Type</label>
           <select value={type} onChange={(e) => setType(e.target.value)}>

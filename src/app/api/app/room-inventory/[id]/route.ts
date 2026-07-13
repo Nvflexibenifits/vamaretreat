@@ -31,9 +31,29 @@ export async function PATCH(
 
     const merged = { ...(existing.data as Record<string, unknown>), ...body };
 
+    // Renames change the item's id — the row key must move with it, otherwise
+    // every later update targets a key that no longer matches the visible id.
+    const newId =
+      typeof body.id === "string" && body.id.trim() && body.id !== id
+        ? (body.id as string)
+        : id;
+    if (newId !== id) {
+      const [clash] = await db
+        .select()
+        .from(roomInventory)
+        .where(eq(roomInventory.id, newId))
+        .limit(1);
+      if (clash) {
+        return NextResponse.json(
+          { error: `A room with id ${newId} already exists` },
+          { status: 409 }
+        );
+      }
+    }
+
     await db
       .update(roomInventory)
-      .set({ data: merged })
+      .set({ id: newId, data: merged })
       .where(eq(roomInventory.id, id));
 
     return NextResponse.json({ ok: true });

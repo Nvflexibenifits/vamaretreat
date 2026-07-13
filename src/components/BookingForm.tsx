@@ -132,6 +132,8 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     createBooking,
     updateBooking,
     showNotif,
+    creditNotes,
+    redeemCreditNote,
     rooms,
     roomInventory,
     discountCaps,
@@ -177,10 +179,10 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   type AddOnRow = { uid: string; category: string; amount: string; gstPct: string };
   const [addOnRows, setAddOnRows] = useState<AddOnRow[]>([]);
 
-  type PaymentRow = { uid: string; date: string; amount: string; mode: string };
+  type PaymentRow = { uid: string; date: string; amount: string; mode: string; cnCode: string };
   const todayDate = typeof window !== "undefined" ? new Date().toISOString().split("T")[0] : "";
   const [newPaymentRows, setNewPaymentRows] = useState<PaymentRow[]>([
-    { uid: newUid(), date: todayDate, amount: "", mode: "Bank Transfer" },
+    { uid: newUid(), date: todayDate, amount: "", mode: "Bank Transfer", cnCode: "" },
   ]);
 
   const checkin = formSegs.length > 0
@@ -450,6 +452,48 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     return true;
   };
 
+  // Credit-note payment rows must reference a valid note with enough balance
+  // (summed across rows using the same code).
+  const validateCreditNoteRows = (): boolean => {
+    const usage = new Map<string, number>();
+    for (const r of newPaymentRows) {
+      if (r.mode !== "Credit Note") continue;
+      const amt = parseFloat(r.amount) || 0;
+      if (!r.date || amt <= 0) continue;
+      const code = r.cnCode.trim();
+      if (!code) {
+        showNotif("Enter the credit note code for the credit note payment", "error");
+        return false;
+      }
+      const cn = creditNotes.find((c) => c.code.toLowerCase() === code.toLowerCase());
+      if (!cn) {
+        showNotif(`Credit note ${code} not found`, "error");
+        return false;
+      }
+      usage.set(cn.code, (usage.get(cn.code) ?? 0) + amt);
+    }
+    for (const [code, amt] of usage.entries()) {
+      const cn = creditNotes.find((c) => c.code === code)!;
+      if (amt > cn.remainingAmount) {
+        showNotif(
+          `${code} has only ₹${cn.remainingAmount.toLocaleString("en-IN")} remaining (entered ₹${amt.toLocaleString("en-IN")})`,
+          "error"
+        );
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const redeemCreditNoteRows = (bookingId: string) => {
+    newPaymentRows
+      .filter((r) => r.mode === "Credit Note" && r.date && (parseFloat(r.amount) || 0) > 0)
+      .forEach((r) => {
+        const result = redeemCreditNote(r.cnCode, bookingId, parseFloat(r.amount) || 0);
+        if (!result.ok) showNotif(result.error, "error");
+      });
+  };
+
   // ─── Build / patch ───
   const buildNewBooking = (
     id: string,
@@ -539,6 +583,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
           amount: parseFloat(p.amount) || 0,
           mode: p.mode,
           by: currentUser,
+          ...(p.mode === "Credit Note" && p.cnCode.trim() ? { creditNoteCode: p.cnCode.trim() } : {}),
         })),
       extras: [],
     };
@@ -558,6 +603,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
         amount: parseFloat(p.amount) || 0,
         mode: p.mode,
         by: currentUser,
+        ...(p.mode === "Credit Note" && p.cnCode.trim() ? { creditNoteCode: p.cnCode.trim() } : {}),
       }));
     const allPayments = validNewPayments.length > 0
       ? [...(initial?.payments ?? []), ...validNewPayments]
@@ -644,6 +690,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   // ─── Save handlers ───
   const saveCreate = (intent: "Enquiry" | "Tentative" | "Confirmed") => {
     if (!validate()) return;
+    if (!validateCreditNoteRows()) return;
     if (intent === "Confirmed" && createAdvance <= 0) {
       showNotif("Enter advance amount to confirm", "error");
       return;
@@ -677,6 +724,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     }
     const booking = buildNewBooking(id, intent, allocatedRooms, segAlloc);
     createBooking(booking);
+    redeemCreditNoteRows(id);
     showNotif(`Booking ${id} saved — ${intent}`, "success");
     if (typeof window !== "undefined") {
       window.open(`/bookings/${id}/confirmation`, "_blank");
@@ -686,6 +734,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
 
   const saveEdit = (alsoOpenConfirmation: boolean) => {
     if (!validate() || !initial) return;
+    if (!validateCreditNoteRows()) return;
     let allocatedRooms = initial.allocatedRooms;
     // Default: carry over each segment's existing allocation (matched by id)
     let segAlloc: Record<string, string[]> = Object.fromEntries(
@@ -713,6 +762,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       segAlloc = {};
     }
     updateBooking(initial.id, buildEditPatch(allocatedRooms, segAlloc));
+    redeemCreditNoteRows(initial.id);
     showNotif(`Booking ${initial.id} updated`, "success");
     if (alsoOpenConfirmation && typeof window !== "undefined") {
       window.open(`/bookings/${initial.id}/confirmation`, "_blank");
@@ -1502,6 +1552,28 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                       <option>Credit Card</option>
                       <option>Credit Note</option>
                     </select>
+                    {row.mode === "Credit Note" && (
+                      <div style={{ marginTop: 5 }}>
+                        <input
+                          type="text"
+                          placeholder="Credit note code"
+                          value={row.cnCode}
+                          onChange={(e) => setNewPaymentRows((prev) =>
+                            prev.map((r) => r.uid === row.uid ? { ...r, cnCode: e.target.value } : r)
+                          )}
+                          style={{ width: "100%", padding: "5px 8px", border: "1px solid var(--bd)", borderRadius: "var(--r3)", fontSize: 12, background: "var(--surf)", outline: "none" }}
+                        />
+                        {row.cnCode.trim() && (() => {
+                          const cn = creditNotes.find((c) => c.code.toLowerCase() === row.cnCode.trim().toLowerCase());
+                          if (!cn) return <div style={{ fontSize: 10, marginTop: 3, color: "var(--red)" }}>Code not found</div>;
+                          return (
+                            <div style={{ fontSize: 10, marginTop: 3, color: cn.remainingAmount > 0 ? "var(--grn)" : "var(--red)" }}>
+                              {cn.guestName} · {fmt(cn.remainingAmount)} available
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    )}
                   </td>
                   <td style={{ textAlign: "center" }}>
                     {newPaymentRows.length > 1 && (
@@ -1524,7 +1596,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
             className="btn btn-ghost btn-xs"
             onClick={() => setNewPaymentRows((prev) => [
               ...prev,
-              { uid: newUid(), date: todayDate, amount: "", mode: "Bank Transfer" },
+              { uid: newUid(), date: todayDate, amount: "", mode: "Bank Transfer", cnCode: "" },
             ])}
           >
             + Add Row

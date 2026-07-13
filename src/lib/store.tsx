@@ -79,8 +79,14 @@ type AppContextValue = {
     bookingId: string,
     amount: number,
     mode: string,
-    type: string
+    type: string,
+    creditNoteCode?: string
   ) => void;
+  redeemCreditNote: (
+    code: string,
+    bookingId: string,
+    amount: number
+  ) => { ok: true; note: CreditNote } | { ok: false; error: string };
   completeBooking: (
     bookingId: string,
     extras: Extra[],
@@ -329,20 +335,47 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => clearTimeout(t);
   }, [notif]);
 
-  // Fire-and-forget sync helper for mutations with a body.
+  // Fire-and-forget sync helper for mutations with a body. Failures are
+  // surfaced as a notification — a silent failure looks saved locally but
+  // vanishes on the next reload.
   const sync = (url: string, method: string, body: unknown) => {
     lastMutationRef.current = Date.now();
     fetch(url, {
       method,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-    }).catch(console.error);
+    })
+      .then(async (r) => {
+        if (!r.ok) {
+          const detail = await r.json().then((d) => d?.error).catch(() => null);
+          console.error(`[sync] ${method} ${url} failed: ${r.status}`, detail);
+          setNotif({
+            msg: detail || "Warning: last change could not be saved to the server",
+            kind: "error",
+          });
+        }
+      })
+      .catch(() => {
+        setNotif({ msg: "Network error: last change was not saved", kind: "error" });
+      });
   };
 
   // Fire-and-forget DELETE helper.
   const del = (url: string) => {
     lastMutationRef.current = Date.now();
-    fetch(url, { method: "DELETE" }).catch(console.error);
+    fetch(url, { method: "DELETE" })
+      .then((r) => {
+        if (!r.ok) {
+          console.error(`[del] DELETE ${url} failed: ${r.status}`);
+          setNotif({
+            msg: "Warning: last delete could not be saved to the server",
+            kind: "error",
+          });
+        }
+      })
+      .catch(() => {
+        setNotif({ msg: "Network error: last delete was not saved", kind: "error" });
+      });
   };
 
   const showNotif = useCallback((msg: string, kind: NotifKind = "success") => {
@@ -419,6 +452,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     },
     []
+  );
+
+  // Redeem part (or all) of a credit note against a booking. Validates the
+  // code and remaining balance, records the transaction, and persists.
+  const redeemCreditNote = useCallback(
+    (code: string, bookingId: string, amount: number): { ok: true; note: CreditNote } | { ok: false; error: string } => {
+      const cn = creditNotes.find((c) => c.code.trim().toLowerCase() === code.trim().toLowerCase());
+      if (!cn) return { ok: false, error: `Credit note ${code.trim()} not found` };
+      if (amount <= 0) return { ok: false, error: "Enter a valid credit note amount" };
+      if (cn.remainingAmount < amount) {
+        return {
+          ok: false,
+          error: `${cn.code} has only ₹${cn.remainingAmount.toLocaleString("en-IN")} remaining`,
+        };
+      }
+      const remainingAfter = cn.remainingAmount - amount;
+      const updated: CreditNote = {
+        ...cn,
+        usedAmount: cn.usedAmount + amount,
+        remainingAmount: remainingAfter,
+        status: remainingAfter <= 0 ? "Fully Used" : "Partially Used",
+        transactions: [
+          ...(cn.transactions ?? []),
+          { date: todayStr(), bookingId, amountUsed: amount, remainingAfter },
+        ],
+      };
+      setCreditNotes((prev) => prev.map((c) => (c.code === cn.code ? updated : c)));
+      sync(`/api/app/credit-notes/${encodeURIComponent(cn.code)}`, "PATCH", updated);
+      return { ok: true, note: updated };
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [creditNotes]
   );
 
   const addExtras = useCallback((bookingId: string, newExtras: Extra[]) => {
@@ -594,7 +659,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const recordPayment = useCallback(
-    (bookingId: string, amount: number, mode: string, type: string) => {
+    (bookingId: string, amount: number, mode: string, type: string, creditNoteCode?: string) => {
       setBookings((prev) =>
         prev.map((b) => {
           if (b.id !== bookingId) return b;
@@ -609,6 +674,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
               amount,
               mode,
               by: currentUser,
+              ...(creditNoteCode ? { creditNoteCode } : {}),
             },
           ];
           const newStatus =
@@ -844,6 +910,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       createBooking,
       updateBooking,
       cancelBooking,
+      redeemCreditNote,
       addExtras,
       markLost,
       recordPayment,
@@ -922,6 +989,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       creditNoteSettings,
       creditNotes,
       cancelBooking,
+      redeemCreditNote,
       gstSettings,
       cancellationPolicy,
       venues,
