@@ -9,7 +9,7 @@ type RevFilter = "month";
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { bookings, revenueEntries, currentUser, currentRole, rooms, roomInventory } = useApp();
+  const { bookings, revenueEntries, currentRole, rooms, roomInventory } = useApp();
   const isFrontOffice = currentRole === "Front Office";
 
   const roomCategories = useMemo(() => {
@@ -26,8 +26,9 @@ export default function DashboardPage() {
   const [pendingOpen, setPendingOpen] = useState(false);
   const [foFilter, setFoFilter] = useState<"today" | "tomorrow" | "custom">("today");
   const [foCustomDate, setFoCustomDate] = useState("");
-  // Weekly Room Status: start date of the displayed week ("" = week starting today)
-  const [weekStart, setWeekStart] = useState("");
+  // Room Availability: This Week / Next Week / custom Date Range tabs
+  const [weekTab, setWeekTab] = useState<"this" | "next" | "range">("this");
+  const [rangeStart, setRangeStart] = useState("");
 
   useEffect(() => {
     setToday(todayStr());
@@ -60,12 +61,15 @@ export default function DashboardPage() {
     [pendingBookings]
   );
 
-  // ───── Room Status (7 days from the selected week start) ─────
+  // ───── Room Availability (7 days from the selected tab's anchor) ─────
   const roomDates = useMemo(() => {
-    const anchor = weekStart || today;
-    if (!anchor) return [];
+    if (!today) return [];
+    const anchor =
+      weekTab === "next" ? addDays(today, 7)
+      : weekTab === "range" ? rangeStart || today
+      : today;
     return sevenDaysFrom(anchor);
-  }, [today, weekStart]);
+  }, [today, weekTab, rangeStart]);
 
   const roomStatus = useMemo(() => {
     return roomCategories.map((cat) => {
@@ -191,13 +195,6 @@ export default function DashboardPage() {
     return foCustomDate || today;
   }, [today, foFilter, foCustomDate]);
 
-  const foDateLabel = useMemo(() => {
-    if (!foDate) return "";
-    return new Date(foDate + "T00:00:00").toLocaleDateString("en-IN", {
-      weekday: "long", day: "numeric", month: "long", year: "numeric",
-    });
-  }, [foDate]);
-
   // ───── Front Office: Check-ins / Stayovers / Check-outs ─────
   const foCheckIns = useMemo(() => {
     if (!foDate) return [];
@@ -297,13 +294,6 @@ export default function DashboardPage() {
 
     return (
       <div className="view">
-        <div className="pg-hd">
-          <div>
-            <h2>Hello, {currentUser}</h2>
-            <p>Daily occupancy report &mdash; {foDateLabel}</p>
-          </div>
-        </div>
-
         {/* Filter bar */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20 }}>
           {(["today", "tomorrow", "custom"] as const).map((f) => (
@@ -531,9 +521,7 @@ export default function DashboardPage() {
   return (
     <div className="view">
       <div className="pg-hd">
-        <div>
-          <h2>Hello, {currentUser}</h2>
-        </div>
+        <div></div>
         <a href="/bookings/new" className="btn btn-primary btn-sm">New Booking</a>
       </div>
 
@@ -567,6 +555,87 @@ export default function DashboardPage() {
           </div>
         </div>
 
+      </div>
+
+      {/* ───────── Room Availability ───────── */}
+      <div className="tbl-wrap" style={{ marginBottom: 16 }}>
+        <div className="tbl-hd">
+          <h3>Room Availability</h3>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: 14 }}>
+            {([["this", "This Week"], ["next", "Next Week"], ["range", "Date Range"]] as const).map(([key, label]) => (
+              <button
+                key={key}
+                className={`btn btn-xs${weekTab === key ? " btn-primary" : " btn-ghost"}`}
+                onClick={() => setWeekTab(key)}
+              >
+                {label}
+              </button>
+            ))}
+            {weekTab === "range" && (
+              <input
+                type="date"
+                value={rangeStart || today}
+                onChange={(e) => setRangeStart(e.target.value)}
+                style={{
+                  height: 26,
+                  padding: "0 8px",
+                  fontSize: 12,
+                  border: "1px solid var(--bd)",
+                  borderRadius: "var(--r3)",
+                  background: "var(--surf)",
+                  color: "var(--t1)",
+                  outline: "none",
+                }}
+              />
+            )}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--t3)", display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
+            <strong style={{ color: "var(--grn)" }}>B: Booked</strong>
+            <strong style={{ color: "var(--amb)" }}>T: Tentative</strong>
+            <strong style={{ color: "var(--t2)" }}>A: Available</strong>
+          </div>
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <table>
+            <thead>
+              <tr>
+                <th rowSpan={2} style={{ verticalAlign: "bottom" }}>Room Category</th>
+                {roomDates.map((d) => {
+                  const dt = new Date(d + "T00:00:00");
+                  const wk = dt.toLocaleDateString("en-IN", { weekday: "short" });
+                  const dm = `${String(dt.getDate()).padStart(2, "0")}/${String(dt.getMonth() + 1).padStart(2, "0")}`;
+                  return (
+                    <th key={d} colSpan={3} style={{ textAlign: "center", borderLeft: "1px solid var(--bd)" }}>
+                      <div>{wk}</div>
+                      <div style={{ fontSize: 9, color: "var(--t4)", fontWeight: 500, marginTop: 2 }}>{dm}</div>
+                    </th>
+                  );
+                })}
+              </tr>
+              <tr>
+                {roomDates.flatMap((d) => [
+                  <th key={`${d}-b`} style={{ textAlign: "center", fontSize: 10, color: "var(--grn)", borderLeft: "1px solid var(--bd)", width: 36 }}>B</th>,
+                  <th key={`${d}-t`} style={{ textAlign: "center", fontSize: 10, color: "var(--amb)", width: 36 }}>T</th>,
+                  <th key={`${d}-a`} style={{ textAlign: "center", fontSize: 10, color: "var(--t2)", width: 36 }}>A</th>,
+                ])}
+              </tr>
+            </thead>
+            <tbody>
+              {roomStatus.map((row) => (
+                <tr key={row.name} style={{ cursor: "default" }}>
+                  <td>
+                    <div style={{ fontWeight: 500, color: "var(--t1)" }}>{row.name}</div>
+                  </td>
+                  {row.cells.flatMap((c) => [
+                    <td key={`${c.date}-b`} style={{ textAlign: "center", fontSize: 12, fontWeight: 600, color: c.booked > 0 ? "var(--grn)" : "var(--t4)", borderLeft: "1px solid var(--bd)" }}>{c.booked}</td>,
+                    <td key={`${c.date}-t`} style={{ textAlign: "center", fontSize: 12, fontWeight: 600, color: c.tentative > 0 ? "var(--amb)" : "var(--t4)" }}>{c.tentative}</td>,
+                    <td key={`${c.date}-a`} style={{ textAlign: "center", fontSize: 12, fontWeight: 600, color: "var(--t2)" }}>{c.available}</td>,
+                  ])}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* ───────── Payment Pending list (collapsible) ───────── */}
@@ -658,91 +727,6 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* ───────── Weekly Room Status ───────── */}
-      <div className="tbl-wrap">
-        <div className="tbl-hd">
-          <h3>Weekly Room Status</h3>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: 14 }}>
-            <button
-              className="btn btn-ghost btn-xs"
-              onClick={() => today && setWeekStart(addDays(weekStart || today, -7))}
-            >
-              &lsaquo; Prev Week
-            </button>
-            <input
-              type="date"
-              value={weekStart || today}
-              onChange={(e) => setWeekStart(e.target.value)}
-              style={{
-                height: 26,
-                padding: "0 8px",
-                fontSize: 12,
-                border: "1px solid var(--bd)",
-                borderRadius: "var(--r3)",
-                background: "var(--surf)",
-                color: "var(--t1)",
-                outline: "none",
-              }}
-            />
-            <button
-              className="btn btn-ghost btn-xs"
-              onClick={() => today && setWeekStart(addDays(weekStart || today, 7))}
-            >
-              Next Week &rsaquo;
-            </button>
-            {weekStart && weekStart !== today && (
-              <button className="btn btn-ghost btn-xs" onClick={() => setWeekStart("")}>
-                Today
-              </button>
-            )}
-          </div>
-          <div style={{ fontSize: 11, color: "var(--t3)", display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
-            <strong style={{ color: "var(--grn)" }}>Booked</strong>
-            {" / "}
-            <strong style={{ color: "var(--amb)" }}>Tentative</strong>
-            {" / "}
-            <strong style={{ color: "var(--t2)" }}>Available</strong>
-          </div>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Room Category</th>
-              {roomDates.map((d) => {
-                const dt = new Date(d + "T00:00:00");
-                const wk = dt.toLocaleDateString("en-IN", { weekday: "short" });
-                const dm = `${String(dt.getDate()).padStart(2, "0")}/${String(dt.getMonth() + 1).padStart(2, "0")}`;
-                return (
-                  <th key={d} style={{ textAlign: "center" }}>
-                    <div>{wk}</div>
-                    <div style={{ fontSize: 9, color: "var(--t4)", fontWeight: 500, marginTop: 2 }}>{dm}</div>
-                  </th>
-                );
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            {roomStatus.map((row) => (
-              <tr key={row.name} style={{ cursor: "default" }}>
-                <td>
-                  <div style={{ fontWeight: 500, color: "var(--t1)" }}>{row.name}</div>
-                </td>
-                {row.cells.map((c) => (
-                  <td key={c.date} style={{ textAlign: "center" }}>
-                    <div className="rs-cell" title="Booked / Tentative / Available">
-                      <span className="rs-b">{c.booked}</span>
-                      <span className="rs-sep">/</span>
-                      <span className="rs-t">{c.tentative}</span>
-                      <span className="rs-sep">/</span>
-                      <span className="rs-a">{c.available}</span>
-                    </div>
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
     </div>
   );
 }

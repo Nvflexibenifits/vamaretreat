@@ -146,11 +146,6 @@ export default function RoomChartPage() {
     return out;
   }, [offset, today]);
 
-  const rangeLabel = useMemo(() => {
-    if (dates.length === 0) return "";
-    return `${fmtIN(dates[0])} — ${fmtIN(dates[dates.length - 1])}`;
-  }, [dates]);
-
   // Month dropdown: current month + next 12 months
   const monthOptions = useMemo(() => {
     if (!today) return [];
@@ -663,7 +658,6 @@ export default function RoomChartPage() {
       <div className="pg-hd">
         <div>
           <h2>Room Chart</h2>
-          <p>30-day availability view · {rangeLabel}</p>
         </div>
         <div className="pg-hd-actions">
           <button className="btn btn-ghost btn-sm" onClick={goNextMonth}>

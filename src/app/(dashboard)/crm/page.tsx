@@ -54,7 +54,6 @@ export default function CrmPage() {
       <div className="pg-hd">
         <div>
           <h2>Guest CRM</h2>
-          <p>All guests from bookings — searchable, with stay history and spend</p>
         </div>
         <button className="btn btn-ghost btn-sm">⬇ Export CSV</button>
       </div>

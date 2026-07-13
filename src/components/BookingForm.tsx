@@ -782,7 +782,6 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       <div className="pg-hd">
         <div>
           <h2>{isEdit ? `Edit Booking — ${initial!.id}` : "New Booking"}</h2>
-          {!isEdit && <p>Pricing auto-calculates as you fill the form</p>}
         </div>
         {isEdit ? (
           <Link href={`/bookings/${initial!.id}`} className="btn btn-ghost btn-sm">

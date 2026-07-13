@@ -82,7 +82,6 @@ export default function MasterSetupPage() {
       <div className="pg-hd">
         <div>
           <h2>Master Setup</h2>
-          <p>Configure pricing, discounts, special days, cancellations and users</p>
         </div>
       </div>
 
