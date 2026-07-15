@@ -26,6 +26,8 @@ export default function DashboardPage() {
   const [pendingOpen, setPendingOpen] = useState(false);
   const [foFilter, setFoFilter] = useState<"today" | "tomorrow" | "custom">("today");
   const [foCustomDate, setFoCustomDate] = useState("");
+  // Front Office dashboard tabs: guest movement tables vs daily summaries
+  const [foTab, setFoTab] = useState<"movement" | "summary">("movement");
   // Room Availability: This Week / Next Week / custom Date Range tabs
   const [weekTab, setWeekTab] = useState<"this" | "next" | "range">("this");
   const [rangeStart, setRangeStart] = useState("");
@@ -101,13 +103,22 @@ export default function DashboardPage() {
     });
   }, [bookings, roomDates, roomCategories]);
 
-  // ───── Front Office: Room Summary for today ─────
+  // ───── Front Office: daily report filter date (shared by all FO tabs) ─────
+  const foDate = useMemo(() => {
+    if (!today) return "";
+    if (foFilter === "today") return today;
+    if (foFilter === "tomorrow") return addDays(today, 1);
+    return foCustomDate || today;
+  }, [today, foFilter, foCustomDate]);
+
+  // ───── Front Office: Room Summary for the selected date ─────
   const roomSummaryToday = useMemo(() => {
-    if (!today) return [];
+    const d = foDate;
+    if (!d) return [];
     const getRoomCount = (b: (typeof bookings)[0], catId: string): number => {
       let qty = 0;
       b.segments
-        .filter((seg) => seg.checkin <= today && today < seg.checkout)
+        .filter((seg) => seg.checkin <= d && d < seg.checkout)
         .forEach((seg) => {
           seg.rooms
             .filter((r) => r.roomId === catId)
@@ -123,77 +134,85 @@ export default function DashboardPage() {
           if (b.status !== "Confirmed" && b.status !== "Completed") return;
           const qty = getRoomCount(b, r.id);
           if (qty === 0) return;
-          if (b.checkin < today && b.checkout > today) rollOver += qty;
-          else if (b.checkin === today && b.checkout > today) newCheckin += qty;
+          if (b.checkin < d && b.checkout > d) rollOver += qty;
+          else if (b.checkin === d && b.checkout > d) newCheckin += qty;
         });
         return { category: r.name, rollOver, newCheckin, total: rollOver + newCheckin };
       })
       .filter((row) => row.total > 0);
-  }, [rooms, bookings, today]);
+  }, [rooms, bookings, foDate]);
 
-  // ───── Front Office: Guest Pax Count for today ─────
+  // ───── Front Office: Guest Pax Count for the selected date ─────
+  // Counts come from the segment covering the date (bookings with multiple
+  // date ranges carry different pax/meals per segment); booking-level fallback.
   const guestPaxToday = useMemo(() => {
-    if (!today) return [];
-    const isActive = (b: (typeof bookings)[0]) =>
+    const d = foDate;
+    if (!d) return [];
+    type Bkg = (typeof bookings)[0];
+    const isActive = (b: Bkg) =>
       (b.status === "Confirmed" || b.status === "Completed") &&
-      b.checkin <= today && b.checkout > today;
-    const isRollOver = (b: (typeof bookings)[0]) => b.checkin < today;
-    const isNew = (b: (typeof bookings)[0]) => b.checkin === today;
-    const sum = (arr: (typeof bookings), fn: (b: (typeof bookings)[0]) => number) =>
-      arr.reduce((s, b) => s + fn(b), 0);
+      b.checkin <= d && b.checkout > d;
+    const isRollOver = (b: Bkg) => b.checkin < d;
+    const isNew = (b: Bkg) => b.checkin === d;
+    const segFor = (b: Bkg) => b.segments?.find((s) => s.checkin <= d && d < s.checkout);
+    const adultsOf = (b: Bkg) => segFor(b)?.adults ?? b.adults;
+    const seniorsOf = (b: Bkg) => segFor(b)?.seniors ?? b.seniors;
+    const kidsOf = (b: Bkg) => {
+      const s = segFor(b);
+      return s
+        ? s.kidsAbove10 + s.kids6to10 + s.kids2to6 + s.infantsBelow2
+        : b.kidsAbove10 + b.kids6to10 + b.kids2to6 + b.infantsBelow2;
+    };
+    const petsOf = (b: Bkg) => segFor(b)?.pets ?? b.pets;
+    const driversOf = (b: Bkg) => segFor(b)?.drivers ?? b.driverCount ?? 0;
+    const mealOnOf = (b: Bkg) => segFor(b)?.mealOn ?? b.mealOn;
+    const driverMealOnOf = (b: Bkg) => segFor(b)?.driverMealOn ?? b.driverMealOn ?? false;
+    const sum = (arr: Bkg[], fn: (b: Bkg) => number) => arr.reduce((s, b) => s + fn(b), 0);
 
     const active = bookings.filter(isActive);
     const rollOverBkgs = active.filter(isRollOver);
     const newBkgs = active.filter(isNew);
-    const mealBkgs = active.filter((b) => b.mealOn);
-    const driverMealBkgs = active.filter((b) => b.driverMealOn);
+    const mealBkgs = active.filter(mealOnOf);
+    const driverMealBkgs = active.filter(driverMealOnOf);
 
     return [
       {
         label: "Adults",
-        rollOver: sum(rollOverBkgs, (b) => b.adults),
-        newGuests: sum(newBkgs, (b) => b.adults),
-        meals: sum(mealBkgs, (b) => b.adults),
-        total: sum(active, (b) => b.adults),
+        rollOver: sum(rollOverBkgs, adultsOf),
+        newGuests: sum(newBkgs, adultsOf),
+        meals: sum(mealBkgs, adultsOf),
+        total: sum(active, adultsOf),
       },
       {
         label: "Sr. Citizens",
-        rollOver: sum(rollOverBkgs, (b) => b.seniors),
-        newGuests: sum(newBkgs, (b) => b.seniors),
-        meals: sum(mealBkgs, (b) => b.seniors),
-        total: sum(active, (b) => b.seniors),
+        rollOver: sum(rollOverBkgs, seniorsOf),
+        newGuests: sum(newBkgs, seniorsOf),
+        meals: sum(mealBkgs, seniorsOf),
+        total: sum(active, seniorsOf),
       },
       {
         label: "Kids",
-        rollOver: sum(rollOverBkgs, (b) => b.kidsAbove10 + b.kids6to10 + b.kids2to6 + b.infantsBelow2),
-        newGuests: sum(newBkgs, (b) => b.kidsAbove10 + b.kids6to10 + b.kids2to6 + b.infantsBelow2),
-        meals: sum(mealBkgs, (b) => b.kidsAbove10 + b.kids6to10 + b.kids2to6 + b.infantsBelow2),
-        total: sum(active, (b) => b.kidsAbove10 + b.kids6to10 + b.kids2to6 + b.infantsBelow2),
+        rollOver: sum(rollOverBkgs, kidsOf),
+        newGuests: sum(newBkgs, kidsOf),
+        meals: sum(mealBkgs, kidsOf),
+        total: sum(active, kidsOf),
       },
       {
         label: "Pets",
-        rollOver: sum(rollOverBkgs, (b) => b.pets),
-        newGuests: sum(newBkgs, (b) => b.pets),
+        rollOver: sum(rollOverBkgs, petsOf),
+        newGuests: sum(newBkgs, petsOf),
         meals: 0,
-        total: sum(active, (b) => b.pets),
+        total: sum(active, petsOf),
       },
       {
         label: "Driver",
-        rollOver: sum(rollOverBkgs, (b) => b.driverCount ?? 0),
-        newGuests: sum(newBkgs, (b) => b.driverCount ?? 0),
-        meals: sum(driverMealBkgs, (b) => b.driverCount ?? 0),
-        total: sum(active, (b) => b.driverCount ?? 0),
+        rollOver: sum(rollOverBkgs, driversOf),
+        newGuests: sum(newBkgs, driversOf),
+        meals: sum(driverMealBkgs, driversOf),
+        total: sum(active, driversOf),
       },
     ].filter((row) => row.total > 0);
-  }, [bookings, today]);
-
-  // ───── Front Office: daily report filter date ─────
-  const foDate = useMemo(() => {
-    if (!today) return "";
-    if (foFilter === "today") return today;
-    if (foFilter === "tomorrow") return addDays(today, 1);
-    return foCustomDate || today;
-  }, [today, foFilter, foCustomDate]);
+  }, [bookings, foDate]);
 
   // ───── Front Office: Check-ins / Stayovers / Check-outs ─────
   const foCheckIns = useMemo(() => {
@@ -292,9 +311,28 @@ export default function DashboardPage() {
       </tr>
     );
 
+    const foDayLabel =
+      foFilter === "today" ? "Today" : foFilter === "tomorrow" ? "Tomorrow" : fmtIN(foDate);
+
     return (
       <div className="view">
-        {/* Filter bar */}
+        {/* Tabs */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, borderBottom: "1px solid var(--bd)", paddingBottom: 12 }}>
+          <button
+            className={`btn btn-sm${foTab === "movement" ? " btn-primary" : " btn-ghost"}`}
+            onClick={() => setFoTab("movement")}
+          >
+            Guest Movement
+          </button>
+          <button
+            className={`btn btn-sm${foTab === "summary" ? " btn-primary" : " btn-ghost"}`}
+            onClick={() => setFoTab("summary")}
+          >
+            Room &amp; Pax Summary
+          </button>
+        </div>
+
+        {/* Date filter — applies to both tabs */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20 }}>
           {(["today", "tomorrow", "custom"] as const).map((f) => (
             <button
@@ -316,6 +354,8 @@ export default function DashboardPage() {
           )}
         </div>
 
+        {foTab === "movement" && (
+        <>
         {/* Check-ins */}
         <div className="tbl-wrap" style={{ marginBottom: 16 }}>
           <div className="tbl-hd">
@@ -369,11 +409,15 @@ export default function DashboardPage() {
             </tbody>
           </table>
         </div>
+        </>
+        )}
 
+        {foTab === "summary" && (
+        <>
         {/* Room Summary */}
         <div className="tbl-wrap" style={{ marginBottom: 16 }}>
           <div className="tbl-hd">
-            <h3>Room Summary &mdash; Today</h3>
+            <h3>Room Summary &mdash; {foDayLabel}</h3>
           </div>
           <table>
             <thead>
@@ -389,8 +433,8 @@ export default function DashboardPage() {
                 <tr>
                   <td colSpan={4}>
                     <div className="empty-state">
-                      <h3>No occupied rooms today</h3>
-                      <p>No confirmed or completed bookings are active today</p>
+                      <h3>No occupied rooms</h3>
+                      <p>No confirmed or completed bookings are active on this date</p>
                     </div>
                   </td>
                 </tr>
@@ -439,7 +483,7 @@ export default function DashboardPage() {
         {/* Guest Pax Count */}
         <div className="tbl-wrap">
           <div className="tbl-hd">
-            <h3>Guest Pax Count &mdash; Today</h3>
+            <h3>Guest Pax Count &mdash; {foDayLabel}</h3>
           </div>
           <table>
             <thead>
@@ -456,8 +500,8 @@ export default function DashboardPage() {
                 <tr>
                   <td colSpan={5}>
                     <div className="empty-state">
-                      <h3>No guests today</h3>
-                      <p>No confirmed or completed bookings are active today</p>
+                      <h3>No guests</h3>
+                      <p>No confirmed or completed bookings are active on this date</p>
                     </div>
                   </td>
                 </tr>
@@ -514,6 +558,8 @@ export default function DashboardPage() {
             </tbody>
           </table>
         </div>
+        </>
+        )}
       </div>
     );
   }

@@ -47,6 +47,8 @@ export default function BookingsPage() {
   );
 
   const data = bookings.filter((b) => {
+    // Lost and Completed bookings are excluded from this list entirely
+    if (b.status === "Lost" || b.status === "Completed") return false;
     if (statusFilter !== "All" && b.status !== statusFilter) return false;
     const s = search.toLowerCase();
     if (
