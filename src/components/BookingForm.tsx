@@ -853,11 +853,8 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       {/* §2 Accommodation */}
       <div className="form-panel">
         <div className="form-sec">
-          <div className="form-sec-title" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span><span className="form-sec-num">2</span>Accommodation</span>
-            <button type="button" className="btn btn-sm" onClick={addSegment} style={{ fontSize: 12 }}>
-              + Add New Date
-            </button>
+          <div className="form-sec-title">
+            <span className="form-sec-num">2</span>Accommodation
           </div>
 
           {formSegs.length === 0 ? (
@@ -1290,6 +1287,13 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
               );
             })
           )}
+
+          {/* Add another date range — sits after the last date's details */}
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 4 }}>
+            <button type="button" className="btn btn-primary btn-sm" onClick={addSegment}>
+              + Add New Date
+            </button>
+          </div>
 
           {/* Grand total */}
           {formSegs.some((s) => s.rows.some((r) => r.roomId)) && (
