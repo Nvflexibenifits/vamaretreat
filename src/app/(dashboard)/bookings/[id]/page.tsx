@@ -21,6 +21,13 @@ function getDatesInRange(checkin: string, checkout: string): string[] {
   return dates;
 }
 
+// dd/mm/yy — compact date format matching the revenue table convention
+function fmtShort(d: string): string {
+  if (!d) return "—";
+  const [y, m, dd] = d.split("-");
+  return `${dd}/${m}/${y.slice(2)}`;
+}
+
 function computeCancel(
   advance: number,
   checkin: string,
@@ -566,70 +573,86 @@ export default function BookingDetailPage() {
             <BkgRow label="Source" value={b.source || "—"} last />
           </div>
 
+          {/* Guest Packs Count — one row per date range, before charges */}
+          <SectionHeader>Guest Packs Count</SectionHeader>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
+              <thead>
+                <tr style={{ background: "var(--surf2)", borderBottom: "2px solid var(--bd)" }}>
+                  {[
+                    { h: "C-in", left: true },
+                    { h: "C-out", left: true },
+                    { h: "A", left: false },
+                    { h: "Sr. Ct", left: false },
+                    { h: "K 10-16", left: false },
+                    { h: "K 6-10", left: false },
+                    { h: "Inf 0-6", left: false },
+                    { h: "Pets", left: false },
+                  ].map(({ h, left }, i) => (
+                    <th key={i} style={{ padding: "8px 10px", fontSize: 11, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".3px", textAlign: left ? "left" : "center", whiteSpace: "nowrap" }}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {(b.segments?.length ? b.segments : [null]).map((seg, i) => {
+                  const counts = seg
+                    ? {
+                        checkin: seg.checkin, checkout: seg.checkout,
+                        adults: seg.adults, seniors: seg.seniors, kidsAbove10: seg.kidsAbove10,
+                        kids6to10: seg.kids6to10, infants: seg.infantsBelow2 + seg.kids2to6, pets: seg.pets,
+                      }
+                    : {
+                        checkin: b.checkin, checkout: b.checkout,
+                        adults: b.adults, seniors: b.seniors, kidsAbove10: b.kidsAbove10,
+                        kids6to10: b.kids6to10, infants: b.infantsBelow2 + b.kids2to6, pets: b.pets,
+                      };
+                  const num = (v: number) => (
+                    <span style={{ fontWeight: v > 0 ? 700 : 500, color: v > 0 ? "var(--t1)" : "var(--t4)" }}>{v}</span>
+                  );
+                  return (
+                    <tr key={seg?.id ?? i} style={{ borderBottom: "1px solid var(--bd)" }}>
+                      <td style={{ padding: "8px 10px", fontSize: 12, whiteSpace: "nowrap" }}>
+                        <div>{fmtShort(counts.checkin)}</div>
+                        <div style={{ fontSize: 10, color: "var(--t3)", fontWeight: 500 }}>{dayName(counts.checkin)}</div>
+                      </td>
+                      <td style={{ padding: "8px 10px", fontSize: 12, whiteSpace: "nowrap" }}>
+                        <div>{fmtShort(counts.checkout)}</div>
+                        <div style={{ fontSize: 10, color: "var(--t3)", fontWeight: 500 }}>{dayName(counts.checkout)}</div>
+                      </td>
+                      <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "center" }}>{num(counts.adults)}</td>
+                      <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "center" }}>{num(counts.seniors)}</td>
+                      <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "center" }}>{num(counts.kidsAbove10)}</td>
+                      <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "center" }}>{num(counts.kids6to10)}</td>
+                      <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "center" }}>{num(counts.infants)}</td>
+                      <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "center" }}>{num(counts.pets)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
           {/* Accommodation Charges — exact Excel column order */}
           <SectionHeader>Accommodation Charges</SectionHeader>
-          {(b.segments?.length ? b.segments : [null]).map((seg, i) => {
-            const counts = seg
-              ? {
-                  adults: seg.adults, seniors: seg.seniors, kidsAbove10: seg.kidsAbove10,
-                  kids6to10: seg.kids6to10, infants: seg.infantsBelow2 + seg.kids2to6, pets: seg.pets,
-                }
-              : {
-                  adults: b.adults, seniors: b.seniors, kidsAbove10: b.kidsAbove10,
-                  kids6to10: b.kids6to10, infants: b.infantsBelow2 + b.kids2to6, pets: b.pets,
-                };
-            return (
-              <div
-                key={seg?.id ?? i}
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  gap: 18,
-                  alignItems: "center",
-                  padding: "7px 12px",
-                  background: "var(--surf2)",
-                  borderBottom: "1px solid var(--bd)",
-                  fontSize: 12,
-                }}
-              >
-                {seg && (
-                  <span style={{ fontWeight: 700, color: "var(--acc)", whiteSpace: "nowrap" }}>
-                    {fmtIN(seg.checkin)} → {fmtIN(seg.checkout)}
-                  </span>
-                )}
-                {[
-                  { label: "Adults", v: counts.adults },
-                  { label: "Sr. Citizens", v: counts.seniors },
-                  { label: "Kids 10-16 Yrs", v: counts.kidsAbove10 },
-                  { label: "Kids 6-10 Yrs", v: counts.kids6to10 },
-                  { label: "Infants (0-6 Yrs)", v: counts.infants },
-                  { label: "Pets", v: counts.pets },
-                ].map(({ label, v }) => (
-                  <span key={label} style={{ whiteSpace: "nowrap" }}>
-                    <span style={{ color: "var(--t3)" }}>{label}: </span>
-                    <span style={{ fontWeight: 700, color: "var(--t1)" }}>{v}</span>
-                  </span>
-                ))}
-              </div>
-            );
-          })}
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1000 }}>
               <thead>
                 <tr style={{ background: "var(--surf2)", borderBottom: "2px solid var(--bd)" }}>
                   {[
-                    { h: "Room Category",   left: true  },
-                    { h: "Check-in Date",   left: false },
-                    { h: "Check-out Date",  left: false },
-                    { h: "No. of Nights",   left: false },
-                    { h: "Room Rate",       left: false },
-                    { h: "Disc %",          left: false },
-                    { h: "Net Room Rate",   left: false },
-                    { h: "No. of Rooms",    left: false },
-                    { h: "Room Charges",    left: false },
-                    { h: "GST %",           left: false },
-                    { h: "GST Amt",         left: false },
-                    { h: "Total Amt",       left: false },
+                    { h: "Category",  left: true  },
+                    { h: "C-in",      left: false },
+                    { h: "C-out",     left: false },
+                    { h: "Nights",    left: false },
+                    { h: "Rate",      left: false },
+                    { h: "Disc %",    left: false },
+                    { h: "Net Rate",  left: false },
+                    { h: "Rooms",     left: false },
+                    { h: "Charges",   left: false },
+                    { h: "GST %",     left: false },
+                    { h: "GST Amt",   left: false },
+                    { h: "Total",     left: false },
                   ].map(({ h, left }) => (
                     <th key={h} style={{ padding: "8px 10px", fontSize: 11, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".3px", textAlign: left ? "left" : "right", whiteSpace: "nowrap" }}>
                       {h}
@@ -650,13 +673,13 @@ export default function BookingDetailPage() {
                         <td style={{ padding: "8px 10px", fontSize: 12, color: "var(--t1)", fontWeight: 500 }}>{r.roomName}</td>
                         <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right", whiteSpace: "nowrap" }}>
                           <div style={{ lineHeight: 1.3 }}>
-                            <div>{fmtIN(r.checkin || b.checkin)}</div>
+                            <div>{fmtShort(r.checkin || b.checkin)}</div>
                             <div style={{ fontSize: 10, color: "var(--t3)", fontWeight: 500 }}>{dayName(r.checkin || b.checkin)}</div>
                           </div>
                         </td>
                         <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right", whiteSpace: "nowrap" }}>
                           <div style={{ lineHeight: 1.3 }}>
-                            <div>{fmtIN(r.checkout || b.checkout)}</div>
+                            <div>{fmtShort(r.checkout || b.checkout)}</div>
                             <div style={{ fontSize: 10, color: "var(--t3)", fontWeight: 500 }}>{dayName(r.checkout || b.checkout)}</div>
                           </div>
                         </td>
@@ -694,18 +717,18 @@ export default function BookingDetailPage() {
                   <thead>
                     <tr style={{ background: "var(--surf2)", borderBottom: "2px solid var(--bd)" }}>
                       {[
-                        { h: "Meal / Charge Type", left: true  },
-                        { h: "Meal Rate",           left: false },
-                        { h: "No. of Nights",       left: false },
-                        { h: "No. of Pax",          left: false },
-                        { h: "Meal Chgs",           left: false },
+                        { h: "Charge Type", left: true  },
+                        { h: "Rate",        left: false },
+                        { h: "Nights",      left: false },
+                        { h: "Pax",         left: false },
+                        { h: "Charges",     left: false },
                         { h: "",                    left: false },
                         { h: "",                    left: false },
                         { h: "",                    left: false },
                         { h: "",                    left: false },
-                        { h: "GST Rate",            left: false },
-                        { h: "GST Amt",             left: false },
-                        { h: "Total Amt",           left: false },
+                        { h: "GST %",   left: false },
+                        { h: "GST Amt", left: false },
+                        { h: "Total",   left: false },
                       ].map(({ h }, i) => (
                         <th key={i} style={{ padding: "8px 10px", fontSize: 11, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".3px", textAlign: i === 0 ? "left" : "right", whiteSpace: "nowrap" }}>
                           {h}
@@ -819,7 +842,7 @@ export default function BookingDetailPage() {
           {/* Meal Preference + Special Request */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0, borderTop: "1px solid var(--bd)" }}>
             <div style={{ padding: "12px 16px", borderRight: "1px solid var(--bd)" }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 4 }}>Meal Preference</div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 4 }}>Meals</div>
               <div style={{ fontSize: 13, color: "var(--t1)" }}>{b.mealOn ? "Included" : "Not included"}</div>
             </div>
             <div style={{ padding: "12px 16px" }}>
