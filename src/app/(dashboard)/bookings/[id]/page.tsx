@@ -819,7 +819,7 @@ export default function BookingDetailPage() {
           <div style={{ borderTop: "2px solid var(--bd)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", background: "var(--amb-lt)", borderBottom: "1px solid var(--bd)" }}>
               <span style={{ fontFamily: "var(--font-outfit), Outfit, sans-serif", fontWeight: 800, fontSize: 13, color: "var(--t1)" }}>
-                Total Amount Payable (A + B)
+                Total Amount Payable
               </span>
               <span style={{ fontFamily: "var(--font-outfit), Outfit, sans-serif", fontWeight: 800, fontSize: 18, color: "var(--t1)" }}>
                 {fmt(b.grandTotal)}

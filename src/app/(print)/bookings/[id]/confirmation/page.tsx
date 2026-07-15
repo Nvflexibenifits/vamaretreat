@@ -2,7 +2,14 @@
 
 import { useParams } from "next/navigation";
 import { useApp } from "@/lib/store";
-import { fmt, fmtIN, getBookingPricingRows, nightsBetween } from "@/lib/utils";
+import { dayName, fmt, fmtIN, getBookingPricingRows, nightsBetween } from "@/lib/utils";
+
+// dd/mm/yy — compact date format matching the booking view page
+function fmtShort(d: string): string {
+  if (!d) return "—";
+  const [y, m, dd] = d.split("-");
+  return `${dd}/${m}/${y.slice(2)}`;
+}
 import type { PricingRow } from "@/types";
 
 const TH: React.CSSProperties = {
@@ -229,7 +236,9 @@ export default function ConfirmationPage() {
                 color: "#0f2318",
               }}
             >
-              BOOKING CONFIRMATION
+              {b.status === "Confirmed" || b.status === "Completed"
+                ? "BOOKING CONFIRMATION"
+                : "BOOKING PRICING"}
             </div>
             <div style={{ fontSize: 11, color: "#52524a", marginTop: 3 }}>{b.id}</div>
           </div>
@@ -256,6 +265,71 @@ export default function ConfirmationPage() {
           />
         </div>
 
+        {/* Guest Packs Count — one row per date range */}
+        <div
+          style={{
+            background: "#0f2318",
+            color: "#fff",
+            padding: "8px 12px",
+            display: "flex",
+            alignItems: "center",
+            fontFamily: "Outfit, sans-serif",
+            fontWeight: 700,
+            fontSize: 12,
+            letterSpacing: ".5px",
+            textTransform: "uppercase",
+          }}
+        >
+          <span>Guest Packs Count</span>
+        </div>
+        <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 14 }}>
+          <thead>
+            <tr>
+              <th style={TH}>C-in</th>
+              <th style={TH}>C-out</th>
+              <th style={{ ...TH, textAlign: "center" }}>A</th>
+              <th style={{ ...TH, textAlign: "center" }}>Sr. Ct</th>
+              <th style={{ ...TH, textAlign: "center" }}>K 10-16</th>
+              <th style={{ ...TH, textAlign: "center" }}>K 6-10</th>
+              <th style={{ ...TH, textAlign: "center" }}>Inf 0-6</th>
+              <th style={{ ...TH, textAlign: "center" }}>Pets</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(b.segments?.length ? b.segments : [null]).map((seg, i) => {
+              const counts = seg
+                ? {
+                    checkin: seg.checkin, checkout: seg.checkout,
+                    adults: seg.adults, seniors: seg.seniors, kidsAbove10: seg.kidsAbove10,
+                    kids6to10: seg.kids6to10, infants: seg.infantsBelow2 + seg.kids2to6, pets: seg.pets,
+                  }
+                : {
+                    checkin: b.checkin, checkout: b.checkout,
+                    adults: b.adults, seniors: b.seniors, kidsAbove10: b.kidsAbove10,
+                    kids6to10: b.kids6to10, infants: b.infantsBelow2 + b.kids2to6, pets: b.pets,
+                  };
+              return (
+                <tr key={seg?.id ?? i}>
+                  <td style={{ ...TD, whiteSpace: "nowrap" }}>
+                    <div>{fmtShort(counts.checkin)}</div>
+                    <div style={{ fontSize: 10, color: "#52524a" }}>{dayName(counts.checkin)}</div>
+                  </td>
+                  <td style={{ ...TD, whiteSpace: "nowrap" }}>
+                    <div>{fmtShort(counts.checkout)}</div>
+                    <div style={{ fontSize: 10, color: "#52524a" }}>{dayName(counts.checkout)}</div>
+                  </td>
+                  <td style={{ ...TD, textAlign: "center", fontWeight: counts.adults > 0 ? 700 : 400 }}>{counts.adults}</td>
+                  <td style={{ ...TD, textAlign: "center", fontWeight: counts.seniors > 0 ? 700 : 400 }}>{counts.seniors}</td>
+                  <td style={{ ...TD, textAlign: "center", fontWeight: counts.kidsAbove10 > 0 ? 700 : 400 }}>{counts.kidsAbove10}</td>
+                  <td style={{ ...TD, textAlign: "center", fontWeight: counts.kids6to10 > 0 ? 700 : 400 }}>{counts.kids6to10}</td>
+                  <td style={{ ...TD, textAlign: "center", fontWeight: counts.infants > 0 ? 700 : 400 }}>{counts.infants}</td>
+                  <td style={{ ...TD, textAlign: "center", fontWeight: counts.pets > 0 ? 700 : 400 }}>{counts.pets}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+
         {/* Accommodation Charges */}
         <div
           style={{
@@ -274,67 +348,21 @@ export default function ConfirmationPage() {
           <span>Accomodation Charges</span>
         </div>
 
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 16,
-            padding: "6px 12px",
-            border: "1px solid #d0c9bc",
-            borderTop: "none",
-            fontSize: 11,
-          }}
-        >
-          {(b.segments?.length ? b.segments : [null]).map((seg, i) => {
-            const counts = seg
-              ? {
-                  adults: seg.adults, seniors: seg.seniors, kidsAbove10: seg.kidsAbove10,
-                  kids6to10: seg.kids6to10, infants: seg.infantsBelow2 + seg.kids2to6, pets: seg.pets,
-                }
-              : {
-                  adults: b.adults, seniors: b.seniors, kidsAbove10: b.kidsAbove10,
-                  kids6to10: b.kids6to10, infants: b.infantsBelow2 + b.kids2to6, pets: b.pets,
-                };
-            return (
-              <div key={seg?.id ?? i} style={{ display: "flex", flexWrap: "wrap", gap: 16, width: "100%" }}>
-                {seg && (
-                  <span style={{ fontWeight: 700, whiteSpace: "nowrap" }}>
-                    {fmtIN(seg.checkin)} → {fmtIN(seg.checkout)}
-                  </span>
-                )}
-                {[
-                  { label: "Adults", v: counts.adults },
-                  { label: "Senior Citizens", v: counts.seniors },
-                  { label: "Kids 10-16 Yrs", v: counts.kidsAbove10 },
-                  { label: "Kids 6-10 Yrs", v: counts.kids6to10 },
-                  { label: "Infants (0-6 Yrs)", v: counts.infants },
-                  { label: "Pets", v: counts.pets },
-                ].map(({ label, v }) => (
-                  <span key={label} style={{ whiteSpace: "nowrap" }}>
-                    <span style={{ color: "#52524a" }}>{label}: </span>
-                    <span style={{ fontWeight: 700 }}>{v}</span>
-                  </span>
-                ))}
-              </div>
-            );
-          })}
-        </div>
-
         <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 4 }}>
           <thead>
             <tr>
-              <th style={TH}>Room Category</th>
-              <th style={{ ...TH, textAlign: "right" }}>Check-in Date</th>
-              <th style={{ ...TH, textAlign: "right" }}>Check-out Date</th>
-              <th style={{ ...TH, textAlign: "right" }}>No. of Nights</th>
-              <th style={{ ...TH, textAlign: "right" }}>Room Rate</th>
+              <th style={TH}>Category</th>
+              <th style={{ ...TH, textAlign: "right" }}>C-in</th>
+              <th style={{ ...TH, textAlign: "right" }}>C-out</th>
+              <th style={{ ...TH, textAlign: "right" }}>Nights</th>
+              <th style={{ ...TH, textAlign: "right" }}>Rate</th>
               <th style={{ ...TH, textAlign: "right" }}>Disc %</th>
-              <th style={{ ...TH, textAlign: "right" }}>Net Room Rate</th>
-              <th style={{ ...TH, textAlign: "right" }}>No. of Rooms</th>
-              <th style={{ ...TH, textAlign: "right" }}>Room Charges</th>
+              <th style={{ ...TH, textAlign: "right" }}>Net Rate</th>
+              <th style={{ ...TH, textAlign: "right" }}>Rooms</th>
+              <th style={{ ...TH, textAlign: "right" }}>Charges</th>
               <th style={{ ...TH, textAlign: "right" }}>GST %</th>
               <th style={{ ...TH, textAlign: "right" }}>GST Amt</th>
-              <th style={{ ...TH, textAlign: "right" }}>Total Amt</th>
+              <th style={{ ...TH, textAlign: "right" }}>Total</th>
             </tr>
           </thead>
           <tbody>
@@ -352,8 +380,14 @@ export default function ConfirmationPage() {
                 return (
                   <tr key={i}>
                     <td style={TD}>{r.roomName}</td>
-                    <td style={TD_NUM}>{fmtIN(r.checkin || b.checkin)}</td>
-                    <td style={TD_NUM}>{fmtIN(r.checkout || b.checkout)}</td>
+                    <td style={{ ...TD_NUM, whiteSpace: "nowrap" }}>
+                      <div>{fmtShort(r.checkin || b.checkin)}</div>
+                      <div style={{ fontSize: 10, color: "#52524a" }}>{dayName(r.checkin || b.checkin)}</div>
+                    </td>
+                    <td style={{ ...TD_NUM, whiteSpace: "nowrap" }}>
+                      <div>{fmtShort(r.checkout || b.checkout)}</div>
+                      <div style={{ fontSize: 10, color: "#52524a" }}>{dayName(r.checkout || b.checkout)}</div>
+                    </td>
                     <td style={TD_NUM}>{r.nights}</td>
                     <td style={TD_NUM}>{fmt(r.tariff)}</td>
                     <td style={TD_NUM}>{r.discountPct > 0 ? `${r.discountPct}%` : "—"}</td>
@@ -383,18 +417,18 @@ export default function ConfirmationPage() {
           <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 4 }}>
             <thead>
               <tr>
-                <th style={TH}>Meal / Charge Type</th>
-                <th style={{ ...TH, textAlign: "right" }}>Meal Rate</th>
-                <th style={{ ...TH, textAlign: "right" }}>No. of Nights</th>
-                <th style={{ ...TH, textAlign: "right" }}>No. of Pax</th>
-                <th style={{ ...TH, textAlign: "right" }}>Meal Chgs</th>
+                <th style={TH}>Charge Type</th>
+                <th style={{ ...TH, textAlign: "right" }}>Rate</th>
+                <th style={{ ...TH, textAlign: "right" }}>Nights</th>
+                <th style={{ ...TH, textAlign: "right" }}>Pax</th>
+                <th style={{ ...TH, textAlign: "right" }}>Charges</th>
                 <th style={TH}></th>
                 <th style={TH}></th>
                 <th style={TH}></th>
                 <th style={TH}></th>
-                <th style={{ ...TH, textAlign: "right" }}>GST Rate</th>
+                <th style={{ ...TH, textAlign: "right" }}>GST %</th>
                 <th style={{ ...TH, textAlign: "right" }}>GST Amt</th>
-                <th style={{ ...TH, textAlign: "right" }}>Total Amt</th>
+                <th style={{ ...TH, textAlign: "right" }}>Total</th>
               </tr>
             </thead>
             <tbody>
@@ -469,7 +503,7 @@ export default function ConfirmationPage() {
         <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 14 }}>
           <tbody>
             <tr>
-              <td style={TD_GRAND} colSpan={9}>Total Amt Payable (A + B)</td>
+              <td style={TD_GRAND} colSpan={9}>Total Amt Payable</td>
               <td style={TD_GRAND}></td>
               <td style={TD_GRAND_NUM}>{fmt(grandGst)}</td>
               <td style={TD_GRAND_NUM}>{fmt(grandTotal)}</td>
@@ -502,7 +536,7 @@ export default function ConfirmationPage() {
                 marginBottom: 4,
               }}
             >
-              Meal Preference
+              Meals
             </div>
             <div style={{ fontSize: 12, color: "#1a1a16" }}>
               {b.mealOn ? "Included" : "Not included"}
