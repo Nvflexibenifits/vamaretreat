@@ -214,7 +214,7 @@ export default function RevenuePage() {
 
   const numTd: React.CSSProperties = { textAlign: "right", whiteSpace: "nowrap", fontSize: 12 };
   const chargesCols = 5 + gstRates.length;
-  const allCols = 6 + chargesCols + 3 + 2;
+  const allCols = 5 + chargesCols + 3 + 2;
 
   return (
     <div className="view">
@@ -314,7 +314,7 @@ export default function RevenuePage() {
           <table style={{ minWidth: 1260 }}>
             <thead>
               <tr>
-                <th colSpan={6} style={groupHdStyle}>Booking Info</th>
+                <th colSpan={5} style={groupHdStyle}>Booking Info</th>
                 <th colSpan={chargesCols} style={{ ...groupHdStyle, ...sectionBorder }}>Charges</th>
                 <th colSpan={3} style={{ ...groupHdStyle, ...sectionBorder }}>Payments Received</th>
                 <th style={{ ...groupHdStyle, ...sectionBorder, textAlign: "right" }}>Bal</th>
@@ -325,7 +325,6 @@ export default function RevenuePage() {
                 <th style={{ whiteSpace: "nowrap" }}>C-in</th>
                 <th style={{ whiteSpace: "nowrap" }}>C-out</th>
                 <th>Guest</th>
-                <th style={{ whiteSpace: "nowrap" }}>Mobile</th>
                 <th style={{ whiteSpace: "nowrap" }}>Bkg ID</th>
                 <th style={{ textAlign: "right", ...sectionBorder }}>Room</th>
                 {gstRates.map((r) => (
@@ -358,8 +357,10 @@ export default function RevenuePage() {
                       <td style={{ color: "var(--t3)", fontSize: 12 }}>{i + 1}</td>
                       <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{fmtShort(r.b.checkin)}</td>
                       <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{fmtShort(r.b.checkout)}</td>
-                      <td style={{ fontWeight: 500, color: "var(--t1)", fontSize: 12, whiteSpace: "nowrap" }}>{r.b.guest}</td>
-                      <td style={{ fontSize: 12, whiteSpace: "nowrap" }}>{r.b.mobile || "—"}</td>
+                      <td style={{ whiteSpace: "nowrap" }}>
+                        <div style={{ fontWeight: 500, color: "var(--t1)", fontSize: 12 }}>{r.b.guest}</div>
+                        <div style={{ fontSize: 11, color: "var(--t3)" }}>{r.b.mobile || "—"}</div>
+                      </td>
                       <td style={{ whiteSpace: "nowrap" }}>
                         <Link
                           href={`/bookings/${r.b.id}`}
@@ -402,7 +403,7 @@ export default function RevenuePage() {
                     </tr>
                   ))}
                   <tr style={{ background: "var(--surf2)", fontWeight: 700 }}>
-                    <td colSpan={6} style={{ textAlign: "right", fontSize: 12, color: "var(--t2)" }}>Total</td>
+                    <td colSpan={5} style={{ textAlign: "right", fontSize: 12, color: "var(--t2)" }}>Total</td>
                     <td style={{ ...numTd, ...sectionBorder, fontWeight: 700 }}>{nfmt(totals.roomNet)}</td>
                     {gstRates.map((rate) => (
                       <td key={rate} style={{ ...numTd, fontWeight: 700, color: "var(--t3)" }}>
