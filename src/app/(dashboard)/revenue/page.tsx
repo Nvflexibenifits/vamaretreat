@@ -306,9 +306,13 @@ export default function RevenuePage() {
       <div className="tbl-wrap">
         <div className="tbl-hd">
           <h3>Revenue Table</h3>
-          <span style={{ fontSize: 12, color: "var(--t3)", marginLeft: "auto" }}>
+          <span style={{ fontSize: 12, color: "var(--t3)", marginLeft: 12 }}>
             {tableRows.length} booking{tableRows.length !== 1 ? "s" : ""}
           </span>
+          <div style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 14, marginLeft: "auto" }}>
+            <strong style={{ color: "var(--amb)" }}>Amount pending from guest</strong>
+            <strong style={{ color: "var(--pur)" }}>Refund due to guest</strong>
+          </div>
         </div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ minWidth: 1260 }}>
@@ -429,17 +433,6 @@ export default function RevenuePage() {
         </div>
       </div>
 
-      {/* Balance legend */}
-      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 10, fontSize: 12, color: "var(--t3)" }}>
-        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ display: "inline-block", width: 10, height: 10, background: "var(--amb-lt)", border: "1px solid var(--amb)", borderRadius: 2 }}></span>
-          Amount pending from guest
-        </span>
-        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ display: "inline-block", width: 10, height: 10, background: "var(--pur-lt)", border: "1px solid var(--pur)", borderRadius: 2 }}></span>
-          Excess received, refund due to guest
-        </span>
-      </div>
     </div>
   );
 }
