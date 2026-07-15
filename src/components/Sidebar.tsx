@@ -22,9 +22,13 @@ export function Sidebar() {
   const [bookingsOpen, setBookingsOpen] = useState<boolean>(
     pathname.startsWith("/bookings")
   );
+  const [revenueOpen, setRevenueOpen] = useState<boolean>(
+    pathname.startsWith("/revenue")
+  );
 
   useEffect(() => {
     if (pathname.startsWith("/bookings")) setBookingsOpen(true);
+    if (pathname.startsWith("/revenue")) setRevenueOpen(true);
   }, [pathname]);
 
   const onLogout = async () => {
@@ -105,12 +109,32 @@ export function Sidebar() {
 
         {!isFrontOffice && (
           <>
-            <Link
-              href="/revenue"
-              className={`nav-it${isSimpleActive(pathname, "/revenue") ? " active" : ""}`}
+            <button
+              type="button"
+              className={`nav-it${revenueOpen ? " active" : ""}`}
+              onClick={() => setRevenueOpen((v) => !v)}
+              style={{ background: "transparent", border: "none", width: "100%", textAlign: "left" }}
             >
               Revenue
-            </Link>
+              <span className={`nav-arrow${revenueOpen ? " open" : ""}`}>{revenueOpen ? "-" : "+"}</span>
+            </button>
+
+            {revenueOpen && (
+              <div className="nav-children">
+                <Link
+                  href="/revenue"
+                  className={`nav-it child${pathname === "/revenue" ? " active" : ""}`}
+                >
+                  Revenue Overview
+                </Link>
+                <Link
+                  href="/revenue/credit-notes"
+                  className={`nav-it child${isSimpleActive(pathname, "/revenue/credit-notes") ? " active" : ""}`}
+                >
+                  Credit Notes
+                </Link>
+              </div>
+            )}
 
             <span className="nav-it soon">
               Reports
