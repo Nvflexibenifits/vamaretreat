@@ -534,6 +534,14 @@ export default function BookingDetailPage() {
                 Cancel
               </button>
             )}
+            {!isFrontOffice && (b.status === "Enquiry" || b.status === "Tentative") && (
+              <button
+                className="btn btn-danger btn-sm"
+                onClick={() => openModal({ kind: "lost", bookingId: b.id })}
+              >
+                Mark Lost
+              </button>
+            )}
           </div>
         </div>
 
