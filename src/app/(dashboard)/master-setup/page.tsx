@@ -38,7 +38,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "rooms-pricing", label: "Room Pricing" },
   { id: "rooms-inventory", label: "Room Inventory" },
   { id: "venues", label: "Venue & Services" },
-  { id: "meal", label: "Meal Charges" },
+  { id: "meal", label: "Meal Setup" },
   { id: "special", label: "Special Days" },
   { id: "cancellation", label: "Cancellation Setup" },
   { id: "users", label: "Users" },
@@ -102,7 +102,7 @@ export default function MasterSetupPage() {
           {tab === "rooms-pricing" && <RoomPricingSection />}
           {tab === "rooms-inventory" && <RoomInventorySection />}
           {tab === "venues" && <VenueMasterTab />}
-          {tab === "meal" && <MealPackageTab />}
+          {tab === "meal" && <MealSetupTab />}
           {tab === "special" && <SpecialDaysTab />}
           {tab === "cancellation" && <CancellationSetupTab />}
           {tab === "users" && <UsersTab />}
@@ -432,235 +432,256 @@ function VenueMasterTab() {
   );
 }
 
-// ─────────── Meal Charges ───────────
-function MealPackageTab() {
-  const { packageRates, updatePackageRates, showNotif } = useApp();
-  const [draft, setDraft] = useState<PackageRates>(packageRates);
+// ─────────── Meal Setup (categories -> packages, persisted in settings) ───────────
+function MealSetupTab() {
+  const { mealCategories, updateMealCategories, showNotif } = useApp();
 
-  // Add-row form state for each table
-  const [addPkg, setAddPkg] = useState(false);
-  const [pkgLabel, setPkgLabel] = useState("");
-  const [pkgPrice, setPkgPrice] = useState("");
-  const [pkgPer, setPkgPer] = useState("person / night");
+  const [addCatOpen, setAddCatOpen] = useState(false);
+  const [newCatName, setNewCatName] = useState("");
+  const [renamingCat, setRenamingCat] = useState<{ id: string; value: string } | null>(null);
+  const [addPkgFor, setAddPkgFor] = useState<string | null>(null);
+  const [pkgDraft, setPkgDraft] = useState({ name: "", rate: "" });
+  const [editingPkg, setEditingPkg] = useState<{ catId: string; pkgId: string; name: string; rate: string } | null>(null);
 
-  const [addMeal, setAddMeal] = useState(false);
-  const [mealLabel, setMealLabel] = useState("");
-  const [mealPrice, setMealPrice] = useState("");
-
-  useEffect(() => setDraft(packageRates), [packageRates]);
-
-  const save = () => {
-    updatePackageRates(draft);
-    showNotif("Meal charges saved", "success");
+  const onAddCategory = () => {
+    const name = newCatName.trim();
+    if (!name) { showNotif("Enter a category name", "error"); return; }
+    if (mealCategories.some((c) => c.name.toLowerCase() === name.toLowerCase())) {
+      showNotif(`${name} already exists`, "error"); return;
+    }
+    updateMealCategories([...mealCategories, { id: uid(), name, packages: [] }]);
+    setNewCatName("");
+    setAddCatOpen(false);
+    showNotif(`${name} added`, "success");
   };
 
-  const gst18 = (base: number) => Math.round(base * 0.18);
-  const total = (base: number) => base + gst18(base);
-
-  const rateRow = (label: string, field: keyof PackageRates, perLabel: string) => {
-    const base = draft[field] as number;
-    return (
-      <tr key={field}>
-        <td style={{ fontWeight: 500 }}>{label}</td>
-        <td>
-          <input
-            type="number"
-            value={base}
-            min={0}
-            onChange={(e) => setDraft((prev) => ({ ...prev, [field]: parseInt(e.target.value) || 0 }))}
-          />
-        </td>
-        <td style={{ textAlign: "right" }}>₹{gst18(base).toLocaleString("en-IN")}</td>
-        <td style={{ textAlign: "right", fontWeight: 600 }}>₹{total(base).toLocaleString("en-IN")}</td>
-        <td style={{ fontSize: 12, color: "var(--t3)" }}>{perLabel}</td>
-        <td></td>
-      </tr>
-    );
+  const onRenameCategory = () => {
+    if (!renamingCat) return;
+    const name = renamingCat.value.trim();
+    if (!name) { showNotif("Enter a category name", "error"); return; }
+    updateMealCategories(mealCategories.map((c) => (c.id === renamingCat.id ? { ...c, name } : c)));
+    setRenamingCat(null);
+    showNotif("Category renamed", "success");
   };
 
-  const customRow = (row: MealCustomRow, tableKey: "customPackages" | "customIndividualMeals") => (
-    <tr key={row.id}>
-      <td style={{ fontWeight: 500 }}>{row.label}</td>
-      <td>
-        <input
-          type="number"
-          value={row.price}
-          min={0}
-          onChange={(e) =>
-            setDraft((prev) => ({
-              ...prev,
-              [tableKey]: (prev[tableKey] ?? []).map((r) =>
-                r.id === row.id ? { ...r, price: parseInt(e.target.value) || 0 } : r
-              ),
-            }))
-          }
-        />
-      </td>
-      <td style={{ textAlign: "right" }}>₹{gst18(row.price).toLocaleString("en-IN")}</td>
-      <td style={{ textAlign: "right", fontWeight: 600 }}>₹{total(row.price).toLocaleString("en-IN")}</td>
-      <td style={{ fontSize: 12, color: "var(--t3)" }}>{row.perLabel}</td>
-      <td style={{ textAlign: "right" }}>
-        <button
-          className="btn btn-ghost btn-xs"
-          style={{ color: "var(--red)" }}
-          onClick={() =>
-            setDraft((prev) => ({
-              ...prev,
-              [tableKey]: (prev[tableKey] ?? []).filter((r) => r.id !== row.id),
-            }))
-          }
-        >
-          Remove
-        </button>
-      </td>
-    </tr>
-  );
-
-  const onAddPackage = () => {
-    const label = pkgLabel.trim();
-    const price = parseInt(pkgPrice) || 0;
-    if (!label) { showNotif("Enter a package name", "error"); return; }
-    setDraft((prev) => ({
-      ...prev,
-      customPackages: [...(prev.customPackages ?? []), { id: uid(), label, price, perLabel: pkgPer }],
-    }));
-    setPkgLabel(""); setPkgPrice(""); setPkgPer("person / night"); setAddPkg(false);
+  const onRemoveCategory = (catId: string) => {
+    updateMealCategories(mealCategories.filter((c) => c.id !== catId));
+    showNotif("Category removed", "success");
   };
 
-  const onAddMeal = () => {
-    const label = mealLabel.trim();
-    const price = parseInt(mealPrice) || 0;
-    if (!label) { showNotif("Enter a meal name", "error"); return; }
-    setDraft((prev) => ({
-      ...prev,
-      customIndividualMeals: [...(prev.customIndividualMeals ?? []), { id: uid(), label, price, perLabel: "per adult" }],
-    }));
-    setMealLabel(""); setMealPrice(""); setAddMeal(false);
+  const onAddPackage = (catId: string) => {
+    const name = pkgDraft.name.trim();
+    const rate = parseFloat(pkgDraft.rate) || 0;
+    if (!name) { showNotif("Enter a package name", "error"); return; }
+    if (rate <= 0) { showNotif("Enter a valid rate", "error"); return; }
+    const cat = mealCategories.find((c) => c.id === catId);
+    if (cat?.packages.some((pk) => pk.name.toLowerCase() === name.toLowerCase())) {
+      showNotif(`${name} already exists under ${cat.name}`, "error"); return;
+    }
+    updateMealCategories(mealCategories.map((c) =>
+      c.id === catId ? { ...c, packages: [...c.packages, { id: uid(), name, rate }] } : c
+    ));
+    setPkgDraft({ name: "", rate: "" });
+    setAddPkgFor(null);
+    showNotif(`${name} added`, "success");
+  };
+
+  const onSavePkgEdit = () => {
+    if (!editingPkg) return;
+    const name = editingPkg.name.trim();
+    const rate = parseFloat(editingPkg.rate) || 0;
+    if (!name) { showNotif("Enter a package name", "error"); return; }
+    if (rate <= 0) { showNotif("Enter a valid rate", "error"); return; }
+    updateMealCategories(mealCategories.map((c) =>
+      c.id === editingPkg.catId
+        ? { ...c, packages: c.packages.map((pk) => (pk.id === editingPkg.pkgId ? { ...pk, name, rate } : pk)) }
+        : c
+    ));
+    setEditingPkg(null);
+    showNotif("Package updated", "success");
+  };
+
+  const onRemovePackage = (catId: string, pkgId: string) => {
+    updateMealCategories(mealCategories.map((c) =>
+      c.id === catId ? { ...c, packages: c.packages.filter((pk) => pk.id !== pkgId) } : c
+    ));
+    showNotif("Package removed", "success");
   };
 
   return (
     <div className="settings-panel">
       <div className="sp-hd">
-        <h3>Meal Charges</h3>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn btn-ghost btn-sm" onClick={() => { setDraft(SEED_PACKAGE_RATES); setAddPkg(false); setAddMeal(false); }}>
-            Reset to defaults
-          </button>
-          <button className="btn btn-primary btn-sm" onClick={save}>
-            Save Changes
+        <h3>Meal Setup</h3>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 12, color: "var(--t3)" }}>
+            {mealCategories.reduce((s, c) => s + c.packages.length, 0)} packages across {mealCategories.length} categories
+          </span>
+          <button className="btn btn-ghost btn-sm" onClick={() => { setAddCatOpen((v) => !v); setNewCatName(""); }}>
+            {addCatOpen ? "Close" : "Add Category"}
           </button>
         </div>
       </div>
       <div className="sp-body">
-        <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
-          <div style={{ fontFamily: "var(--font-outfit), Outfit, sans-serif", fontSize: 13, fontWeight: 700, color: "var(--t1)" }}>
-            Meal &amp; Activity Package — FY 2026-27
-          </div>
-          <button
-            className="btn btn-ghost btn-xs"
-            style={{ marginLeft: "auto" }}
-            onClick={() => { setAddPkg((v) => !v); setPkgLabel(""); setPkgPrice(""); setPkgPer("person / night"); }}
-          >
-            {addPkg ? "Close" : "Add Package"}
-          </button>
-        </div>
-
-        {addPkg && (
-          <div style={{ display: "grid", gridTemplateColumns: "1.5fr 110px 140px auto auto", gap: 8, alignItems: "end", padding: 10, background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r2)", marginBottom: 8 }}>
+        {addCatOpen && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 8, alignItems: "end", padding: 10, background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r2)", marginBottom: 14 }}>
             <div className="field">
-              <label>Package Name</label>
-              <input type="text" value={pkgLabel} onChange={(e) => setPkgLabel(e.target.value)} placeholder="e.g. Kids Package" autoFocus onKeyDown={(e) => { if (e.key === "Enter") onAddPackage(); }} />
+              <label>Category Name</label>
+              <input
+                type="text"
+                value={newCatName}
+                onChange={(e) => setNewCatName(e.target.value)}
+                placeholder="e.g. Festive Packages"
+                onKeyDown={(e) => { if (e.key === "Enter") onAddCategory(); if (e.key === "Escape") setAddCatOpen(false); }}
+                autoFocus
+              />
             </div>
-            <div className="field">
-              <label>Base Price (₹)</label>
-              <input type="number" value={pkgPrice} onChange={(e) => setPkgPrice(e.target.value)} min={0} placeholder="0" />
-            </div>
-            <div className="field">
-              <label>Per</label>
-              <input type="text" value={pkgPer} onChange={(e) => setPkgPer(e.target.value)} placeholder="person / night" />
-            </div>
-            <button className="btn btn-primary btn-sm" onClick={onAddPackage}>Add</button>
-            <button className="btn btn-ghost btn-sm" onClick={() => setAddPkg(false)}>Cancel</button>
+            <button className="btn btn-primary btn-sm" onClick={onAddCategory}>Add</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => setAddCatOpen(false)}>Cancel</button>
           </div>
         )}
 
-        <table className="pricing-tbl">
-          <thead>
-            <tr>
-              <th>Package</th>
-              <th>Basic Price (₹)</th>
-              <th style={{ textAlign: "right" }}>18% GST</th>
-              <th style={{ textAlign: "right" }}>Total Price</th>
-              <th>Per</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rateRow("Per Adult / Child > 10 Yrs", "mealPerAdultPerNight", "person / night")}
-            {rateRow("Per Pet Package", "petPerPetPerNight", "pet / night")}
-            {rateRow("Per Driver / Attendant", "driverPerNight", "person / night")}
-            {(draft.customPackages ?? []).map((r) => customRow(r, "customPackages"))}
-          </tbody>
-        </table>
-
-        <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 8, lineHeight: 1.7 }}>
-          1. No charge for Kids &lt; 6 yrs.&nbsp;&nbsp;
-          2. Pet charges apply even if pet meal is not taken.&nbsp;&nbsp;
-          3. Drivers/attendants not permitted for activities &amp; pool.
-        </div>
-
-        <div style={{ display: "flex", alignItems: "center", marginTop: 24, marginBottom: 8 }}>
-          <div style={{ fontFamily: "var(--font-outfit), Outfit, sans-serif", fontSize: 13, fontWeight: 700, color: "var(--t1)" }}>
-            Individual Meal Charges — OTA / Visitors (per adult)
-          </div>
-          <button
-            className="btn btn-ghost btn-xs"
-            style={{ marginLeft: "auto" }}
-            onClick={() => { setAddMeal((v) => !v); setMealLabel(""); setMealPrice(""); }}
-          >
-            {addMeal ? "Close" : "Add Package"}
-          </button>
-        </div>
-
-        {addMeal && (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 110px auto auto", gap: 8, alignItems: "end", padding: 10, background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r2)", marginBottom: 8 }}>
-            <div className="field">
-              <label>Meal Name</label>
-              <input type="text" value={mealLabel} onChange={(e) => setMealLabel(e.target.value)} placeholder="e.g. Full Day Meals" autoFocus onKeyDown={(e) => { if (e.key === "Enter") onAddMeal(); }} />
+        {mealCategories.map((cat) => (
+          <div key={cat.id} style={{ marginBottom: 22 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+              {renamingCat?.id === cat.id ? (
+                <>
+                  <input
+                    type="text"
+                    value={renamingCat.value}
+                    onChange={(e) => setRenamingCat({ id: cat.id, value: e.target.value })}
+                    onKeyDown={(e) => { if (e.key === "Enter") onRenameCategory(); if (e.key === "Escape") setRenamingCat(null); }}
+                    autoFocus
+                    style={{ fontWeight: 700, fontSize: 13, width: 220 }}
+                  />
+                  <button className="btn btn-primary btn-xs" onClick={onRenameCategory}>Save</button>
+                  <button className="btn btn-ghost btn-xs" onClick={() => setRenamingCat(null)}>Cancel</button>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontFamily: "var(--font-outfit), Outfit, sans-serif", fontSize: 13, fontWeight: 700, color: "var(--t1)", textTransform: "uppercase", letterSpacing: ".4px" }}>
+                    {cat.name}
+                  </div>
+                  <span className="badge" style={{ background: "var(--surf3)", color: "var(--t2)" }}>
+                    {cat.packages.length}
+                  </span>
+                  <button className="btn btn-ghost btn-xs" onClick={() => setRenamingCat({ id: cat.id, value: cat.name })}>
+                    Rename
+                  </button>
+                  {cat.packages.length === 0 && (
+                    <button
+                      className="btn btn-ghost btn-xs"
+                      style={{ color: "var(--red)" }}
+                      onClick={() => onRemoveCategory(cat.id)}
+                    >
+                      Remove Category
+                    </button>
+                  )}
+                  <button
+                    className="btn btn-ghost btn-xs"
+                    style={{ marginLeft: "auto" }}
+                    onClick={() => {
+                      setAddPkgFor(addPkgFor === cat.id ? null : cat.id);
+                      setPkgDraft({ name: "", rate: "" });
+                    }}
+                  >
+                    {addPkgFor === cat.id ? "Close" : "Add"}
+                  </button>
+                </>
+              )}
             </div>
-            <div className="field">
-              <label>Base Price (₹)</label>
-              <input type="number" value={mealPrice} onChange={(e) => setMealPrice(e.target.value)} min={0} placeholder="0" />
-            </div>
-            <button className="btn btn-primary btn-sm" onClick={onAddMeal}>Add</button>
-            <button className="btn btn-ghost btn-sm" onClick={() => setAddMeal(false)}>Cancel</button>
-          </div>
-        )}
 
-        <table className="pricing-tbl">
-          <thead>
-            <tr>
-              <th>Meal</th>
-              <th>Basic Price (₹)</th>
-              <th style={{ textAlign: "right" }}>18% GST</th>
-              <th style={{ textAlign: "right" }}>Total Price</th>
-              <th></th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rateRow("Breakfast", "individualBreakfast", "per adult")}
-            {rateRow("Lunch & High Tea", "individualLunchHighTea", "per adult")}
-            {rateRow("Only Dinner", "individualOnlyDinner", "per adult")}
-            {rateRow("BBQ + Evening Snacks & Dinner", "individualBbqEveningDinner", "per adult")}
-            {(draft.customIndividualMeals ?? []).map((r) => customRow(r, "customIndividualMeals"))}
-            <tr>
-              <td style={{ fontStyle: "italic", color: "var(--t3)" }} colSpan={6}>
-                Morning Tea — No charge
-              </td>
-            </tr>
-          </tbody>
-        </table>
+            {addPkgFor === cat.id && (
+              <div style={{ display: "grid", gridTemplateColumns: "1.5fr 130px auto auto", gap: 8, alignItems: "end", padding: 10, background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r2)", marginBottom: 8 }}>
+                <div className="field">
+                  <label>Package Name</label>
+                  <input
+                    type="text"
+                    value={pkgDraft.name}
+                    onChange={(e) => setPkgDraft((d) => ({ ...d, name: e.target.value }))}
+                    placeholder="e.g. Kids Package"
+                    onKeyDown={(e) => { if (e.key === "Enter") onAddPackage(cat.id); if (e.key === "Escape") setAddPkgFor(null); }}
+                    autoFocus
+                  />
+                </div>
+                <div className="field">
+                  <label>Rate (₹)</label>
+                  <input type="number" value={pkgDraft.rate} min={0} onChange={(e) => setPkgDraft((d) => ({ ...d, rate: e.target.value }))} placeholder="0" />
+                </div>
+                <button className="btn btn-primary btn-sm" onClick={() => onAddPackage(cat.id)}>Add</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => setAddPkgFor(null)}>Cancel</button>
+              </div>
+            )}
+
+            {cat.packages.length === 0 ? (
+              <div style={{ padding: "14px 12px", border: "1px dashed var(--bd)", borderRadius: "var(--r2)", fontSize: 12, color: "var(--t3)" }}>
+                No packages added yet.
+              </div>
+            ) : (
+              <table className="pricing-tbl">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th style={{ width: 160, textAlign: "right" }}>Rate (₹)</th>
+                    <th style={{ width: 160, textAlign: "right" }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cat.packages.map((pk) => (
+                    <tr key={pk.id}>
+                      {editingPkg?.catId === cat.id && editingPkg?.pkgId === pk.id ? (
+                        <>
+                          <td>
+                            <input
+                              type="text"
+                              value={editingPkg.name}
+                              onChange={(e) => setEditingPkg({ ...editingPkg, name: e.target.value })}
+                              onKeyDown={(e) => { if (e.key === "Enter") onSavePkgEdit(); if (e.key === "Escape") setEditingPkg(null); }}
+                              autoFocus
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              value={editingPkg.rate}
+                              min={0}
+                              style={{ textAlign: "right" }}
+                              onChange={(e) => setEditingPkg({ ...editingPkg, rate: e.target.value })}
+                            />
+                          </td>
+                          <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                            <button className="btn btn-primary btn-xs" onClick={onSavePkgEdit} style={{ marginRight: 6 }}>Save</button>
+                            <button className="btn btn-ghost btn-xs" onClick={() => setEditingPkg(null)}>Cancel</button>
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td style={{ fontWeight: 500 }}>{pk.name}</td>
+                          <td style={{ textAlign: "right" }}>₹{pk.rate.toLocaleString("en-IN")}</td>
+                          <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                            <button
+                              className="btn btn-ghost btn-xs"
+                              onClick={() => setEditingPkg({ catId: cat.id, pkgId: pk.id, name: pk.name, rate: String(pk.rate) })}
+                              style={{ marginRight: 6 }}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              className="btn btn-ghost btn-xs"
+                              style={{ color: "var(--red)" }}
+                              onClick={() => onRemovePackage(cat.id, pk.id)}
+                            >
+                              Remove
+                            </button>
+                          </td>
+                        </>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );

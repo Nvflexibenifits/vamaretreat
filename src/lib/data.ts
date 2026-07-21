@@ -3,9 +3,11 @@ import type {
   BookingSegment,
   BulkRoomBlock,
   CancellationPolicy,
+  CountryCode,
   CreditNoteSettings,
   DiscountCaps,
   GstSettings,
+  MealCategory,
   PackageRates,
   PricingRow,
   RoomInventoryItem,
@@ -517,6 +519,74 @@ export const SEED_PACKAGE_RATES: PackageRates = {
   individualOnlyDinner: 800,
   individualBbqEveningDinner: 1300,
 };
+
+// Default meal master (categories -> packages); editable in Master Setup and
+// persisted in app settings, same pattern as venue categories.
+export const SEED_MEAL_CATEGORIES: MealCategory[] = [
+  {
+    id: "mc-packages",
+    name: "Meal & Activity Packages",
+    packages: [
+      { id: "mp-adult", name: "Per Adult / Child > 10 Yrs", rate: 2100 },
+      { id: "mp-child", name: "Per Child 6-10 Yrs", rate: 1500 },
+      { id: "mp-pet", name: "Pet Package", rate: 1200 },
+      { id: "mp-driver", name: "Driver / Attendant", rate: 1500 },
+    ],
+  },
+  {
+    id: "mc-individual",
+    name: "Individual Meals",
+    packages: [
+      { id: "mi-breakfast", name: "Breakfast", rate: 300 },
+      { id: "mi-lunch", name: "Lunch + High Tea", rate: 700 },
+      { id: "mi-dinner", name: "Only Dinner", rate: 800 },
+      { id: "mi-bbq", name: "BBQ Evening Dinner", rate: 1300 },
+    ],
+  },
+];
+
+// Dial codes with expected national number lengths (digits after the code).
+export const COUNTRY_CODES: CountryCode[] = [
+  { name: "India", dial: "+91", minLen: 10, maxLen: 10 },
+  { name: "United States / Canada", dial: "+1", minLen: 10, maxLen: 10 },
+  { name: "United Kingdom", dial: "+44", minLen: 10, maxLen: 10 },
+  { name: "United Arab Emirates", dial: "+971", minLen: 9, maxLen: 9 },
+  { name: "Saudi Arabia", dial: "+966", minLen: 9, maxLen: 9 },
+  { name: "Qatar", dial: "+974", minLen: 8, maxLen: 8 },
+  { name: "Oman", dial: "+968", minLen: 8, maxLen: 8 },
+  { name: "Kuwait", dial: "+965", minLen: 8, maxLen: 8 },
+  { name: "Bahrain", dial: "+973", minLen: 8, maxLen: 8 },
+  { name: "Singapore", dial: "+65", minLen: 8, maxLen: 8 },
+  { name: "Malaysia", dial: "+60", minLen: 9, maxLen: 10 },
+  { name: "Thailand", dial: "+66", minLen: 9, maxLen: 9 },
+  { name: "Indonesia", dial: "+62", minLen: 9, maxLen: 12 },
+  { name: "Sri Lanka", dial: "+94", minLen: 9, maxLen: 9 },
+  { name: "Nepal", dial: "+977", minLen: 10, maxLen: 10 },
+  { name: "Bangladesh", dial: "+880", minLen: 10, maxLen: 10 },
+  { name: "Pakistan", dial: "+92", minLen: 10, maxLen: 10 },
+  { name: "Maldives", dial: "+960", minLen: 7, maxLen: 7 },
+  { name: "Australia", dial: "+61", minLen: 9, maxLen: 9 },
+  { name: "New Zealand", dial: "+64", minLen: 8, maxLen: 10 },
+  { name: "Germany", dial: "+49", minLen: 10, maxLen: 11 },
+  { name: "France", dial: "+33", minLen: 9, maxLen: 9 },
+  { name: "Italy", dial: "+39", minLen: 9, maxLen: 10 },
+  { name: "Spain", dial: "+34", minLen: 9, maxLen: 9 },
+  { name: "Netherlands", dial: "+31", minLen: 9, maxLen: 9 },
+  { name: "Switzerland", dial: "+41", minLen: 9, maxLen: 9 },
+  { name: "Russia", dial: "+7", minLen: 10, maxLen: 10 },
+  { name: "China", dial: "+86", minLen: 11, maxLen: 11 },
+  { name: "Japan", dial: "+81", minLen: 10, maxLen: 10 },
+  { name: "South Korea", dial: "+82", minLen: 9, maxLen: 10 },
+  { name: "Hong Kong", dial: "+852", minLen: 8, maxLen: 8 },
+  { name: "South Africa", dial: "+27", minLen: 9, maxLen: 9 },
+  { name: "Kenya", dial: "+254", minLen: 9, maxLen: 9 },
+  { name: "Nigeria", dial: "+234", minLen: 10, maxLen: 10 },
+  { name: "Egypt", dial: "+20", minLen: 10, maxLen: 10 },
+  { name: "Israel", dial: "+972", minLen: 9, maxLen: 9 },
+  { name: "Brazil", dial: "+55", minLen: 10, maxLen: 11 },
+  { name: "Mexico", dial: "+52", minLen: 10, maxLen: 10 },
+  { name: "Mauritius", dial: "+230", minLen: 7, maxLen: 8 },
+];
 
 export const SEED_GST_SETTINGS: GstSettings = {
   threshold: 7500,

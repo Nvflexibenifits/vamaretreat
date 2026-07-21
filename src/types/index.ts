@@ -127,6 +127,9 @@ export type BookingSegment = {
   mealRate?: number;
   petRate?: number;
   driverMealRate?: number;
+  // Meal line items picked from the meal master (new model); segments saved
+  // before this exist only with the mealOn/mealRate fields above
+  mealItems?: SegmentMealItem[];
   mealTotal: number;
   mealGst: number;
   mealWithGst: number;
@@ -283,6 +286,37 @@ export type MealCustomRow = {
   label: string;
   price: number;
   perLabel: string;
+};
+
+export type MealPackage = {
+  id: string;
+  name: string;
+  rate: number;
+};
+
+export type MealCategory = {
+  id: string;
+  name: string;
+  packages: MealPackage[];
+};
+
+// A meal line item on a booking segment, picked from the meal master
+export type SegmentMealItem = {
+  id: string;
+  categoryId: string;
+  categoryName: string;
+  packageId: string;
+  packageName: string;
+  rate: number;
+  pax: number;
+  total: number;
+};
+
+export type CountryCode = {
+  name: string;
+  dial: string;
+  minLen: number;
+  maxLen: number;
 };
 
 export type PackageRates = {

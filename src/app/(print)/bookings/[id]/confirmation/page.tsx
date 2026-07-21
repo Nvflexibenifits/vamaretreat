@@ -78,7 +78,6 @@ export default function ConfirmationPage() {
 
   const pricingRows = getBookingPricingRows(b);
   const totalRoomBaseCharges = pricingRows.reduce((s, r) => s + r.roomCharges, 0);
-  const totalDiscount = pricingRows.reduce((s, r) => s + r.discountAmt, 0);
   const totalNet = pricingRows.reduce((s, r) => s + r.netCharges, 0);
   const totalRoomGst = pricingRows.reduce((s, r) => s + r.gstAmt, 0);
   const totalRoomAmt = pricingRows.reduce((s, r) => s + r.totalAmt, 0);
@@ -89,11 +88,6 @@ export default function ConfirmationPage() {
     });
     return Array.from(m.values()).reduce((s, n) => s + n, 0);
   })();
-  const overallDiscPct =
-    totalRoomBaseCharges > 0
-      ? Math.round((totalDiscount / totalRoomBaseCharges) * 100)
-      : 0;
-
   const mealCharges = b.mealOn ? b.mealTotal : 0;
   const mealGst = b.mealOn ? b.mealGst : 0;
   const totalMealAmt = mealCharges + mealGst;
@@ -108,7 +102,6 @@ export default function ConfirmationPage() {
   const totalMealPet = totalMealAmt + totalPetAmt + totalDriverMealAmt;
 
   const grandTotal = totalRoomAmt + totalMealPet;
-  const grandGst = totalRoomGst + totalMealPetGst;
   const grandRaw = totalRoomBaseCharges + totalMealPetCharges;
 
   const showMealTable = b.mealOn || (b.pets || 0) > 0 || (b.driverMealOn ?? false);
@@ -120,6 +113,14 @@ export default function ConfirmationPage() {
     const dates = `${fmtIN(seg.checkin)} → ${fmtIN(seg.checkout)}`;
     const rows: { key: string; label: string; dates: string; rate: number; nights: number; pax: number; chg: number }[] = [];
     if (segNights <= 0) return rows;
+    if (Array.isArray(seg.mealItems) && seg.mealItems.length > 0) {
+      seg.mealItems.forEach((mi) =>
+        rows.push({ key: `${seg.id}-${mi.id}`, label: mi.packageName, dates, rate: mi.rate, nights: segNights, pax: mi.pax, chg: mi.total })
+      );
+      if ((seg.pets ?? 0) > 0 && (seg.petRate ?? 0) > 0)
+        rows.push({ key: `${seg.id}-pet`, label: "Pet Package", dates, rate: seg.petRate ?? 0, nights: segNights, pax: seg.pets, chg: (seg.petRate ?? 0) * segNights * seg.pets });
+      return rows;
+    }
     if (seg.mealOn && (seg.mealRate ?? 0) > 0 && seg.adults > 0)
       rows.push({ key: `${seg.id}-meal`, label: "Meal & Activity Package", dates, rate: seg.mealRate ?? 0, nights: segNights, pax: seg.adults, chg: (seg.mealRate ?? 0) * segNights * seg.adults });
     if ((seg.pets ?? 0) > 0 && (seg.petRate ?? 0) > 0)
@@ -257,15 +258,10 @@ export default function ConfirmationPage() {
           }}
         >
           <GuestRow label="Guest Name" value={b.guest} />
-          <GuestRow label="Mobile No." value={b.mobile} />
-          <GuestRow
-            label="Room Discount"
-            value={`${b.nights} Nights | ${overallDiscPct}%`}
-            last
-          />
+          <GuestRow label="Mobile No." value={b.mobile} last />
         </div>
 
-        {/* Guest Packs Count — one row per date range */}
+        {/* PAX Count — one row per date range */}
         <div
           style={{
             background: "#0f2318",
@@ -280,14 +276,14 @@ export default function ConfirmationPage() {
             textTransform: "uppercase",
           }}
         >
-          <span>Guest Packs Count</span>
+          <span>PAX Count</span>
         </div>
         <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 14 }}>
           <thead>
             <tr>
               <th style={TH}>C-in</th>
               <th style={TH}>C-out</th>
-              <th style={{ ...TH, textAlign: "center" }}>A</th>
+              <th style={{ ...TH, textAlign: "center" }}>AD</th>
               <th style={{ ...TH, textAlign: "center" }}>Sr. Ct</th>
               <th style={{ ...TH, textAlign: "center" }}>K 10-16</th>
               <th style={{ ...TH, textAlign: "center" }}>K 6-10</th>
@@ -503,9 +499,8 @@ export default function ConfirmationPage() {
         <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 14 }}>
           <tbody>
             <tr>
-              <td style={TD_GRAND} colSpan={9}>Total Amt Payable</td>
+              <td style={TD_GRAND} colSpan={10}>Total Amt Payable</td>
               <td style={TD_GRAND}></td>
-              <td style={TD_GRAND_NUM}>{fmt(grandGst)}</td>
               <td style={TD_GRAND_NUM}>{fmt(grandTotal)}</td>
             </tr>
             <tr>

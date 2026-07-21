@@ -125,7 +125,7 @@ export function Sidebar() {
                   href="/revenue"
                   className={`nav-it child${pathname === "/revenue" ? " active" : ""}`}
                 >
-                  Revenue Overview
+                  Revenue Register
                 </Link>
                 <Link
                   href="/revenue/credit-notes"

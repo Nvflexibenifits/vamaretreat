@@ -13,22 +13,30 @@ function statusStyle(status: CreditNote["status"]): React.CSSProperties {
 }
 
 export default function CreditNotesPage() {
-  const { creditNotes, currentRole } = useApp();
+  const { creditNotes, bookings, currentRole } = useApp();
 
-  const notes = useMemo(
-    () => [...creditNotes].sort((a, b) => b.cancellationDate.localeCompare(a.cancellationDate)),
-    [creditNotes]
-  );
+  const notes = useMemo(() => {
+    return [...creditNotes]
+      .sort((a, b) => b.cancellationDate.localeCompare(a.cancellationDate))
+      .map((n) => {
+        // Advance actually received on the cancelled source booking
+        const b = bookings.find((x) => x.id === n.originalBookingId);
+        let advance = (b?.payments ?? []).reduce((s, p) => s + p.amount, 0);
+        if (advance === 0 && (b?.advance ?? 0) > 0) advance = b!.advance;
+        return { n, advance };
+      });
+  }, [creditNotes, bookings]);
 
   const totals = useMemo(
     () =>
       notes.reduce(
-        (t, n) => ({
-          issued: t.issued + n.totalAmount,
-          redeemed: t.redeemed + n.usedAmount,
-          outstanding: t.outstanding + n.remainingAmount,
+        (t, r) => ({
+          advance: t.advance + r.advance,
+          issued: t.issued + r.n.totalAmount,
+          redeemed: t.redeemed + r.n.usedAmount,
+          outstanding: t.outstanding + r.n.remainingAmount,
         }),
-        { issued: 0, redeemed: 0, outstanding: 0 }
+        { advance: 0, issued: 0, redeemed: 0, outstanding: 0 }
       ),
     [notes]
   );
@@ -51,24 +59,8 @@ export default function CreditNotesPage() {
         </div>
       </div>
 
-      {/* Summary cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 18 }}>
-        <div style={{ background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r4)", padding: "14px 18px" }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>
-            Total Issued
-          </div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: "var(--sb)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>
-            {fmt(totals.issued)}
-          </div>
-        </div>
-        <div style={{ background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r4)", padding: "14px 18px" }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>
-            Redeemed
-          </div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: "var(--grn)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>
-            {fmt(totals.redeemed)}
-          </div>
-        </div>
+      {/* Summary */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 18 }}>
         <div style={{ background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r4)", padding: "14px 18px" }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>
             Outstanding
@@ -95,9 +87,10 @@ export default function CreditNotesPage() {
                 <th style={{ whiteSpace: "nowrap" }}>Issued On</th>
                 <th>Guest</th>
                 <th style={{ whiteSpace: "nowrap" }}>Booking ID</th>
-                <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>Amount</th>
+                <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>Advance Amt</th>
+                <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>Credit Note Amt</th>
                 <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>Redeemed</th>
-                <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>Remaining</th>
+                <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>Balance</th>
                 <th style={{ whiteSpace: "nowrap" }}>Status</th>
                 <th style={{ textAlign: "center", width: 70 }}>Action</th>
               </tr>
@@ -105,14 +98,15 @@ export default function CreditNotesPage() {
             <tbody>
               {notes.length === 0 ? (
                 <tr>
-                  <td colSpan={9}>
+                  <td colSpan={10}>
                     <div className="empty-state" style={{ padding: 32 }}>
                       <p>No credit notes issued yet. They are created when a booking is cancelled with a credit note resolution.</p>
                     </div>
                   </td>
                 </tr>
               ) : (
-                notes.map((n) => (
+                <>
+                {notes.map(({ n, advance }) => (
                   <tr key={n.code}>
                     <td>
                       <span style={{ fontSize: 12, fontFamily: "var(--font-outfit), Outfit, sans-serif", fontWeight: 700, color: "var(--t1)" }}>
@@ -132,6 +126,7 @@ export default function CreditNotesPage() {
                         {n.originalBookingId}
                       </Link>
                     </td>
+                    <td style={{ textAlign: "right" }}>{advance > 0 ? fmt(advance) : "—"}</td>
                     <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(n.totalAmount)}</td>
                     <td style={{ textAlign: "right" }}>
                       {n.usedAmount > 0 ? fmt(n.usedAmount) : "—"}
@@ -161,7 +156,19 @@ export default function CreditNotesPage() {
                       </Link>
                     </td>
                   </tr>
-                ))
+                ))}
+                <tr style={{ background: "var(--surf2)", fontWeight: 700 }}>
+                  <td colSpan={4} style={{ textAlign: "right", fontSize: 12, color: "var(--t2)" }}>Total</td>
+                  <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(totals.advance)}</td>
+                  <td style={{ textAlign: "right", fontWeight: 800 }}>{fmt(totals.issued)}</td>
+                  <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(totals.redeemed)}</td>
+                  <td style={{ textAlign: "right", fontWeight: 800, color: totals.outstanding > 0 ? "var(--amb)" : "var(--t3)" }}>
+                    {fmt(totals.outstanding)}
+                  </td>
+                  <td></td>
+                  <td></td>
+                </tr>
+                </>
               )}
             </tbody>
           </table>

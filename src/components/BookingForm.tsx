@@ -8,6 +8,7 @@ import {
   calcPricingRow,
   fiscalYearCode,
   fmt,
+  fmtIN,
   maxDiscountForRowAndRole,
   nightsBetween,
   nowTime,
@@ -15,7 +16,8 @@ import {
   todayStr,
   tryAssignRooms,
 } from "@/lib/utils";
-import type { Booking, BookingSegment, BookingStatus, PackageRates, PricingRow, PricingRowType, SegmentRoom } from "@/types";
+import type { Booking, BookingSegment, BookingStatus, PackageRates, PricingRow, PricingRowType, SegmentMealItem, SegmentRoom } from "@/types";
+import { COUNTRY_CODES } from "@/lib/data";
 
 type FormRow = {
   uid: string;
@@ -25,6 +27,15 @@ type FormRow = {
   nights: string;
   numRooms: string;
   discountPct: string;
+};
+
+type MealFormRow = {
+  uid: string;
+  categoryId: string;
+  packageId: string;
+  name: string;
+  rate: string;
+  pax: string;
 };
 
 type FormSeg = {
@@ -38,12 +49,9 @@ type FormSeg = {
   kids6to10: string;
   infants: string;
   pets: string;
-  mealOn: boolean;
-  mealRate: string;
   petRate: string;
-  driverMealRate: string;
   drivers: string;
-  driverMealOn: boolean;
+  mealRows: MealFormRow[];
 };
 
 type FieldErrors = {
@@ -75,6 +83,28 @@ function getInitialDates() {
   };
 }
 
+function mealRowsFromSegment(seg: BookingSegment, b: Booking): MealFormRow[] {
+  if (Array.isArray(seg.mealItems) && seg.mealItems.length > 0) {
+    return seg.mealItems.map((mi) => ({
+      uid: newUid(),
+      categoryId: mi.categoryId,
+      packageId: mi.packageId,
+      name: mi.packageName,
+      rate: String(mi.rate),
+      pax: String(mi.pax),
+    }));
+  }
+  // Segments saved before the meal-master model: synthesize editable rows
+  const rows: MealFormRow[] = [];
+  if (seg.mealOn ?? b.mealOn) {
+    rows.push({ uid: newUid(), categoryId: "", packageId: "", name: "Meal & Activity Package", rate: String(seg.mealRate ?? 2100), pax: String(seg.adults ?? b.adults ?? 2) });
+  }
+  if ((seg.driverMealOn ?? b.driverMealOn) && (seg.drivers ?? b.driverCount ?? 0) > 0) {
+    rows.push({ uid: newUid(), categoryId: "", packageId: "", name: "Driver / Attendant Meal", rate: String(seg.driverMealRate ?? 1500), pax: String(seg.drivers ?? b.driverCount ?? 0) });
+  }
+  return rows;
+}
+
 function segsFromBooking(b: Booking, rates: PackageRates): FormSeg[] {
   return b.segments.map((seg) => ({
     id: seg.id,
@@ -98,12 +128,9 @@ function segsFromBooking(b: Booking, rates: PackageRates): FormSeg[] {
     // Legacy 2–6 bucket folds into the Infants (0–6) bucket
     infants: String((seg.infantsBelow2 ?? b.infantsBelow2 ?? 0) + (seg.kids2to6 ?? b.kids2to6 ?? 0)),
     pets: String(seg.pets ?? b.pets ?? 0),
-    mealOn: seg.mealOn ?? b.mealOn ?? false,
-    mealRate: String(seg.mealRate ?? rates.mealPerAdultPerNight),
     petRate: String(seg.petRate ?? rates.petPerPetPerNight),
-    driverMealRate: String(seg.driverMealRate ?? rates.mealPerAdultPerNight),
     drivers: String(seg.drivers ?? b.driverCount ?? 0),
-    driverMealOn: seg.driverMealOn ?? b.driverMealOn ?? false,
+    mealRows: mealRowsFromSegment(seg, b),
   }));
 }
 
@@ -134,6 +161,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     showNotif,
     creditNotes,
     redeemCreditNote,
+    mealCategories,
     rooms,
     roomInventory,
     discountCaps,
@@ -146,7 +174,16 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
 
   // ─── Form state ───
   const [name, setName] = useState(initial?.guest ?? "");
-  const [mobile, setMobile] = useState(initial?.mobile ?? "");
+  const parsedMobile = (() => {
+    const raw = initial?.mobile ?? "";
+    const m = raw.match(/^(\+\d{1,4})\s*(.*)$/);
+    if (m) return { dial: m[1], num: m[2].replace(/\D/g, "") };
+    return { dial: "+91", num: raw };
+  })();
+  const [mobile, setMobile] = useState(parsedMobile.num);
+  const [dial, setDial] = useState(parsedMobile.dial);
+  const [codeOpen, setCodeOpen] = useState(false);
+  const [codeQuery, setCodeQuery] = useState("");
   const [email, setEmail] = useState(initial?.email ?? "");
   const [source, setSource] = useState<"Direct" | "OTA">(
     initial?.source === "OTA" ? "OTA" : "Direct"
@@ -155,10 +192,9 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
 
   const defaultSegGuests = {
     adults: "2", seniors: "0", kidsAbove10: "0", kids6to10: "0",
-    infants: "0", pets: "0", mealOn: false, drivers: "0", driverMealOn: false,
-    mealRate: String(packageRates.mealPerAdultPerNight),
+    infants: "0", pets: "0", drivers: "0",
     petRate: String(packageRates.petPerPetPerNight),
-    driverMealRate: String(packageRates.mealPerAdultPerNight),
+    mealRows: [] as MealFormRow[],
   };
 
   const [formSegs, setFormSegs] = useState<FormSeg[]>(() => {
@@ -308,6 +344,33 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     setFormSegs((prev) => prev.map((s) => s.id === segId ? { ...s, [field]: value } : s));
   };
 
+  const addMealRow = (segId: string) =>
+    setFormSegs((prev) =>
+      prev.map((s) =>
+        s.id === segId
+          ? { ...s, mealRows: [...s.mealRows, { uid: newUid(), categoryId: mealCategories[0]?.id ?? "", packageId: "", name: "", rate: "0", pax: s.adults }] }
+          : s
+      )
+    );
+
+  const setMealRow = (segId: string, uid: string, patch: Partial<MealFormRow>) =>
+    setFormSegs((prev) =>
+      prev.map((s) =>
+        s.id === segId ? { ...s, mealRows: s.mealRows.map((r) => (r.uid === uid ? { ...r, ...patch } : r)) } : s
+      )
+    );
+
+  const removeMealRow = (segId: string, uid: string) =>
+    setFormSegs((prev) =>
+      prev.map((s) => (s.id === segId ? { ...s, mealRows: s.mealRows.filter((r) => r.uid !== uid) } : s))
+    );
+
+  const filteredCodes = COUNTRY_CODES.filter((c) => {
+    const q = codeQuery.trim().toLowerCase().replace(/^\+/, "");
+    if (!q) return true;
+    return c.dial.replace("+", "").startsWith(q) || c.name.toLowerCase().includes(q);
+  });
+
   // ─── Calculations ───
   const computedRows = useMemo<PricingRow[]>(
     () =>
@@ -380,12 +443,10 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
           kids2to6: 0,
           infantsBelow2: parseInt(seg.infants) || 0,
           pets: parseInt(seg.pets) || 0,
-          mealOn: seg.mealOn,
-          mealRate: parseFloat(seg.mealRate) || 0,
+          mealOn: seg.mealRows.length > 0,
           petRate: parseFloat(seg.petRate) || 0,
-          driverMealRate: parseFloat(seg.driverMealRate) || 0,
           drivers: parseInt(seg.drivers) || 0,
-          driverMealOn: seg.driverMealOn,
+          driverMealOn: false,
           mealTotal: 0,
           mealGst: 0,
           mealWithGst: 0,
@@ -402,16 +463,40 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     const adultsN = parseInt(seg.adults) || 0;
     const petsN = parseInt(seg.pets) || 0;
     const driversN = parseInt(seg.drivers) || 0;
-    const mealRate = parseFloat(seg.mealRate) || 0;
     const petRate = parseFloat(seg.petRate) || 0;
-    const driverMealRate = parseFloat(seg.driverMealRate) || 0;
-    const meal = seg.mealOn ? mealRate * nights * adultsN : 0;
+    const items = seg.mealRows.map((r) => {
+      const rate = parseFloat(r.rate) || 0;
+      const pax = parseInt(r.pax) || 0;
+      return { row: r, rate, pax, total: rate * nights * pax };
+    });
+    const meal = items.reduce((sum, it) => sum + it.total, 0);
     const pet = petsN > 0 ? petRate * nights * petsN : 0;
-    const drvMeal = seg.driverMealOn && driversN > 0 ? driverMealRate * nights * driversN : 0;
-    const base = meal + pet + drvMeal;
+    const drvMeal = 0;
+    const base = meal + pet;
     const gst = base * 0.18;
-    return { meal, pet, drvMeal, base, gst, total: base + gst, adultsN, petsN, driversN, nights };
+    return { items, meal, pet, drvMeal, base, gst, total: base + gst, adultsN, petsN, driversN, nights };
   });
+
+  // Resolve meal rows into persisted segment meal items (names from master)
+  const buildMealItems = (mc?: (typeof segMealCalcs)[number]): SegmentMealItem[] => {
+    if (!mc) return [];
+    return mc.items
+      .filter((it) => it.rate > 0 && it.pax > 0)
+      .map((it) => {
+        const cat = mealCategories.find((c) => c.id === it.row.categoryId);
+        const pkg = cat?.packages.find((pk) => pk.id === it.row.packageId);
+        return {
+          id: it.row.uid,
+          categoryId: it.row.categoryId,
+          categoryName: cat?.name ?? "",
+          packageId: it.row.packageId,
+          packageName: pkg?.name ?? (it.row.name || "Meal Package"),
+          rate: it.rate,
+          pax: it.pax,
+          total: it.total,
+        };
+      });
+  };
   const totalMealPet = segMealCalcs.reduce((s, c) => s + c.total, 0);
 
   const createAdvance = newPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
@@ -435,7 +520,12 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   const validate = (): boolean => {
     const errs: FieldErrors = {};
     if (!name.trim()) errs.name = true;
-    if (!/^\d{10}$/.test(mobile.trim())) errs.mobile = true;
+    const country = COUNTRY_CODES.find((c) => c.dial === dial);
+    const digits = mobile.trim();
+    const lenOk = country
+      ? digits.length >= country.minLen && digits.length <= country.maxLen
+      : digits.length >= 6 && digits.length <= 14;
+    if (!/^\d+$/.test(digits) || !lenOk) errs.mobile = true;
     if (!checkin) errs.checkin = true;
     if (!checkout || checkout <= checkin) errs.checkout = true;
     const hasRoom = formSegs.some((s) => s.rows.some((r) => r.roomId));
@@ -515,9 +605,10 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
           kids2to6: 0,
           infantsBelow2: parseInt(fs?.infants ?? "0") || 0,
           pets: mc?.petsN ?? 0,
-          mealOn: fs?.mealOn ?? false,
+          mealOn: (mc?.meal ?? 0) > 0 || (mc?.pet ?? 0) > 0,
           drivers: mc?.driversN ?? 0,
-          driverMealOn: fs?.driverMealOn ?? false,
+          driverMealOn: false,
+          mealItems: buildMealItems(mc),
           mealTotal: mc?.base ?? 0,
           mealGst: mc?.gst ?? 0,
           mealWithGst: mc?.total ?? 0,
@@ -532,7 +623,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     return {
       id,
       guest: name.trim(),
-      mobile: mobile.trim(),
+      mobile: `${dial} ${mobile.trim()}`,
       email: email.trim(),
       source,
       notes: notes.trim(),
@@ -625,9 +716,10 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
           kids2to6: 0,
           infantsBelow2: parseInt(fs?.infants ?? "0") || 0,
           pets: mc?.petsN ?? 0,
-          mealOn: fs?.mealOn ?? false,
+          mealOn: (mc?.meal ?? 0) > 0 || (mc?.pet ?? 0) > 0,
           drivers: mc?.driversN ?? 0,
-          driverMealOn: fs?.driverMealOn ?? false,
+          driverMealOn: false,
+          mealItems: buildMealItems(mc),
           mealTotal: mc?.base ?? 0,
           mealGst: mc?.gst ?? 0,
           mealWithGst: mc?.total ?? 0,
@@ -640,7 +732,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     const totalMealGst = segMealCalcs.reduce((s, c) => s + c.gst, 0);
     return {
       guest: name.trim(),
-      mobile: mobile.trim(),
+      mobile: `${dial} ${mobile.trim()}`,
       email: email.trim(),
       source,
       notes: notes.trim(),
@@ -813,13 +905,51 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
             </div>
             <div className={`field${errors.mobile ? " error" : ""}`}>
               <label>Mobile Number *</label>
-              <input
-                type="tel"
-                value={mobile}
-                onChange={(e) => setMobile(e.target.value)}
-                placeholder="10-digit number"
-              />
-              <span className="field-err">Enter valid 10-digit mobile number</span>
+              <div style={{ display: "flex", gap: 6 }}>
+                <div style={{ position: "relative", width: 96, flexShrink: 0 }}>
+                  <input
+                    type="text"
+                    value={codeOpen ? codeQuery : dial}
+                    onFocus={() => { setCodeOpen(true); setCodeQuery(""); }}
+                    onBlur={() => setTimeout(() => setCodeOpen(false), 150)}
+                    onChange={(e) => setCodeQuery(e.target.value)}
+                    placeholder={dial}
+                  />
+                  {codeOpen && (
+                    <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 40, width: 270, maxHeight: 220, overflowY: "auto", background: "var(--surf)", border: "1px solid var(--bd)", borderRadius: "var(--r3)", boxShadow: "0 6px 22px rgba(0,0,0,.14)" }}>
+                      {filteredCodes.map((c) => (
+                        <div
+                          key={c.dial + c.name}
+                          onMouseDown={() => { setDial(c.dial); setCodeOpen(false); }}
+                          style={{ padding: "7px 10px", fontSize: 12, cursor: "pointer", display: "flex", justifyContent: "space-between", gap: 10, background: c.dial === dial ? "var(--surf2)" : undefined }}
+                        >
+                          <span>{c.name}</span>
+                          <span style={{ color: "var(--t3)", fontWeight: 600 }}>{c.dial}</span>
+                        </div>
+                      ))}
+                      {filteredCodes.length === 0 && (
+                        <div style={{ padding: "7px 10px", fontSize: 12, color: "var(--t3)" }}>No matching country</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <input
+                  type="tel"
+                  value={mobile}
+                  onChange={(e) => setMobile(e.target.value.replace(/\D/g, ""))}
+                  placeholder="Mobile number"
+                  style={{ flex: 1 }}
+                />
+              </div>
+              <span className="field-err">
+                {(() => {
+                  const c = COUNTRY_CODES.find((cc) => cc.dial === dial);
+                  if (!c) return "Enter a valid mobile number";
+                  return c.minLen === c.maxLen
+                    ? `Enter a valid ${c.minLen}-digit number for ${c.dial}`
+                    : `Enter a valid ${c.minLen}-${c.maxLen} digit number for ${c.dial}`;
+                })()}
+              </span>
             </div>
             <div className="field">
               <label>Email</label>
@@ -946,7 +1076,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
 
                   {/* Guest counts for this segment */}
                   <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--bd)", background: "var(--surf)" }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", marginBottom: 7, textTransform: "uppercase", letterSpacing: "0.04em" }}>Guest Packs Count</div>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", marginBottom: 7, textTransform: "uppercase", letterSpacing: "0.04em" }}>PAX Count</div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
                       {[
                         { label: "Adults", field: "adults" as keyof FormSeg, min: 1 },
@@ -955,6 +1085,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                         { label: "Kids 6–10", field: "kids6to10" as keyof FormSeg, min: 0 },
                         { label: "Infants (0–6)", field: "infants" as keyof FormSeg, min: 0 },
                         { label: "Pets", field: "pets" as keyof FormSeg, min: 0 },
+                        { label: "Drivers", field: "drivers" as keyof FormSeg, min: 0 },
                       ].map(({ label, field, min }) => (
                         <div key={field} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
                           <span style={{ fontSize: 10, color: "var(--t3)", fontWeight: 500, whiteSpace: "nowrap" }}>{label}</span>
@@ -999,7 +1130,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                           <tr>
                             <td colSpan={13}>
                               <div className="empty-state" style={{ padding: 16 }}>
-                                <p>Click &quot;+ Add Room Row&quot; to add rooms for this period.</p>
+                                <p>Click &quot;+ Add New Room Catg&quot; to add rooms for this period.</p>
                               </div>
                             </td>
                           </tr>
@@ -1143,133 +1274,147 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                       className="btn btn-ghost btn-sm"
                       onClick={() => addSegRoom(seg.id)}
                     >
-                      + Add Room Row
+                      + Add New Room Catg
                     </button>
                   </div>
 
-                  {/* Meal package for this segment */}
+                  {/* Meal charges for this segment — rows from the meal master */}
                   <div style={{ padding: "12px 14px", borderTop: "1px solid var(--bd)", background: "var(--surf)" }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.04em" }}>Meal Charges</div>
-                    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 18, marginBottom: 10 }}>
-                      <span style={{ fontSize: 13, fontWeight: 500, color: "var(--t1)" }}>Include Meal Charges?</span>
-                      <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13 }}>
-                        <input type="radio" name={`meal-${seg.id}`} checked={seg.mealOn} onChange={() => updateSegField(seg.id, "mealOn", true)} /> Yes
-                      </label>
-                      <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13 }}>
-                        <input type="radio" name={`meal-${seg.id}`} checked={!seg.mealOn} onChange={() => updateSegField(seg.id, "mealOn", false)} /> No
-                      </label>
-                      <span style={{ fontSize: 13, fontWeight: 500, color: "var(--t1)", marginLeft: 8 }}>Drivers / Attendants</span>
-                      <input
-                        type="number"
-                        value={seg.drivers}
-                        min={0}
-                        onChange={(e) => {
-                          const v = Math.max(0, parseInt(e.target.value) || 0);
-                          updateSegField(seg.id, "drivers", String(v));
-                          if (v === 0) updateSegField(seg.id, "driverMealOn", false);
-                        }}
-                        style={{ width: 52, padding: "4px 6px", border: "1px solid var(--bd)", borderRadius: "var(--r3)", fontSize: 13, textAlign: "center", background: "var(--surf)", outline: "none" }}
-                      />
-                      {segMeal.driversN > 0 && (
-                        <>
-                          <span style={{ fontSize: 13, fontWeight: 500, color: "var(--t1)" }}>Driver Meal?</span>
-                          <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13 }}>
-                            <input type="radio" name={`driverMeal-${seg.id}`} checked={seg.driverMealOn} onChange={() => updateSegField(seg.id, "driverMealOn", true)} /> Yes
-                          </label>
-                          <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13 }}>
-                            <input type="radio" name={`driverMeal-${seg.id}`} checked={!seg.driverMealOn} onChange={() => updateSegField(seg.id, "driverMealOn", false)} /> No
-                          </label>
-                        </>
-                      )}
+                    <div style={{ display: "flex", alignItems: "center", marginBottom: 10 }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Meal Charges</div>
+                      <button type="button" className="btn btn-ghost btn-xs" style={{ marginLeft: "auto" }} onClick={() => addMealRow(seg.id)}>
+                        + Add Meal
+                      </button>
                     </div>
-                    {(seg.mealOn || segMeal.petsN > 0 || (seg.driverMealOn && segMeal.driversN > 0)) ? (
-                      <table>
-                        <thead>
-                          <tr>
-                            <th style={{ whiteSpace: "nowrap" }}>Charge</th>
-                            <th style={{ whiteSpace: "nowrap", textAlign: "right", width: 110 }}>Rate</th>
-                            <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Nights</th>
-                            <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Pax</th>
-                            <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Charges</th>
-                            <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>GST %</th>
-                            <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>GST Amt</th>
-                            <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Total</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {seg.mealOn && (
-                            <tr style={{ cursor: "default" }}>
-                              <td><strong>Meal &amp; Activity Package</strong></td>
-                              <td style={{ verticalAlign: "middle" }}>
-                                <input
-                                  type="number"
-                                  min={0}
-                                  value={seg.mealRate}
-                                  onChange={(e) => updateSegField(seg.id, "mealRate", e.target.value)}
-                                  style={cellInputStyle}
-                                />
-                              </td>
-                              <td style={{ textAlign: "right" }}>{segMeal.nights}</td>
-                              <td style={{ textAlign: "right" }}>{segMeal.adultsN}</td>
-                              <td style={{ textAlign: "right" }}>{fmt(segMeal.meal)}</td>
-                              <td style={{ textAlign: "right" }}>18%</td>
-                              <td style={{ textAlign: "right" }}>{fmt(segMeal.meal * 0.18)}</td>
-                              <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(segMeal.meal * 1.18)}</td>
+                    {(seg.mealRows.length > 0 || segMeal.petsN > 0) ? (
+                      <div style={{ overflowX: "auto" }}>
+                        <table style={{ minWidth: 900 }}>
+                          <thead>
+                            <tr>
+                              <th style={{ whiteSpace: "nowrap", width: 180 }}>Category</th>
+                              <th style={{ whiteSpace: "nowrap", width: 210 }}>Package</th>
+                              <th style={{ whiteSpace: "nowrap", textAlign: "right", width: 110 }}>Rate</th>
+                              <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Nights</th>
+                              <th style={{ whiteSpace: "nowrap", textAlign: "right", width: 70 }}>Pax</th>
+                              <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Charges</th>
+                              <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>GST %</th>
+                              <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>GST Amt</th>
+                              <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Total</th>
+                              <th style={{ width: 60 }}></th>
                             </tr>
-                          )}
-                          {segMeal.petsN > 0 && (
-                            <tr style={{ cursor: "default" }}>
-                              <td><strong>Pet Package</strong></td>
-                              <td style={{ verticalAlign: "middle" }}>
-                                <input
-                                  type="number"
-                                  min={0}
-                                  value={seg.petRate}
-                                  onChange={(e) => updateSegField(seg.id, "petRate", e.target.value)}
-                                  style={cellInputStyle}
-                                />
+                          </thead>
+                          <tbody>
+                            {seg.mealRows.map((mr) => {
+                              const cat = mealCategories.find((c) => c.id === mr.categoryId);
+                              const rate = parseFloat(mr.rate) || 0;
+                              const pax = parseInt(mr.pax) || 0;
+                              const chg = rate * segMeal.nights * pax;
+                              return (
+                                <tr key={mr.uid} style={{ cursor: "default" }}>
+                                  <td style={{ verticalAlign: "middle" }}>
+                                    <select
+                                      value={mr.categoryId}
+                                      onChange={(e) => setMealRow(seg.id, mr.uid, { categoryId: e.target.value, packageId: "", name: "" })}
+                                      style={{ width: "100%", padding: "5px 8px", border: "1px solid var(--bd)", borderRadius: "var(--r3)", fontSize: 12, background: "var(--surf)", outline: "none" }}
+                                    >
+                                      <option value="">{mr.categoryId ? "— Category —" : mr.name || "— Category —"}</option>
+                                      {mealCategories.map((c) => (
+                                        <option key={c.id} value={c.id}>{c.name}</option>
+                                      ))}
+                                    </select>
+                                  </td>
+                                  <td style={{ verticalAlign: "middle" }}>
+                                    <select
+                                      value={mr.packageId}
+                                      onChange={(e) => {
+                                        const pkg = cat?.packages.find((pk) => pk.id === e.target.value);
+                                        setMealRow(seg.id, mr.uid, {
+                                          packageId: e.target.value,
+                                          name: pkg?.name ?? "",
+                                          rate: pkg ? String(pkg.rate) : mr.rate,
+                                        });
+                                      }}
+                                      style={{ width: "100%", padding: "5px 8px", border: "1px solid var(--bd)", borderRadius: "var(--r3)", fontSize: 12, background: "var(--surf)", outline: "none" }}
+                                    >
+                                      <option value="">— Package —</option>
+                                      {(cat?.packages ?? []).map((pk) => (
+                                        <option key={pk.id} value={pk.id}>{pk.name}</option>
+                                      ))}
+                                    </select>
+                                  </td>
+                                  <td style={{ verticalAlign: "middle" }}>
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      value={mr.rate}
+                                      onChange={(e) => setMealRow(seg.id, mr.uid, { rate: e.target.value })}
+                                      style={cellInputStyle}
+                                    />
+                                  </td>
+                                  <td style={{ textAlign: "right", verticalAlign: "middle" }}>{segMeal.nights}</td>
+                                  <td style={{ verticalAlign: "middle" }}>
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      value={mr.pax}
+                                      onChange={(e) => setMealRow(seg.id, mr.uid, { pax: e.target.value })}
+                                      style={cellInputStyle}
+                                    />
+                                  </td>
+                                  <td style={{ textAlign: "right", verticalAlign: "middle" }}>{fmt(chg)}</td>
+                                  <td style={{ textAlign: "right", verticalAlign: "middle" }}>18%</td>
+                                  <td style={{ textAlign: "right", verticalAlign: "middle" }}>{fmt(chg * 0.18)}</td>
+                                  <td style={{ textAlign: "right", verticalAlign: "middle", fontWeight: 700 }}>{fmt(chg * 1.18)}</td>
+                                  <td style={{ verticalAlign: "middle" }}>
+                                    <button
+                                      type="button"
+                                      className="btn btn-ghost btn-xs"
+                                      onClick={() => removeMealRow(seg.id, mr.uid)}
+                                      title="Remove row"
+                                    >
+                                      Remove
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                            {segMeal.petsN > 0 && (
+                              <tr style={{ cursor: "default" }}>
+                                <td style={{ fontSize: 12, color: "var(--t3)", verticalAlign: "middle" }}>Auto (pets)</td>
+                                <td style={{ verticalAlign: "middle" }}><strong>Pet Package</strong></td>
+                                <td style={{ verticalAlign: "middle" }}>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    value={seg.petRate}
+                                    onChange={(e) => updateSegField(seg.id, "petRate", e.target.value)}
+                                    style={cellInputStyle}
+                                  />
+                                </td>
+                                <td style={{ textAlign: "right", verticalAlign: "middle" }}>{segMeal.nights}</td>
+                                <td style={{ textAlign: "right", verticalAlign: "middle" }}>{segMeal.petsN}</td>
+                                <td style={{ textAlign: "right", verticalAlign: "middle" }}>{fmt(segMeal.pet)}</td>
+                                <td style={{ textAlign: "right", verticalAlign: "middle" }}>18%</td>
+                                <td style={{ textAlign: "right", verticalAlign: "middle" }}>{fmt(segMeal.pet * 0.18)}</td>
+                                <td style={{ textAlign: "right", verticalAlign: "middle", fontWeight: 700 }}>{fmt(segMeal.pet * 1.18)}</td>
+                                <td></td>
+                              </tr>
+                            )}
+                            <tr style={{ background: "var(--surf2)" }}>
+                              <td colSpan={8} style={{ textAlign: "right", fontWeight: 700, color: "var(--t1)" }}>
+                                Meal Total (this date)
                               </td>
-                              <td style={{ textAlign: "right" }}>{segMeal.nights}</td>
-                              <td style={{ textAlign: "right" }}>{segMeal.petsN}</td>
-                              <td style={{ textAlign: "right" }}>{fmt(segMeal.pet)}</td>
-                              <td style={{ textAlign: "right" }}>18%</td>
-                              <td style={{ textAlign: "right" }}>{fmt(segMeal.pet * 0.18)}</td>
-                              <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(segMeal.pet * 1.18)}</td>
-                            </tr>
-                          )}
-                          {seg.driverMealOn && segMeal.driversN > 0 && (
-                            <tr style={{ cursor: "default" }}>
-                              <td><strong>Driver / Attendant Meal</strong></td>
-                              <td style={{ verticalAlign: "middle" }}>
-                                <input
-                                  type="number"
-                                  min={0}
-                                  value={seg.driverMealRate}
-                                  onChange={(e) => updateSegField(seg.id, "driverMealRate", e.target.value)}
-                                  style={cellInputStyle}
-                                />
+                              <td style={{ textAlign: "right", fontWeight: 800, color: "var(--sb)", fontSize: 14 }}>
+                                {fmt(segMeal.total)}
                               </td>
-                              <td style={{ textAlign: "right" }}>{segMeal.nights}</td>
-                              <td style={{ textAlign: "right" }}>{segMeal.driversN}</td>
-                              <td style={{ textAlign: "right" }}>{fmt(segMeal.drvMeal)}</td>
-                              <td style={{ textAlign: "right" }}>18%</td>
-                              <td style={{ textAlign: "right" }}>{fmt(segMeal.drvMeal * 0.18)}</td>
-                              <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(segMeal.drvMeal * 1.18)}</td>
+                              <td></td>
                             </tr>
-                          )}
-                          <tr style={{ background: "var(--surf2)" }}>
-                            <td colSpan={7} style={{ textAlign: "right", fontWeight: 700, color: "var(--t1)" }}>
-                              Meal Total (this segment)
-                            </td>
-                            <td style={{ textAlign: "right", fontWeight: 800, color: "var(--sb)", fontSize: 14 }}>
-                              {fmt(segMeal.total)}
-                            </td>
-                          </tr>
-                        </tbody>
-                      </table>
+                          </tbody>
+                        </table>
+                      </div>
                     ) : (
                       <div style={{ fontSize: 12, color: "var(--t3)" }}>
-                        No meal charges added. Toggle Yes above to include meals, or add pets to show pet charges.
+                        No meal charges added. Click + Add Meal to pick a package, or add pets to show pet charges.
                       </div>
                     )}
                   </div>
@@ -1511,6 +1656,39 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
           <div className="form-sec-title">
             <span className="form-sec-num">5</span>Payment Received
           </div>
+          {isEdit && (initial?.payments?.length ?? 0) > 0 && (
+            <table className="pricing-tbl" style={{ marginBottom: 14 }}>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Mode</th>
+                  <th style={{ textAlign: "right" }}>Amount (₹)</th>
+                  <th style={{ textAlign: "right" }}>Cumulative (₹)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(() => {
+                  let running = 0;
+                  return initial!.payments.map((p, i) => {
+                    running += p.amount;
+                    return (
+                      <tr key={i} style={{ cursor: "default" }}>
+                        <td>{fmtIN(p.date)}</td>
+                        <td>
+                          {p.mode}
+                          {p.creditNoteCode ? (
+                            <span style={{ fontSize: 11, color: "var(--t3)", marginLeft: 6 }}>{p.creditNoteCode}</span>
+                          ) : null}
+                        </td>
+                        <td style={{ textAlign: "right" }}>{fmt(p.amount)}</td>
+                        <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(running)}</td>
+                      </tr>
+                    );
+                  });
+                })()}
+              </tbody>
+            </table>
+          )}
           <table className="pricing-tbl" style={{ marginBottom: 8 }}>
             <thead>
               <tr>

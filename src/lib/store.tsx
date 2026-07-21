@@ -22,6 +22,7 @@ import type {
   DiscountCaps,
   Extra,
   GstSettings,
+  MealCategory,
   NotifKind,
   PackageRates,
   RefundPayout,
@@ -40,6 +41,7 @@ import {
   SEED_CREDIT_NOTE_SETTINGS,
   SEED_DISCOUNT_CAPS,
   SEED_GST_SETTINGS,
+  SEED_MEAL_CATEGORIES,
   SEED_PACKAGE_RATES,
   SEED_ROOM_INVENTORY,
   SEED_SPECIAL_DAYS,
@@ -122,6 +124,8 @@ type AppContextValue = {
   updateVenueTypes: (types: string[]) => void;
   userRoles: string[];
   updateUserRoles: (roles: string[]) => void;
+  mealCategories: MealCategory[];
+  updateMealCategories: (cats: MealCategory[]) => void;
   venueBlocks: VenueBlock[];
   updateRooms: (rooms: RoomMaster[]) => void;
   addRoomInventoryItem: (item: RoomInventoryItem) => void;
@@ -216,6 +220,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [venues, setVenues] = useState<Venue[]>(SEED_VENUES);
   const [venueTypes, setVenueTypesState] = useState<string[]>(SEED_VENUE_TYPES);
   const [userRoles, setUserRolesState] = useState<string[]>(["Admin", "Front Office", "Sales"]);
+  const [mealCategories, setMealCategoriesState] = useState<MealCategory[]>(SEED_MEAL_CATEGORIES);
   const [venueBlocks, setVenueBlocks] = useState<VenueBlock[]>(SEED_VENUE_BLOCKS);
   const [bulkRoomBlocks, setBulkRoomBlocks] = useState<BulkRoomBlock[]>(SEED_BULK_ROOM_BLOCKS);
   const [hydrated, setHydrated] = useState(false);
@@ -253,6 +258,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (Array.isArray(data.venues)) setVenues(data.venues);
     if (Array.isArray(data.venueTypes)) setVenueTypesState(data.venueTypes);
     if (Array.isArray(data.userRoles)) setUserRolesState(data.userRoles);
+    if (Array.isArray(data.mealCategories)) setMealCategoriesState(data.mealCategories);
     if (Array.isArray(data.venueBlocks)) setVenueBlocks(data.venueBlocks);
     if (Array.isArray(data.bulkRoomBlocks)) setBulkRoomBlocks(data.bulkRoomBlocks);
     if (Array.isArray(data.specialDays)) setSpecialDays(data.specialDays);
@@ -605,6 +611,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     sync("/api/app/settings", "PUT", { userRoles: roles });
   }, []);
 
+  const updateMealCategories = useCallback((cats: MealCategory[]) => {
+    setMealCategoriesState(cats);
+    sync("/api/app/settings", "PUT", { mealCategories: cats });
+  }, []);
+
   const addVenue = useCallback((v: Venue) => {
     setVenues((prev) => [...prev, v]);
     sync("/api/app/venues", "POST", v);
@@ -950,6 +961,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updateVenueTypes,
       userRoles,
       updateUserRoles,
+      mealCategories,
+      updateMealCategories,
       venueBlocks,
       updateRooms,
       addRoomInventoryItem,
@@ -1016,6 +1029,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updateVenueTypes,
       userRoles,
       updateUserRoles,
+      mealCategories,
+      updateMealCategories,
       venueBlocks,
       updateRooms,
       addRoomInventoryItem,

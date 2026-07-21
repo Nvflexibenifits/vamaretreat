@@ -81,19 +81,35 @@ export default function RevenuePage() {
       .sort((a, b) => a.checkin.localeCompare(b.checkin))
       .map((b) => {
         const pricingRows = getBookingPricingRows(b);
-        const roomNet = pricingRows.reduce((s, r) => s + r.netCharges, 0);
-        // Room GST split by the actual rate applied on each pricing row
-        const roomGstByRate: Record<number, number> = {};
-        pricingRows.forEach((r) => {
-          if (r.gstAmt > 0) roomGstByRate[r.gstRate] = (roomGstByRate[r.gstRate] ?? 0) + r.gstAmt;
-        });
-        const mealNet = b.mealTotal + b.petTotal + (b.driverMealTotal ?? 0);
-        const mealGst = b.mealGst + b.petGst + (b.driverMealGst ?? 0);
-        // Add-on charges are stored rolled into grandTotal (incl. their GST)
-        const other = Math.max(0, b.grandTotal - b.totalRoomCharges - b.totalMealCharges);
         const isCancelled = b.status === "Cancelled";
-        const total = isCancelled && b.cancellationDetails
-          ? b.cancellationDetails.cancellationCharge
+        // Refund cancellations remove the booking's revenue (only a
+        // cancellation charge, if any, is kept). Credit-note cancellations
+        // keep full revenue: no money leaves, the stay obligation remains.
+        const isRefundCancel = isCancelled && b.cancellationDetails?.resolution === "refund";
+
+        const roomNetRaw = pricingRows.reduce((s, r) => s + r.netCharges, 0);
+        let gst5Raw = 0;
+        let gst18Raw = 0;
+        pricingRows.forEach((r) => {
+          if (r.gstAmt <= 0) return;
+          if (r.gstRate === 5) gst5Raw += r.gstAmt;
+          else gst18Raw += r.gstAmt;
+        });
+        const mealNetRaw = b.mealTotal + b.petTotal + (b.driverMealTotal ?? 0);
+        gst18Raw += b.mealGst + b.petGst + (b.driverMealGst ?? 0);
+        // Add-on charges are stored rolled into grandTotal (incl. their GST)
+        const otherRaw = Math.max(0, b.grandTotal - b.totalRoomCharges - b.totalMealCharges);
+
+        const roomNet = isRefundCancel ? 0 : roomNetRaw;
+        const mealNet = isRefundCancel ? 0 : mealNetRaw;
+        const other = isRefundCancel ? 0 : otherRaw;
+        const gst5 = isRefundCancel ? 0 : gst5Raw;
+        const gst18 = isRefundCancel ? 0 : gst18Raw;
+        // Refund-case revenue = charge retained + any credit-note portion
+        // (the CN part stays with the hotel), so the balance column shows
+        // exactly the cash refund still owed to the guest.
+        const total = isRefundCancel
+          ? (b.cancellationDetails?.cancellationCharge ?? 0) + (b.cancellationDetails?.creditNoteAmount ?? 0)
           : b.grandTotal;
 
         let bank = 0, cash = 0, crNote = 0;
@@ -106,51 +122,35 @@ export default function RevenuePage() {
         // Legacy bookings may carry an advance without itemized payments
         if (bank + cash + crNote === 0 && b.advance > 0) bank = b.advance;
 
-        // A cancellation settled with a credit note returns value to the guest
-        // already, so it doesn't remain as a cash refund due. Cash refunds
-        // recorded on the booking page count as paid out the same way.
-        const settledViaCreditNote =
-          isCancelled && b.cancellationDetails?.resolution === "credit-note"
-            ? b.cancellationDetails.creditNoteAmount
-            : 0;
+        // Recorded refund payouts settle the refund-due balance
         const refundsPaid = isCancelled
           ? (b.cancellationDetails?.refundPayouts ?? []).reduce((s, p) => s + p.amount, 0)
           : 0;
-        const bal = bank + cash + crNote - settledViaCreditNote - refundsPaid - total;
-        return { b, roomNet, roomGstByRate, mealNet, mealGst, other, total, bank, cash, crNote, bal, isCancelled };
+        // Round to whole rupees so paise residue doesn't read as refund due
+        const bal = Math.round(bank + cash + crNote - refundsPaid - total);
+        return { b, roomNet, mealNet, other, gst5, gst18, total, bank, cash, crNote, bal, isCancelled };
       });
   }, [bookings, search, rangeFrom, rangeTo]);
 
-  // One column per distinct room-GST rate present in the filtered data
-  const gstRates = useMemo(() => {
-    const rates = [...new Set(tableRows.flatMap((r) => Object.keys(r.roomGstByRate).map(Number)))];
-    rates.sort((a, b) => a - b);
-    return rates.length > 0 ? rates : [5];
-  }, [tableRows]);
-
-  const totals = useMemo(() => {
-    const gstByRate: Record<number, number> = {};
-    const acc = tableRows.reduce(
-      (t, r) => {
-        Object.entries(r.roomGstByRate).forEach(([rate, amt]) => {
-          gstByRate[Number(rate)] = (gstByRate[Number(rate)] ?? 0) + amt;
-        });
-        return {
+  const totals = useMemo(
+    () =>
+      tableRows.reduce(
+        (t, r) => ({
           roomNet: t.roomNet + r.roomNet,
           mealNet: t.mealNet + r.mealNet,
-          mealGst: t.mealGst + r.mealGst,
           other: t.other + r.other,
+          gst5: t.gst5 + r.gst5,
+          gst18: t.gst18 + r.gst18,
           total: t.total + r.total,
           bank: t.bank + r.bank,
           cash: t.cash + r.cash,
           crNote: t.crNote + r.crNote,
           bal: t.bal + r.bal,
-        };
-      },
-      { roomNet: 0, mealNet: 0, mealGst: 0, other: 0, total: 0, bank: 0, cash: 0, crNote: 0, bal: 0 }
-    );
-    return { ...acc, gstByRate };
-  }, [tableRows]);
+        }),
+        { roomNet: 0, mealNet: 0, other: 0, gst5: 0, gst18: 0, total: 0, bank: 0, cash: 0, crNote: 0, bal: 0 }
+      ),
+    [tableRows]
+  );
 
   // Pending payments (global, unaffected by filters)
   const pendingBookings = useMemo(
@@ -181,23 +181,19 @@ export default function RevenuePage() {
   const exportExcel = () => {
     const headers = [
       "SL No.", "Check-in", "Check-out", "Guest Name", "Mobile", "Booking ID", "Status",
-      "Room Charges",
-      ...gstRates.map((r) => `GST ${r}% (Room)`),
-      "Meal Charges", "Other Charges", "GST 18%", "Total Charges",
+      "Room Charges", "Meal Charges", "Other Charges", "GST 5%", "GST 18%", "Total Charges",
       "Received - Bank", "Received - Cash", "Credit Note", "Balance",
     ];
     const lines = tableRows.map((r, i) => [
       i + 1, fmtShort(r.b.checkin), fmtShort(r.b.checkout), r.b.guest, r.b.mobile, r.b.id, r.b.status,
-      Math.round(r.roomNet),
-      ...gstRates.map((rate) => Math.round(r.roomGstByRate[rate] ?? 0)),
-      Math.round(r.mealNet), Math.round(r.other), Math.round(r.mealGst), Math.round(r.total),
+      Math.round(r.roomNet), Math.round(r.mealNet), Math.round(r.other),
+      Math.round(r.gst5), Math.round(r.gst18), Math.round(r.total),
       Math.round(r.bank), Math.round(r.cash), Math.round(r.crNote), Math.round(r.bal),
     ]);
     lines.push([
       "", "", "", "", "", "Total", "",
-      Math.round(totals.roomNet),
-      ...gstRates.map((rate) => Math.round(totals.gstByRate[rate] ?? 0)),
-      Math.round(totals.mealNet), Math.round(totals.other), Math.round(totals.mealGst), Math.round(totals.total),
+      Math.round(totals.roomNet), Math.round(totals.mealNet), Math.round(totals.other),
+      Math.round(totals.gst5), Math.round(totals.gst18), Math.round(totals.total),
       Math.round(totals.bank), Math.round(totals.cash), Math.round(totals.crNote), Math.round(totals.bal),
     ]);
     const csv = [headers, ...lines]
@@ -213,14 +209,14 @@ export default function RevenuePage() {
   };
 
   const numTd: React.CSSProperties = { textAlign: "right", whiteSpace: "nowrap", fontSize: 12 };
-  const chargesCols = 5 + gstRates.length;
+  const chargesCols = 6;
   const allCols = 5 + chargesCols + 3 + 2;
 
   return (
     <div className="view">
       <div className="pg-hd">
         <div>
-          <h2>Revenue</h2>
+          <h2>Revenue Register</h2>
         </div>
         <div className="pg-hd-actions" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <select
@@ -273,8 +269,9 @@ export default function RevenuePage() {
             Total Charges ({rangeLabel})
           </div>
           <div style={{ fontSize: 22, fontWeight: 800, color: "var(--sb)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>
-            {fmt(totals.total)}
+            {fmt(totals.roomNet + totals.mealNet + totals.other)}
           </div>
+          <div style={{ fontSize: 10, color: "var(--t3)", marginTop: 2 }}>Excluding GST</div>
         </div>
         <div style={{ background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r4)", padding: "14px 18px" }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>
@@ -331,11 +328,9 @@ export default function RevenuePage() {
                 <th>Guest</th>
                 <th style={{ whiteSpace: "nowrap" }}>Bkg ID</th>
                 <th style={{ textAlign: "right", ...sectionBorder }}>Room</th>
-                {gstRates.map((r) => (
-                  <th key={r} style={{ textAlign: "right", whiteSpace: "nowrap" }}>GST {r}%</th>
-                ))}
                 <th style={{ textAlign: "right" }}>Meal</th>
                 <th style={{ textAlign: "right" }}>Other</th>
+                <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>GST 5%</th>
                 <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>GST 18%</th>
                 <th style={{ textAlign: "right" }}>Total</th>
                 <th style={{ textAlign: "right", ...sectionBorder }}>Bank</th>
@@ -376,15 +371,11 @@ export default function RevenuePage() {
                           <span className="badge bd-lost" style={{ marginLeft: 5, fontSize: 8 }}>Cancelled</span>
                         )}
                       </td>
-                      <td style={{ ...numTd, ...sectionBorder }}>{nfmt(r.roomNet)}</td>
-                      {gstRates.map((rate) => (
-                        <td key={rate} style={{ ...numTd, color: "var(--t3)" }}>
-                          {(r.roomGstByRate[rate] ?? 0) > 0 ? nfmt(r.roomGstByRate[rate]) : "—"}
-                        </td>
-                      ))}
+                      <td style={{ ...numTd, ...sectionBorder }}>{r.roomNet > 0 ? nfmt(r.roomNet) : "—"}</td>
                       <td style={numTd}>{r.mealNet > 0 ? nfmt(r.mealNet) : "—"}</td>
                       <td style={numTd}>{r.other > 0 ? nfmt(r.other) : "—"}</td>
-                      <td style={{ ...numTd, color: "var(--t3)" }}>{r.mealGst > 0 ? nfmt(r.mealGst) : "—"}</td>
+                      <td style={{ ...numTd, color: "var(--t3)" }}>{r.gst5 > 0 ? nfmt(r.gst5) : "—"}</td>
+                      <td style={{ ...numTd, color: "var(--t3)" }}>{r.gst18 > 0 ? nfmt(r.gst18) : "—"}</td>
                       <td style={{ ...numTd, fontWeight: 700 }}>{nfmt(r.total)}</td>
                       <td style={{ ...numTd, ...sectionBorder }}>{r.bank > 0 ? nfmt(r.bank) : "—"}</td>
                       <td style={numTd}>{r.cash > 0 ? nfmt(r.cash) : "—"}</td>
@@ -409,14 +400,10 @@ export default function RevenuePage() {
                   <tr style={{ background: "var(--surf2)", fontWeight: 700 }}>
                     <td colSpan={5} style={{ textAlign: "right", fontSize: 12, color: "var(--t2)" }}>Total</td>
                     <td style={{ ...numTd, ...sectionBorder, fontWeight: 700 }}>{nfmt(totals.roomNet)}</td>
-                    {gstRates.map((rate) => (
-                      <td key={rate} style={{ ...numTd, fontWeight: 700, color: "var(--t3)" }}>
-                        {nfmt(totals.gstByRate[rate] ?? 0)}
-                      </td>
-                    ))}
                     <td style={{ ...numTd, fontWeight: 700 }}>{nfmt(totals.mealNet)}</td>
                     <td style={{ ...numTd, fontWeight: 700 }}>{nfmt(totals.other)}</td>
-                    <td style={{ ...numTd, fontWeight: 700, color: "var(--t3)" }}>{nfmt(totals.mealGst)}</td>
+                    <td style={{ ...numTd, fontWeight: 700, color: "var(--t3)" }}>{nfmt(totals.gst5)}</td>
+                    <td style={{ ...numTd, fontWeight: 700, color: "var(--t3)" }}>{nfmt(totals.gst18)}</td>
                     <td style={{ ...numTd, fontWeight: 800 }}>{nfmt(totals.total)}</td>
                     <td style={{ ...numTd, ...sectionBorder, fontWeight: 700 }}>{nfmt(totals.bank)}</td>
                     <td style={{ ...numTd, fontWeight: 700 }}>{nfmt(totals.cash)}</td>

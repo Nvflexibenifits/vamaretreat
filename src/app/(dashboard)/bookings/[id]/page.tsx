@@ -22,6 +22,28 @@ function getDatesInRange(checkin: string, checkout: string): string[] {
 }
 
 // dd/mm/yy — compact date format matching the revenue table convention
+const CANCEL_LB: React.CSSProperties = {
+  fontSize: 10,
+  fontWeight: 700,
+  color: "var(--t3)",
+  textTransform: "uppercase",
+  letterSpacing: ".4px",
+  marginBottom: 2,
+};
+const CANCEL_VAL: React.CSSProperties = { fontSize: 13, fontWeight: 600, color: "var(--t1)" };
+const CANCEL_PCT_INPUT: React.CSSProperties = {
+  width: 64,
+  height: 30,
+  padding: "0 8px",
+  fontSize: 13,
+  textAlign: "right",
+  border: "1px solid var(--bd)",
+  borderRadius: "var(--r2)",
+  background: "var(--surf)",
+  color: "var(--t1)",
+  outline: "none",
+};
+
 function fmtShort(d: string): string {
   if (!d) return "—";
   const [y, m, dd] = d.split("-");
@@ -106,6 +128,9 @@ export default function BookingDetailPage() {
   const isFrontOffice = currentRole === "Front Office";
   const b = bookings.find((x) => x.id === id);
   const [showCancelModal, setShowCancelModal] = useState(false);
+  // Editable per-booking overrides, seeded from the policy when the modal opens
+  const [cancelRefundPct, setCancelRefundPct] = useState("0");
+  const [cancelCnPct, setCancelCnPct] = useState("0");
   const [today] = useState(() => todayStr());
 
   // Record Refund modal (cancelled bookings with a cash refund due)
@@ -191,6 +216,14 @@ export default function BookingDetailPage() {
     const dates = `${fmtIN(seg.checkin)} → ${fmtIN(seg.checkout)}`;
     const rows: { key: string; label: string; dates: string; rate: number; nights: number; pax: number; chg: number }[] = [];
     if (segNights <= 0) return rows;
+    if (Array.isArray(seg.mealItems) && seg.mealItems.length > 0) {
+      seg.mealItems.forEach((mi) =>
+        rows.push({ key: `${seg.id}-${mi.id}`, label: mi.packageName, dates, rate: mi.rate, nights: segNights, pax: mi.pax, chg: mi.total })
+      );
+      if ((seg.pets ?? 0) > 0 && (seg.petRate ?? 0) > 0)
+        rows.push({ key: `${seg.id}-pet`, label: "Pet Package", dates, rate: seg.petRate ?? 0, nights: segNights, pax: seg.pets, chg: (seg.petRate ?? 0) * segNights * seg.pets });
+      return rows;
+    }
     if (seg.mealOn && (seg.mealRate ?? 0) > 0 && seg.adults > 0)
       rows.push({ key: `${seg.id}-meal`, label: "Meal & Activity Package", dates, rate: seg.mealRate ?? 0, nights: segNights, pax: seg.adults, chg: (seg.mealRate ?? 0) * segNights * seg.adults });
     if ((seg.pets ?? 0) > 0 && (seg.petRate ?? 0) > 0)
@@ -215,17 +248,31 @@ export default function BookingDetailPage() {
     return m;
   })();
 
+  const refundPctNum = Math.max(0, Math.min(100, parseFloat(cancelRefundPct) || 0));
+  const cnPctNum = Math.max(0, Math.min(100, parseFloat(cancelCnPct) || 0));
+  const cancelRefundAmt = cancelCalc ? Math.round(cancelCalc.paid * refundPctNum / 100) : 0;
+  const cancelCnAmt = cancelCalc ? Math.round(cancelCalc.paid * cnPctNum / 100) : 0;
+  const cancelPctOver = refundPctNum + cnPctNum > 100;
+  const cancelRetained = cancelCalc ? Math.max(0, cancelCalc.paid - cancelRefundAmt - cancelCnAmt) : 0;
+  const cancelCnCode = cancelCnAmt > 0
+    ? `${creditNoteSettings.prefix}-${String(creditNoteSettings.nextNumber).padStart(4, "0")}`
+    : undefined;
+
   const onConfirmCancel = () => {
     if (!cancelCalc) return;
+    if (cancelPctOver) {
+      showNotif("Refund % + Credit Note % cannot exceed 100%", "error");
+      return;
+    }
     const details: CancellationDetails = {
       cancellationDate: today,
       daysBeforeCheckin: cancelCalc.daysBeforeCheckin,
       policyType: cancelCalc.isSpecial ? "special" : "standard",
-      cancellationCharge: cancelCalc.cancellationCharge,
-      refundAmount: cancelCalc.refundAmount,
-      creditNoteAmount: cancelCalc.creditNoteAmount,
-      resolution: cancelCalc.hasCredit ? "credit-note" : "refund",
-      creditNoteCode: cancelCalc.creditNoteCode,
+      cancellationCharge: cancelRetained,
+      refundAmount: cancelRefundAmt,
+      creditNoteAmount: cancelCnAmt,
+      resolution: cancelRefundAmt > 0 ? "refund" : cancelCnAmt > 0 ? "credit-note" : "refund",
+      creditNoteCode: cancelCnCode,
       processedBy: currentUser,
     };
     cancelBooking(b.id, details);
@@ -332,69 +379,98 @@ export default function BookingDetailPage() {
           <div
             style={{
               background: "var(--surf)", borderRadius: "var(--r3)",
-              border: "1px solid var(--bd)", padding: 28, width: 460,
+              border: "1px solid var(--bd)", padding: 28, width: 520,
               maxWidth: "calc(100vw - 32px)", boxShadow: "0 8px 32px rgba(0,0,0,.18)",
             }}
           >
-            <h3 style={{ marginBottom: 4, color: "var(--red)" }}>Cancel Booking</h3>
-            <p style={{ fontSize: 12, color: "var(--t3)", marginBottom: 20 }}>
-              {b.guest} · {b.id}
-            </p>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
+              <h3 style={{ color: "var(--red)" }}>Cancel Booking</h3>
+              <span style={{ fontSize: 12, color: "var(--t2)" }}>
+                Date: <strong style={{ color: "var(--t1)" }}>{fmtIN(today)}</strong>
+              </span>
+            </div>
 
-            {/* Policy row */}
-            <div style={{ padding: "10px 14px", background: "var(--surf2)", borderRadius: "var(--r2)", border: "1px solid var(--bd)", marginBottom: 16, fontSize: 12 }}>
-              <div style={{ fontWeight: 700, color: "var(--t1)", marginBottom: 4 }}>Policy Applied</div>
-              <div style={{ color: "var(--t2)" }}>{cancelCalc.policyLabel}</div>
-              <div style={{ color: "var(--t3)", marginTop: 2 }}>
-                {cancelCalc.daysBeforeCheckin === 0
-                  ? "Check-in is today"
-                  : `${cancelCalc.daysBeforeCheckin} day${cancelCalc.daysBeforeCheckin !== 1 ? "s" : ""} before check-in`}
+            {/* Booking details */}
+            <div style={{ border: "1px solid var(--bd)", borderRadius: "var(--r2)", overflow: "hidden", marginBottom: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", borderBottom: "1px solid var(--bd)" }}>
+                <div style={{ padding: "8px 14px" }}>
+                  <div style={CANCEL_LB}>Guest Name</div>
+                  <div style={CANCEL_VAL}>{b.guest}</div>
+                </div>
+                <div style={{ padding: "8px 14px", borderLeft: "1px solid var(--bd)" }}>
+                  <div style={CANCEL_LB}>Booking ID</div>
+                  <div style={CANCEL_VAL}>{b.id}</div>
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", borderBottom: "1px solid var(--bd)" }}>
+                <div style={{ padding: "8px 14px" }}>
+                  <div style={CANCEL_LB}>Check-in Date</div>
+                  <div style={CANCEL_VAL}>{fmtIN(b.checkin)}</div>
+                </div>
+                <div style={{ padding: "8px 14px", borderLeft: "1px solid var(--bd)" }}>
+                  <div style={CANCEL_LB}>Days Before Check-in</div>
+                  <div style={CANCEL_VAL}>{cancelCalc.daysBeforeCheckin}</div>
+                </div>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "var(--surf2)" }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "var(--t2)" }}>Advance Amount Paid</span>
+                <span style={{ fontSize: 14, fontWeight: 700 }}>{fmt(cancelCalc.paid)}</span>
               </div>
             </div>
 
-            {/* Amount breakdown */}
-            <div style={{ border: "1px solid var(--bd)", borderRadius: "var(--r2)", overflow: "hidden", marginBottom: 20 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", borderBottom: "1px solid var(--bd)" }}>
-                <span style={{ fontSize: 12, color: "var(--t2)" }}>Amount Received</span>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>{fmt(cancelCalc.paid)}</span>
+            {/* Refund / Credit Note — % editable for this booking */}
+            <div style={{ border: "1px solid var(--bd)", borderRadius: "var(--r2)", overflow: "hidden", marginBottom: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderBottom: "1px solid var(--bd)", background: "var(--grn-lt)" }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "var(--t2)", width: 88 }}>Refund</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={cancelRefundPct}
+                  onChange={(e) => setCancelRefundPct(e.target.value)}
+                  style={CANCEL_PCT_INPUT}
+                />
+                <span style={{ fontSize: 12, color: "var(--t3)" }}>%</span>
+                <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 700, color: "var(--grn)" }}>{fmt(cancelRefundAmt)}</span>
               </div>
-              {cancelCalc.cancellationCharge > 0 && (
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", borderBottom: "1px solid var(--bd)", background: "var(--surf2)" }}>
-                  <span style={{ fontSize: 12, color: "var(--t2)" }}>
-                    Cancellation Charge ({cancelCalc.cancellationChargePct}%)
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", background: "var(--acc-lt)" }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "var(--t2)", width: 88 }}>Credit Note</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={cancelCnPct}
+                  onChange={(e) => setCancelCnPct(e.target.value)}
+                  style={CANCEL_PCT_INPUT}
+                />
+                <span style={{ fontSize: 12, color: "var(--t3)" }}>%</span>
+                {cancelCnCode && (
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "var(--acc)", background: "var(--surf)", border: "1px solid var(--bd)", borderRadius: "var(--r1)", padding: "2px 6px" }}>
+                    {cancelCnCode}
                   </span>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "var(--red)" }}>− {fmt(cancelCalc.cancellationCharge)}</span>
-                </div>
-              )}
-              {cancelCalc.refundAmount > 0 && (
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", background: "var(--grn-lt)" }}>
-                  <span style={{ fontSize: 12, color: "var(--t2)" }}>
-                    Refund to Guest ({cancelCalc.refundPct}%)
-                  </span>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: "var(--grn)" }}>{fmt(cancelCalc.refundAmount)}</span>
-                </div>
-              )}
-              {cancelCalc.creditNoteAmount > 0 && (
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", background: "var(--acc-lt)" }}>
-                  <span style={{ fontSize: 12, color: "var(--t2)" }}>
-                    Credit Note Issued ({cancelCalc.creditNotePct}%) · {cancelCalc.creditNoteCode}
-                  </span>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: "var(--acc)" }}>{fmt(cancelCalc.creditNoteAmount)}</span>
-                </div>
-              )}
-              {cancelCalc.refundAmount === 0 && cancelCalc.creditNoteAmount === 0 && (
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", background: "var(--surf2)" }}>
-                  <span style={{ fontSize: 12, color: "var(--t3)" }}>No refund / credit note</span>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "var(--t3)" }}>—</span>
-                </div>
-              )}
+                )}
+                <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 700, color: "var(--acc)" }}>{fmt(cancelCnAmt)}</span>
+              </div>
             </div>
+
+            {cancelPctOver ? (
+              <p style={{ fontSize: 11, color: "var(--red)", fontWeight: 600, marginBottom: 14 }}>
+                Refund % + Credit Note % cannot exceed 100%.
+              </p>
+            ) : (
+              <p style={{ fontSize: 11, color: "var(--t3)", marginBottom: 14 }}>
+                Prefilled from policy: {cancelCalc.policyLabel}. Edit the % above to override for this booking only.
+                {cancelRetained > 0 && (
+                  <> Retained as cancellation charge: <strong style={{ color: "var(--t1)" }}>{fmt(cancelRetained)}</strong>.</>
+                )}
+              </p>
+            )}
 
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button className="btn btn-ghost btn-sm" onClick={() => setShowCancelModal(false)}>
                 Go Back
               </button>
-              <button className="btn btn-danger btn-sm" onClick={onConfirmCancel}>
+              <button className="btn btn-danger btn-sm" onClick={onConfirmCancel} disabled={cancelPctOver}>
                 Confirm Cancellation
               </button>
             </div>
@@ -447,7 +523,13 @@ export default function BookingDetailPage() {
             {showCancel && (
               <button
                 className="btn btn-danger btn-sm"
-                onClick={() => setShowCancelModal(true)}
+                onClick={() => {
+                  if (cancelCalc) {
+                    setCancelRefundPct(String(cancelCalc.refundPct ?? 0));
+                    setCancelCnPct(String(cancelCalc.creditNotePct ?? 0));
+                  }
+                  setShowCancelModal(true);
+                }}
               >
                 Cancel
               </button>
@@ -573,8 +655,8 @@ export default function BookingDetailPage() {
             <BkgRow label="Source" value={b.source || "—"} last />
           </div>
 
-          {/* Guest Packs Count — one row per date range, before charges */}
-          <SectionHeader>Guest Packs Count</SectionHeader>
+          {/* PAX Count — one row per date range, before charges */}
+          <SectionHeader>PAX Count</SectionHeader>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
               <thead>
@@ -582,7 +664,7 @@ export default function BookingDetailPage() {
                   {[
                     { h: "C-in", left: true },
                     { h: "C-out", left: true },
-                    { h: "A", left: false },
+                    { h: "AD", left: false },
                     { h: "Sr. Ct", left: false },
                     { h: "K 10-16", left: false },
                     { h: "K 6-10", left: false },

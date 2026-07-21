@@ -142,7 +142,7 @@ export default function DashboardPage() {
       .filter((row) => row.total > 0);
   }, [rooms, bookings, foDate]);
 
-  // ───── Front Office: Guest Pax Count for the selected date ─────
+  // ───── Front Office: PAX Count for the selected date ─────
   // Counts come from the segment covering the date (bookings with multiple
   // date ranges carry different pax/meals per segment); booking-level fallback.
   const guestPaxToday = useMemo(() => {
@@ -258,7 +258,7 @@ export default function DashboardPage() {
         <th>Guest Name</th>
         <th style={{ textAlign: "center", width: 48 }}>Day</th>
         <th>Room No's</th>
-        <th style={{ textAlign: "center", width: 44 }}>A</th>
+        <th style={{ textAlign: "center", width: 44 }}>AD</th>
         <th style={{ textAlign: "center", width: 52 }}>Sr.Ct</th>
         <th style={{ textAlign: "center", width: 52 }}>K&gt;14</th>
         <th style={{ textAlign: "center", width: 52 }}>K&lt;14</th>
@@ -480,10 +480,10 @@ export default function DashboardPage() {
           </table>
         </div>
 
-        {/* Guest Pax Count */}
+        {/* PAX Count */}
         <div className="tbl-wrap">
           <div className="tbl-hd">
-            <h3>Guest Pax Count &mdash; {foDayLabel}</h3>
+            <h3>PAX Count &mdash; {foDayLabel}</h3>
           </div>
           <table>
             <thead>
