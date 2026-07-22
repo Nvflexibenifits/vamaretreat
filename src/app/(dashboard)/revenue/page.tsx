@@ -105,12 +105,16 @@ export default function RevenuePage() {
         const other = isRefundCancel ? 0 : otherRaw;
         const gst5 = isRefundCancel ? 0 : gst5Raw;
         const gst18 = isRefundCancel ? 0 : gst18Raw;
-        // Refund-case revenue = charge retained + any credit-note portion
-        // (the CN part stays with the hotel), so the balance column shows
-        // exactly the cash refund still owed to the guest.
-        const total = isRefundCancel
+        // Value a cancelled booking actually keeps: cancellation charge
+        // retained plus any credit note issued (the CN worth stays with the
+        // hotel; the uncollected balance never arrives).
+        const retained = isCancelled
           ? (b.cancellationDetails?.cancellationCharge ?? 0) + (b.cancellationDetails?.creditNoteAmount ?? 0)
-          : b.grandTotal;
+          : 0;
+        const total = isRefundCancel ? retained : b.grandTotal;
+        // Contribution to the Total Charges (revenue) card: basic charges for
+        // live bookings, only the retained worth for cancelled ones.
+        const cardRevenue = isCancelled ? retained : roomNet + mealNet + other;
 
         let bank = 0, cash = 0, crNote = 0;
         (b.payments ?? []).forEach((p) => {
@@ -121,14 +125,23 @@ export default function RevenuePage() {
         });
         // Legacy bookings may carry an advance without itemized payments
         if (bank + cash + crNote === 0 && b.advance > 0) bank = b.advance;
+        const received = bank + cash + crNote;
 
         // Recorded refund payouts settle the refund-due balance
         const refundsPaid = isCancelled
           ? (b.cancellationDetails?.refundPayouts ?? []).reduce((s, p) => s + p.amount, 0)
           : 0;
-        // Round to whole rupees so paise residue doesn't read as refund due
-        const bal = Math.round(bank + cash + crNote - refundsPaid - total);
-        return { b, roomNet, mealNet, other, gst5, gst18, total, bank, cash, crNote, bal, isCancelled };
+
+        // Balance convention: positive = pending from guest (amber),
+        // negative = refund the hotel owes the guest (purple).
+        // Cancelled bookings never have a pending side — credit-note
+        // cancellations settle to 0, refund cancellations show only the
+        // unpaid refund as negative until Record Refund clears it.
+        let bal: number;
+        if (!isCancelled) bal = Math.round(total - received);
+        else if (isRefundCancel) bal = Math.min(0, Math.round(retained + refundsPaid - received));
+        else bal = 0;
+        return { b, roomNet, mealNet, other, gst5, gst18, total, cardRevenue, bank, cash, crNote, bal, isCancelled };
       });
   }, [bookings, search, rangeFrom, rangeTo]);
 
@@ -142,12 +155,13 @@ export default function RevenuePage() {
           gst5: t.gst5 + r.gst5,
           gst18: t.gst18 + r.gst18,
           total: t.total + r.total,
+          cardRevenue: t.cardRevenue + r.cardRevenue,
           bank: t.bank + r.bank,
           cash: t.cash + r.cash,
           crNote: t.crNote + r.crNote,
           bal: t.bal + r.bal,
         }),
-        { roomNet: 0, mealNet: 0, other: 0, gst5: 0, gst18: 0, total: 0, bank: 0, cash: 0, crNote: 0, bal: 0 }
+        { roomNet: 0, mealNet: 0, other: 0, gst5: 0, gst18: 0, total: 0, cardRevenue: 0, bank: 0, cash: 0, crNote: 0, bal: 0 }
       ),
     [tableRows]
   );
@@ -160,7 +174,7 @@ export default function RevenuePage() {
   const pendingPayments = pendingBookings.reduce((s, b) => s + b.balance, 0);
 
   const refundsDue = useMemo(
-    () => tableRows.filter((r) => r.bal > 0).reduce((s, r) => s + r.bal, 0),
+    () => tableRows.filter((r) => r.bal < 0).reduce((s, r) => s - r.bal, 0),
     [tableRows]
   );
 
@@ -269,9 +283,9 @@ export default function RevenuePage() {
             Total Charges ({rangeLabel})
           </div>
           <div style={{ fontSize: 22, fontWeight: 800, color: "var(--sb)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>
-            {fmt(totals.roomNet + totals.mealNet + totals.other)}
+            {fmt(totals.cardRevenue)}
           </div>
-          <div style={{ fontSize: 10, color: "var(--t3)", marginTop: 2 }}>Excluding GST</div>
+          <div style={{ fontSize: 10, color: "var(--t3)", marginTop: 2 }}>Excluding GST · cancelled bookings counted at retained value</div>
         </div>
         <div style={{ background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r4)", padding: "14px 18px" }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>
@@ -385,12 +399,12 @@ export default function RevenuePage() {
                           ...numTd,
                           ...sectionBorder,
                           fontWeight: 700,
-                          background: r.bal < 0 ? "var(--amb-lt)" : r.bal > 0 ? "var(--pur-lt)" : undefined,
-                          color: r.bal < 0 ? "var(--amb)" : r.bal > 0 ? "var(--pur)" : "var(--grn)",
+                          background: r.bal > 0 ? "var(--amb-lt)" : r.bal < 0 ? "var(--pur-lt)" : undefined,
+                          color: r.bal > 0 ? "var(--amb)" : r.bal < 0 ? "var(--pur)" : "var(--grn)",
                         }}
-                        title={r.bal < 0 ? "Amount pending from guest" : r.bal > 0 ? "Excess received — refund due to guest" : "Settled"}
+                        title={r.bal > 0 ? "Amount pending from guest" : r.bal < 0 ? "Refund due to guest" : "Settled"}
                       >
-                        {r.bal === 0 ? "0" : r.bal > 0 ? `+${nfmt(r.bal)}` : `−${nfmt(-r.bal)}`}
+                        {r.bal === 0 ? "0" : r.bal > 0 ? nfmt(r.bal) : `−${nfmt(-r.bal)}`}
                       </td>
                       <td style={{ textAlign: "center", ...sectionBorder }}>
                         <Link href={`/bookings/${r.b.id}`} className="btn btn-ghost btn-xs">View</Link>
@@ -408,8 +422,8 @@ export default function RevenuePage() {
                     <td style={{ ...numTd, ...sectionBorder, fontWeight: 700 }}>{nfmt(totals.bank)}</td>
                     <td style={{ ...numTd, fontWeight: 700 }}>{nfmt(totals.cash)}</td>
                     <td style={{ ...numTd, fontWeight: 700 }}>{nfmt(totals.crNote)}</td>
-                    <td style={{ ...numTd, ...sectionBorder, fontWeight: 800, color: totals.bal < 0 ? "var(--amb)" : totals.bal > 0 ? "var(--pur)" : "var(--grn)" }}>
-                      {totals.bal === 0 ? "0" : totals.bal > 0 ? `+${nfmt(totals.bal)}` : `−${nfmt(-totals.bal)}`}
+                    <td style={{ ...numTd, ...sectionBorder, fontWeight: 800, color: totals.bal > 0 ? "var(--amb)" : totals.bal < 0 ? "var(--pur)" : "var(--grn)" }}>
+                      {totals.bal === 0 ? "0" : totals.bal > 0 ? nfmt(totals.bal) : `−${nfmt(-totals.bal)}`}
                     </td>
                     <td style={sectionBorder}></td>
                   </tr>
