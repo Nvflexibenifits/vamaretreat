@@ -174,8 +174,24 @@ export default function BookingsPage() {
                     <td>{b.nights}</td>
                     <td style={{ fontWeight: 600 }}>{fmt(b.grandTotal)}</td>
                     <td style={{ fontWeight: 500, color: "var(--grn)" }}>{fmt(b.grandTotal - b.balance)}</td>
-                    <td style={{ fontWeight: 500, color: b.balance > 0 ? "var(--amb)" : "var(--grn)" }}>
-                      {b.balance > 0 ? fmt(b.balance) : "Paid"}
+                    <td
+                      style={{
+                        fontWeight: 500,
+                        color:
+                          b.status === "Cancelled" || b.status === "Lost"
+                            ? "var(--t3)"
+                            : b.balance > 0
+                            ? "var(--amb)"
+                            : "var(--grn)",
+                      }}
+                    >
+                      {/* Dead bookings have no collectible balance; refunds and
+                          retention live in the cancellation details instead. */}
+                      {b.status === "Cancelled" || b.status === "Lost"
+                        ? "—"
+                        : b.balance > 0
+                        ? fmt(b.balance)
+                        : "Paid"}
                     </td>
                     <td><StatusBadge status={b.status} /></td>
                     <td style={{ fontSize: 11, color: "var(--t3)" }}>{b.rex}</td>

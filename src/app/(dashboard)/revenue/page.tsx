@@ -112,9 +112,10 @@ export default function RevenuePage() {
           ? (b.cancellationDetails?.cancellationCharge ?? 0) + (b.cancellationDetails?.creditNoteAmount ?? 0)
           : 0;
         const total = isRefundCancel ? retained : b.grandTotal;
-        // Contribution to the Total Charges (revenue) card: basic charges for
-        // live bookings, only the retained worth for cancelled ones.
-        const cardRevenue = isCancelled ? retained : roomNet + mealNet + other;
+        // Total Charges card: full billed charges ex-GST for every booking,
+        // regardless of cancellation outcome (per client: plain charges, not
+        // realized revenue).
+        const cardCharges = roomNetRaw + mealNetRaw + otherRaw;
 
         let bank = 0, cash = 0, crNote = 0;
         (b.payments ?? []).forEach((p) => {
@@ -141,7 +142,7 @@ export default function RevenuePage() {
         if (!isCancelled) bal = Math.round(total - received);
         else if (isRefundCancel) bal = Math.min(0, Math.round(retained + refundsPaid - received));
         else bal = 0;
-        return { b, roomNet, mealNet, other, gst5, gst18, total, cardRevenue, bank, cash, crNote, bal, isCancelled };
+        return { b, roomNet, mealNet, other, gst5, gst18, total, cardCharges, bank, cash, crNote, bal, isCancelled };
       });
   }, [bookings, search, rangeFrom, rangeTo]);
 
@@ -155,13 +156,13 @@ export default function RevenuePage() {
           gst5: t.gst5 + r.gst5,
           gst18: t.gst18 + r.gst18,
           total: t.total + r.total,
-          cardRevenue: t.cardRevenue + r.cardRevenue,
+          cardCharges: t.cardCharges + r.cardCharges,
           bank: t.bank + r.bank,
           cash: t.cash + r.cash,
           crNote: t.crNote + r.crNote,
           bal: t.bal + r.bal,
         }),
-        { roomNet: 0, mealNet: 0, other: 0, gst5: 0, gst18: 0, total: 0, cardRevenue: 0, bank: 0, cash: 0, crNote: 0, bal: 0 }
+        { roomNet: 0, mealNet: 0, other: 0, gst5: 0, gst18: 0, total: 0, cardCharges: 0, bank: 0, cash: 0, crNote: 0, bal: 0 }
       ),
     [tableRows]
   );
@@ -283,9 +284,9 @@ export default function RevenuePage() {
             Total Charges ({rangeLabel})
           </div>
           <div style={{ fontSize: 22, fontWeight: 800, color: "var(--sb)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>
-            {fmt(totals.cardRevenue)}
+            {fmt(totals.cardCharges)}
           </div>
-          <div style={{ fontSize: 10, color: "var(--t3)", marginTop: 2 }}>Excluding GST · cancelled bookings counted at retained value</div>
+          <div style={{ fontSize: 10, color: "var(--t3)", marginTop: 2 }}>Excluding GST · all bookings incl. cancelled</div>
         </div>
         <div style={{ background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r4)", padding: "14px 18px" }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>

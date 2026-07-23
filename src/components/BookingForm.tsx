@@ -134,6 +134,31 @@ function segsFromBooking(b: Booking, rates: PackageRates): FormSeg[] {
   }));
 }
 
+// Default meal pax from the segment's pax counts, based on who the package
+// is for (inferred from its name since the meal master has no audience field).
+function mealPaxFor(seg: FormSeg, pkgName: string): number {
+  const n = pkgName.toLowerCase();
+  const adults = parseInt(seg.adults) || 0;
+  const seniors = parseInt(seg.seniors) || 0;
+  const kids1016 = parseInt(seg.kidsAbove10) || 0;
+  const kids610 = parseInt(seg.kids6to10) || 0;
+  const infants = parseInt(seg.infants) || 0;
+  if (/driver|attendant/.test(n)) return parseInt(seg.drivers) || 0;
+  if (/pet/.test(n)) return parseInt(seg.pets) || 0;
+  if (/infant/.test(n)) return infants;
+  if (/child|kid/.test(n)) {
+    if (/10\s*[-–—]\s*16|above\s*10/.test(n)) return kids1016;
+    if (/6\s*[-–—]\s*10/.test(n)) return kids610;
+    if (/0\s*[-–—]\s*6/.test(n)) return infants;
+    return kids1016 + kids610;
+  }
+  if (/senior|sr\.?\s*citizen/.test(n)) return seniors;
+  // Adult packages cover senior citizens as well.
+  if (/adult/.test(n)) return adults + seniors;
+  // Individual meals and anything unrecognized: everyone taking meals.
+  return adults + seniors + kids1016 + kids610;
+}
+
 const cellInputStyle: React.CSSProperties = {
   width: "100%",
   padding: "5px 7px",
@@ -261,13 +286,43 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
         } else {
           roomIds.forEach((roomId) => {
             const existing = s.rows.filter((r) => r.roomId === roomId);
-            const sunThu = existing.find((r) => r.rowType === "sun-thu");
-            const friRow = existing.find((r) => r.rowType === "fri");
-            const satRow = existing.find((r) => r.rowType === "sat");
-            const first = existing[0];
-            if (wd > 0) newRows.push(sunThu ? { ...sunThu, nights: String(wd) } : { uid: newUid(), rowType: "sun-thu", roomId, tariff: first?.tariff ?? "0", nights: String(wd), numRooms: first?.numRooms ?? "1", discountPct: first?.discountPct ?? "0" });
-            if (fr > 0) newRows.push(friRow ? { ...friRow, nights: String(fr) } : { uid: newUid(), rowType: "fri", roomId, tariff: first?.tariff ?? "0", nights: String(fr), numRooms: first?.numRooms ?? "1", discountPct: first?.discountPct ?? "0" });
-            if (sa > 0) newRows.push(satRow ? { ...satRow, nights: String(sa) } : { uid: newUid(), rowType: "sat", roomId, tariff: first?.tariff ?? "0", nights: String(sa), numRooms: first?.numRooms ?? "1", discountPct: first?.discountPct ?? "0" });
+            const byType = {
+              "sun-thu": existing.filter((r) => r.rowType === "sun-thu"),
+              fri: existing.filter((r) => r.rowType === "fri"),
+              sat: existing.filter((r) => r.rowType === "sat"),
+            };
+            // Rows of the same day type are separate physical rooms, so a
+            // day type new to the date range clones the largest existing
+            // set — no room row is dropped or invented.
+            const refSet = [byType["sun-thu"], byType.fri, byType.sat].sort((a, b) => b.length - a.length)[0];
+            const seed = existing[0];
+            // Dates changed: reset each day-type's discount to the room's
+            // Master Setup default so stale discounts don't carry over.
+            const room = rooms.find((r) => r.id === roomId);
+            const discFor = (rt: string, fallback: string) => {
+              if (!room) return fallback;
+              return String(rt === "sat" ? room.weekendDiscount : rt === "fri" ? room.fridayDiscount : room.weekdayDiscount);
+            };
+            const buildType = (rt: "sun-thu" | "fri" | "sat", nights: number) => {
+              const own = byType[rt];
+              const src = own.length > 0 ? own : refSet;
+              if (src.length === 0) {
+                newRows.push({ uid: newUid(), rowType: rt, roomId, tariff: seed?.tariff ?? "0", nights: String(nights), numRooms: seed?.numRooms ?? "1", discountPct: discFor(rt, "0") });
+                return;
+              }
+              src.forEach((r) =>
+                newRows.push({
+                  ...r,
+                  uid: own.length > 0 ? r.uid : newUid(),
+                  rowType: rt,
+                  nights: String(nights),
+                  discountPct: discFor(rt, r.discountPct),
+                })
+              );
+            };
+            if (wd > 0) buildType("sun-thu", wd);
+            if (fr > 0) buildType("fri", fr);
+            if (sa > 0) buildType("sat", sa);
           });
         }
         return { ...s, checkin: newCheckin, checkout: newCheckout, rows: [...newRows, ...customRows] };
@@ -348,7 +403,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     setFormSegs((prev) =>
       prev.map((s) =>
         s.id === segId
-          ? { ...s, mealRows: [...s.mealRows, { uid: newUid(), categoryId: mealCategories[0]?.id ?? "", packageId: "", name: "", rate: "0", pax: s.adults }] }
+          ? { ...s, mealRows: [...s.mealRows, { uid: newUid(), categoryId: mealCategories[0]?.id ?? "", packageId: "", name: "", rate: "0", pax: String((parseInt(s.adults) || 0) + (parseInt(s.seniors) || 0)) }] }
           : s
       )
     );
@@ -414,10 +469,19 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
             existing.pricingRows.push(stampedCalc);
           } else {
             const roomObj = rooms.find((rm) => rm.id === r.roomId);
+            // Rooms needed for this category: rows of the same day type are
+            // separate physical rooms (sum); different day types share the
+            // same rooms across the stay (max).
+            const perType = new Map<string, number>();
+            seg.rows
+              .filter((rr) => rr.roomId === r.roomId)
+              .forEach((rr) =>
+                perType.set(rr.rowType, (perType.get(rr.rowType) || 0) + (parseInt(rr.numRooms) || 1))
+              );
             roomMap.set(r.roomId, {
               roomId: r.roomId,
               roomName: roomObj?.name ?? "",
-              numRooms: parseInt(r.numRooms) || 1,
+              numRooms: Math.max(1, ...perType.values()),
               discountPct: parseFloat(r.discountPct) || 0,
               pricingRows: [stampedCalc],
             });
@@ -1332,6 +1396,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                                           packageId: e.target.value,
                                           name: pkg?.name ?? "",
                                           rate: pkg ? String(pkg.rate) : mr.rate,
+                                          ...(pkg && { pax: String(mealPaxFor(seg, pkg.name)) }),
                                         });
                                       }}
                                       style={{ width: "100%", padding: "5px 8px", border: "1px solid var(--bd)", borderRadius: "var(--r3)", fontSize: 12, background: "var(--surf)", outline: "none" }}

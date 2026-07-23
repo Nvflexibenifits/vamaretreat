@@ -264,6 +264,16 @@ export function roomsHeldOnDate(b: Booking, date: string): string[] {
   return [...held];
 }
 
+// Occupancy end for venue/bulk room blocks: a same-day block (dayout) holds
+// its single date, i.e. occupies [checkin, checkin + 1 day) so it can't be
+// double-booked for that night.
+export function blockOccupancyEnd(checkin: string, checkout: string): string {
+  if (checkout > checkin) return checkout;
+  const d = new Date(checkin);
+  d.setDate(d.getDate() + 1);
+  return d.toISOString().split("T")[0];
+}
+
 export function findAvailableRoomIds(
   category: string,
   checkin: string,
@@ -291,7 +301,7 @@ export function findAvailableRoomIds(
     });
   bulkBlocks
     .filter((blk) => blk.id !== ignoreBlockId)
-    .filter((blk) => rangesOverlap(blk.checkin, blk.checkout, checkin, checkout))
+    .filter((blk) => rangesOverlap(blk.checkin, blockOccupancyEnd(blk.checkin, blk.checkout), checkin, checkout))
     .forEach((blk) => blk.rows.forEach((row) => row.roomIds.forEach((r) => occupied.add(r))));
   return inventory
     .filter((r) => r.cat === category && r.active && !occupied.has(r.id))

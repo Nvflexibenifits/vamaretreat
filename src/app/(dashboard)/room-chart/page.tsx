@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "@/lib/store";
-import { findAvailableRoomIds, fmt, fmtIN, roomsHeldOnDate, todayStr } from "@/lib/utils";
+import { blockOccupancyEnd, findAvailableRoomIds, fmt, fmtIN, roomsHeldOnDate, todayStr } from "@/lib/utils";
 import type {
   Booking,
   BulkRoomBlock,
@@ -127,7 +127,6 @@ export default function RoomChartPage() {
     "complimentary"
   );
   const [upAmount, setUpAmount] = useState("");
-  const [upReason, setUpReason] = useState("");
 
   useEffect(() => {
     setToday(todayStr());
@@ -228,7 +227,7 @@ export default function RoomChartPage() {
       });
     bulkRoomBlocks.forEach((blk) => {
       const cur = new Date(blk.checkin);
-      const end = new Date(blk.checkout);
+      const end = new Date(blockOccupancyEnd(blk.checkin, blk.checkout));
       while (cur < end) {
         const ds = cur.toISOString().split("T")[0];
         blk.rows.forEach((row) =>
@@ -246,7 +245,7 @@ export default function RoomChartPage() {
     const map: Record<string, VenueBlock> = {};
     venueBlocks.forEach((vb) => {
       const cur = new Date(vb.checkin);
-      const end = new Date(vb.checkout);
+      const end = new Date(blockOccupancyEnd(vb.checkin, vb.checkout));
       while (cur < end) {
         const ds = cur.toISOString().split("T")[0];
         map[vb.venueId + "|" + ds] = vb;
@@ -301,6 +300,56 @@ export default function RoomChartPage() {
     window.addEventListener("scroll", onScroll, true);
     return () => window.removeEventListener("scroll", onScroll, true);
   }, []);
+
+  // Auto-scroll the main pane while a drag hovers near its top/bottom edge —
+  // native HTML5 drag never scrolls a container, so rows outside the visible
+  // window would otherwise be unreachable as drop targets. Scrolling is
+  // time-based and driven by both a rAF loop (smooth when the pointer sits
+  // still) and the dragover events themselves (works even when the browser
+  // throttles rAF).
+  useEffect(() => {
+    if (!drag) return;
+    const scroller = document.getElementById("views");
+    if (!scroller) return;
+    const ZONE = 64; // px from pane edge where scrolling kicks in
+    const MAX_SPEED = 900; // px per second at the very edge
+    let pointerY: number | null = null;
+    let lastT = performance.now();
+    let raf = 0;
+    const step = (now: number) => {
+      const dt = Math.min(Math.max(now - lastT, 0) / 1000, 0.1);
+      lastT = now;
+      if (pointerY === null || dt === 0) return;
+      const rect = scroller.getBoundingClientRect();
+      const fromTop = pointerY - rect.top;
+      const fromBottom = rect.bottom - pointerY;
+      if (fromTop < ZONE) {
+        scroller.scrollTop -= MAX_SPEED * (1 - Math.max(fromTop, 0) / ZONE) * dt;
+      } else if (fromBottom < ZONE) {
+        scroller.scrollTop += MAX_SPEED * (1 - Math.max(fromBottom, 0) / ZONE) * dt;
+      }
+    };
+    const loop = (now: number) => {
+      step(now);
+      raf = requestAnimationFrame(loop);
+    };
+    const onDragOver = (e: DragEvent) => {
+      pointerY = e.clientY;
+      step(performance.now());
+    };
+    const onDragLeave = (e: DragEvent) => {
+      // Pointer left the window: stop scrolling until it comes back.
+      if (e.relatedTarget === null) pointerY = null;
+    };
+    document.addEventListener("dragover", onDragOver);
+    document.addEventListener("dragleave", onDragLeave);
+    raf = requestAnimationFrame(loop);
+    return () => {
+      document.removeEventListener("dragover", onDragOver);
+      document.removeEventListener("dragleave", onDragLeave);
+      cancelAnimationFrame(raf);
+    };
+  }, [drag]);
 
   const unalloc = bookings.filter(
     (b) =>
@@ -370,19 +419,21 @@ export default function RoomChartPage() {
         (vb) =>
           vb.id !== ignoreId &&
           vb.venueId === venueId &&
-          vb.checkin < checkout &&
-          checkin < vb.checkout
+          vb.checkin < blockOccupancyEnd(checkin, checkout) &&
+          checkin < blockOccupancyEnd(vb.checkin, vb.checkout)
       ) || null
     );
   };
 
   const bulkAvailability = useMemo(() => {
-    if (!uCheckin || !uCheckout || uCheckout <= uCheckin) return {} as Record<string, number>;
+    if (!uCheckin || !uCheckout || uCheckout < uCheckin) return {} as Record<string, number>;
+    // Same-day block (dayout) occupies its single date.
+    const effCheckout = blockOccupancyEnd(uCheckin, uCheckout);
     const editingBulkId = unifiedModal.open ? unifiedModal.editingBulkId : undefined;
     const result: Record<string, number> = {};
     rooms.forEach((r) => {
       result[r.id] = findAvailableRoomIds(
-        r.id, uCheckin, uCheckout, bookings, roomInventory,
+        r.id, uCheckin, effCheckout, bookings, roomInventory,
         undefined, bulkRoomBlocks, editingBulkId
       ).length;
     });
@@ -391,7 +442,7 @@ export default function RoomChartPage() {
 
   const saveUnified = (status: "Tentative" | "Confirmed") => {
     if (!uName.trim()) { showNotif("Enter group / guest name", "error"); return; }
-    if (!uCheckin || !uCheckout || uCheckout <= uCheckin) { showNotif("Pick valid check-in and check-out dates", "error"); return; }
+    if (!uCheckin || !uCheckout || uCheckout < uCheckin) { showNotif("Pick valid check-in and check-out dates", "error"); return; }
     if (!uBulkOpen && !uVenueOpen) { showNotif("Expand at least one section — Bulk Rooms or Venue", "error"); return; }
 
     const pax = parseInt(uPax) || 0;
@@ -419,7 +470,7 @@ export default function RoomChartPage() {
       for (const row of uCatRows) {
         if (!row.catId || row.count <= 0) continue;
         const available = findAvailableRoomIds(
-          row.catId, uCheckin, uCheckout, bookings, roomInventory,
+          row.catId, uCheckin, blockOccupancyEnd(uCheckin, uCheckout), bookings, roomInventory,
           undefined, bulkRoomBlocks, editingBulkId
         );
         if (available.length < row.count) {
@@ -596,7 +647,6 @@ export default function RoomChartPage() {
       });
       setUpKind("complimentary");
       setUpAmount("");
-      setUpReason("");
     } else {
       // Same category — apply override silently
       applyNightOverride(booking.id, {
@@ -616,10 +666,6 @@ export default function RoomChartPage() {
 
   const confirmUpgrade = () => {
     if (!pendingUpgrade) return;
-    if (upKind === "complimentary" && !upReason.trim()) {
-      showNotif("Reason is required for a complimentary upgrade", "error");
-      return;
-    }
     const amount = upKind === "paid" ? parseInt(upAmount) || 0 : 0;
     if (upKind === "paid" && amount <= 0) {
       showNotif("Enter a valid upgrade charge", "error");
@@ -633,7 +679,6 @@ export default function RoomChartPage() {
       upgradeDate: todayStr(),
       kind: upKind,
       extraAmount: amount,
-      reason: upKind === "complimentary" ? upReason.trim() : undefined,
       by: currentUser,
     };
     applyNightOverride(pendingUpgrade.bookingId, {
@@ -650,7 +695,6 @@ export default function RoomChartPage() {
     );
     setPendingUpgrade(null);
     setUpAmount("");
-    setUpReason("");
   };
 
   return (
@@ -1092,6 +1136,7 @@ export default function RoomChartPage() {
               <div className="field">
                 <label>Check-out *</label>
                 <input type="date" value={uCheckout} onChange={(e) => setUCheckout(e.target.value)} />
+                <div className="field-hint">Same as check-in for a dayout (blocks that date)</div>
               </div>
               <div className="field">
                 <label>Pax</label>
@@ -1266,7 +1311,11 @@ export default function RoomChartPage() {
               </span>
             </div>
             <div style={{ marginTop: 12, fontSize: 13, color: "var(--t2)" }}>
-              <div>{fmtIN(bulkDetail.checkin)} → {fmtIN(bulkDetail.checkout)}</div>
+              <div>
+                {bulkDetail.checkin === bulkDetail.checkout
+                  ? `${fmtIN(bulkDetail.checkin)} · Dayout (same-day)`
+                  : `${fmtIN(bulkDetail.checkin)} → ${fmtIN(bulkDetail.checkout)}`}
+              </div>
               {bulkDetail.pax > 0 && <div style={{ marginTop: 4 }}>{bulkDetail.pax} pax</div>}
               {bulkDetail.amount > 0 && <div style={{ marginTop: 4 }}>{fmt(bulkDetail.amount)}</div>}
             </div>
@@ -1362,21 +1411,7 @@ export default function RoomChartPage() {
               </label>
             </div>
 
-            {upKind === "complimentary" ? (
-              <div className="field">
-                <label>Reason *</label>
-                <input
-                  type="text"
-                  value={upReason}
-                  onChange={(e) => setUpReason(e.target.value)}
-                  placeholder="e.g. Anniversary, loyalty guest, ops gesture"
-                  autoFocus
-                />
-                <div className="field-hint">
-                  Shown on the booking detail for audit.
-                </div>
-              </div>
-            ) : (
+            {upKind === "paid" && (
               <div className="field">
                 <label>Upgrade Charge (₹) *</label>
                 <input
@@ -1620,8 +1655,9 @@ function VenueHoverCard({
         {venue.name} · {venue.type}
       </div>
       <div style={{ fontSize: 11, color: "var(--t3)", marginBottom: 8 }}>
-        {fmtIN(block.checkin)} to {fmtIN(block.checkout)} · {nights}{" "}
-        {nights === 1 ? "night" : "nights"}
+        {nights === 0
+          ? `${fmtIN(block.checkin)} · Dayout (same-day)`
+          : `${fmtIN(block.checkin)} to ${fmtIN(block.checkout)} · ${nights} ${nights === 1 ? "night" : "nights"}`}
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
@@ -1670,7 +1706,9 @@ function BulkHoverCard({ block, rect, rooms }: { block: BulkRoomBlock; rect: DOM
       </div>
       <div style={{ fontSize: 11, color: "var(--t3)", marginBottom: 6 }}>{block.guestName}</div>
       <div style={{ fontSize: 11, color: "var(--t3)", marginBottom: 6 }}>
-        {fmtIN(block.checkin)} to {fmtIN(block.checkout)} · {nights} {nights === 1 ? "night" : "nights"}
+        {nights === 0
+          ? `${fmtIN(block.checkin)} · Dayout (same-day)`
+          : `${fmtIN(block.checkin)} to ${fmtIN(block.checkout)} · ${nights} ${nights === 1 ? "night" : "nights"}`}
       </div>
       <div style={{ fontSize: 11, color: "var(--t3)", marginBottom: 6 }}>
         {totalRooms} room{totalRooms !== 1 ? "s" : ""} · {block.rows.map((r) => `${r.roomIds.length} ${rooms.find((rm) => rm.id === r.catId)?.name ?? r.catName}`).join(", ")}
