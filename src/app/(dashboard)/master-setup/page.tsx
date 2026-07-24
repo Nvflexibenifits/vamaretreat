@@ -817,7 +817,7 @@ function RoomPricingSection() {
               />
             </div>
             <div className="field">
-              <label>GST if tariff ≤ threshold</label>
+              <label>GST if net rate ≤ threshold</label>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <input
                   type="number"
@@ -832,7 +832,7 @@ function RoomPricingSection() {
               </div>
             </div>
             <div className="field">
-              <label>GST if tariff &gt; threshold</label>
+              <label>GST if net rate &gt; threshold</label>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <input
                   type="number"

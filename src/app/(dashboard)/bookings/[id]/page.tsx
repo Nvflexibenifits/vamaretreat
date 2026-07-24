@@ -674,9 +674,9 @@ export default function BookingDetailPage() {
                     { h: "C-out", left: true },
                     { h: "AD", left: false },
                     { h: "Sr. Ct", left: false },
-                    { h: "K 10-16", left: false },
-                    { h: "K 6-10", left: false },
-                    { h: "Inf 0-6", left: false },
+                    { h: "K > 6", left: false },
+                    { h: "K 3-6", left: false },
+                    { h: "Inf 0-3", left: false },
                     { h: "Pets", left: false },
                   ].map(({ h, left }, i) => (
                     <th key={i} style={{ padding: "8px 10px", fontSize: 11, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".3px", textAlign: left ? "left" : "center", whiteSpace: "nowrap" }}>

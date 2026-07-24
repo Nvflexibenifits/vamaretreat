@@ -167,7 +167,10 @@ export function calcPricingRow(
   roomMaster: RoomMaster[] = ROOMS
 ): PricingRow {
   const room = roomMaster.find((r) => r.id === roomId);
-  const gstRate = tariff > gstSettings.threshold ? gstSettings.aboveRate : gstSettings.belowRate;
+  // GST slab is decided by the per-night rate the guest actually pays
+  // (tariff net of discount), not the rack tariff.
+  const netRate = tariff * (1 - discountPct / 100);
+  const gstRate = netRate > gstSettings.threshold ? gstSettings.aboveRate : gstSettings.belowRate;
   const roomCharges = tariff * nights * numRooms;
   const discountAmt = roomCharges * (discountPct / 100);
   const netCharges = roomCharges - discountAmt;

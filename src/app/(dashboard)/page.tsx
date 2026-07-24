@@ -260,8 +260,8 @@ export default function DashboardPage() {
         <th>Room No's</th>
         <th style={{ textAlign: "center", width: 44 }}>AD</th>
         <th style={{ textAlign: "center", width: 52 }}>Sr.Ct</th>
-        <th style={{ textAlign: "center", width: 52 }}>K&gt;14</th>
-        <th style={{ textAlign: "center", width: 52 }}>K&lt;14</th>
+        <th style={{ textAlign: "center", width: 52 }}>K&gt;6</th>
+        <th style={{ textAlign: "center", width: 52 }}>K&le;6</th>
         <th style={{ textAlign: "center", width: 48 }}>Pets</th>
         <th style={{ textAlign: "center", width: 60 }}>Meals</th>
         <th style={{ textAlign: "right", width: 110, whiteSpace: "nowrap" }}>Pmt Pending</th>

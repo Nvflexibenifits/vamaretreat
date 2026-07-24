@@ -165,6 +165,13 @@ export default function BookingsPage() {
                       )
                     : 0;
                 const pending = b.status === "Cancelled" || b.status === "Lost" ? 0 : b.balance;
+                // Refund cancellations owe nothing beyond what the hotel
+                // retains — mirror the revenue register's Total column.
+                const amountDue =
+                  b.status === "Cancelled" && b.cancellationDetails?.resolution === "refund"
+                    ? (b.cancellationDetails.cancellationCharge ?? 0) +
+                      (b.cancellationDetails.creditNoteAmount ?? 0)
+                    : b.grandTotal;
                 return (
                   <tr key={b.id} onClick={() => router.push(`/bookings/${b.id}`)}>
                     <td>
@@ -182,7 +189,7 @@ export default function BookingsPage() {
                     <td>{fmtIN(b.checkin)}</td>
                     <td>{fmtIN(b.checkout)}</td>
                     <td>{b.nights}</td>
-                    <td style={{ fontWeight: 600 }}>{fmt(b.grandTotal)}</td>
+                    <td style={{ fontWeight: 600 }}>{fmt(amountDue)}</td>
                     <td style={{ fontWeight: 500, color: "var(--grn)" }}>{fmt(b.grandTotal - b.balance)}</td>
                     <td
                       style={{

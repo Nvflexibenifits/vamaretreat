@@ -22,6 +22,31 @@ export default function DashboardLayout({
     if (!sessionChecking && !isAuthed) router.replace("/login");
   }, [isAuthed, sessionChecking, router]);
 
+  // Select-all on focus for every number input, app-wide: typing into a
+  // pre-filled field (e.g. "2" adults) replaces the value instead of
+  // appending to it. The one-shot mouseup guard stops the click that gave
+  // focus from collapsing the selection; later clicks behave normally.
+  useEffect(() => {
+    let justFocused: HTMLInputElement | null = null;
+    const onFocusIn = (e: FocusEvent) => {
+      const t = e.target;
+      if (t instanceof HTMLInputElement && t.type === "number") {
+        t.select();
+        justFocused = t;
+      }
+    };
+    const onMouseUp = (e: MouseEvent) => {
+      if (justFocused && e.target === justFocused) e.preventDefault();
+      justFocused = null;
+    };
+    document.addEventListener("focusin", onFocusIn);
+    document.addEventListener("mouseup", onMouseUp);
+    return () => {
+      document.removeEventListener("focusin", onFocusIn);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+  }, []);
+
   if (sessionChecking || !isAuthed) return null;
 
   return (

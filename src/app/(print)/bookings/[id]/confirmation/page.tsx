@@ -285,9 +285,9 @@ export default function ConfirmationPage() {
               <th style={TH}>C-out</th>
               <th style={{ ...TH, textAlign: "center" }}>AD</th>
               <th style={{ ...TH, textAlign: "center" }}>Sr. Ct</th>
-              <th style={{ ...TH, textAlign: "center" }}>K 10-16</th>
-              <th style={{ ...TH, textAlign: "center" }}>K 6-10</th>
-              <th style={{ ...TH, textAlign: "center" }}>Inf 0-6</th>
+              <th style={{ ...TH, textAlign: "center" }}>K &gt; 6</th>
+              <th style={{ ...TH, textAlign: "center" }}>K 3-6</th>
+              <th style={{ ...TH, textAlign: "center" }}>Inf 0-3</th>
               <th style={{ ...TH, textAlign: "center" }}>Pets</th>
             </tr>
           </thead>

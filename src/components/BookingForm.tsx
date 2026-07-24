@@ -136,27 +136,30 @@ function segsFromBooking(b: Booking, rates: PackageRates): FormSeg[] {
 
 // Default meal pax from the segment's pax counts, based on who the package
 // is for (inferred from its name since the meal master has no audience field).
+// Buckets: kidsAbove10 = "Kids > 6" (eat as adults), kids6to10 = "Kids 3-6"
+// (free), infants = "Infants 0-3" (free). Seniors have their own packages.
 function mealPaxFor(seg: FormSeg, pkgName: string): number {
   const n = pkgName.toLowerCase();
   const adults = parseInt(seg.adults) || 0;
   const seniors = parseInt(seg.seniors) || 0;
-  const kids1016 = parseInt(seg.kidsAbove10) || 0;
-  const kids610 = parseInt(seg.kids6to10) || 0;
+  const kidsOver6 = parseInt(seg.kidsAbove10) || 0;
+  const kids3to6 = parseInt(seg.kids6to10) || 0;
   const infants = parseInt(seg.infants) || 0;
   if (/driver|attendant/.test(n)) return parseInt(seg.drivers) || 0;
   if (/pet/.test(n)) return parseInt(seg.pets) || 0;
   if (/infant/.test(n)) return infants;
   if (/child|kid/.test(n)) {
-    if (/10\s*[-–—]\s*16|above\s*10/.test(n)) return kids1016;
-    if (/6\s*[-–—]\s*10/.test(n)) return kids610;
-    if (/0\s*[-–—]\s*6/.test(n)) return infants;
-    return kids1016 + kids610;
+    if (/>\s*6|above\s*6|10\s*[-–—]\s*16|above\s*10/.test(n)) return kidsOver6;
+    if (/3\s*[-–—]\s*6|6\s*[-–—]\s*10/.test(n)) return kids3to6;
+    if (/0\s*[-–—]\s*3|0\s*[-–—]\s*6/.test(n)) return infants;
+    return kidsOver6 + kids3to6;
   }
   if (/senior|sr\.?\s*citizen/.test(n)) return seniors;
-  // Adult packages cover senior citizens as well.
-  if (/adult/.test(n)) return adults + seniors;
-  // Individual meals and anything unrecognized: everyone taking meals.
-  return adults + seniors + kids1016 + kids610;
+  // Adult packages cover kids above 6; seniors have separate packages.
+  if (/adult/.test(n)) return adults + kidsOver6;
+  // Individual meals and anything unrecognized: everyone on a paid meal
+  // (kids 3-6 and infants eat free).
+  return adults + seniors + kidsOver6;
 }
 
 const cellInputStyle: React.CSSProperties = {
@@ -396,14 +399,28 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   };
 
   const updateSegField = (segId: string, field: keyof FormSeg, value: string | boolean) => {
-    setFormSegs((prev) => prev.map((s) => s.id === segId ? { ...s, [field]: value } : s));
+    const paxFields: (keyof FormSeg)[] = ["adults", "seniors", "kidsAbove10", "kids6to10", "infants", "pets", "drivers"];
+    setFormSegs((prev) =>
+      prev.map((s) => {
+        if (s.id !== segId) return s;
+        const next = { ...s, [field]: value };
+        // Pax changes re-derive each selected package's meal pax so the meal
+        // table follows the guest counts (still editable afterwards).
+        if (paxFields.includes(field)) {
+          next.mealRows = next.mealRows.map((r) =>
+            r.name ? { ...r, pax: String(mealPaxFor(next, r.name)) } : r
+          );
+        }
+        return next;
+      })
+    );
   };
 
   const addMealRow = (segId: string) =>
     setFormSegs((prev) =>
       prev.map((s) =>
         s.id === segId
-          ? { ...s, mealRows: [...s.mealRows, { uid: newUid(), categoryId: mealCategories[0]?.id ?? "", packageId: "", name: "", rate: "0", pax: String((parseInt(s.adults) || 0) + (parseInt(s.seniors) || 0)) }] }
+          ? { ...s, mealRows: [...s.mealRows, { uid: newUid(), categoryId: mealCategories[0]?.id ?? "", packageId: "", name: "", rate: "0", pax: String((parseInt(s.adults) || 0) + (parseInt(s.kidsAbove10) || 0)) }] }
           : s
       )
     );
@@ -1145,9 +1162,9 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                       {[
                         { label: "Adults", field: "adults" as keyof FormSeg, min: 1 },
                         { label: "Sr. Citizens", field: "seniors" as keyof FormSeg, min: 0 },
-                        { label: "Kids 10–16", field: "kidsAbove10" as keyof FormSeg, min: 0 },
-                        { label: "Kids 6–10", field: "kids6to10" as keyof FormSeg, min: 0 },
-                        { label: "Infants (0–6)", field: "infants" as keyof FormSeg, min: 0 },
+                        { label: "Kids > 6", field: "kidsAbove10" as keyof FormSeg, min: 0 },
+                        { label: "Kids 3–6", field: "kids6to10" as keyof FormSeg, min: 0 },
+                        { label: "Infants (0–3)", field: "infants" as keyof FormSeg, min: 0 },
                         { label: "Pets", field: "pets" as keyof FormSeg, min: 0 },
                         { label: "Drivers", field: "drivers" as keyof FormSeg, min: 0 },
                       ].map(({ label, field, min }) => (
