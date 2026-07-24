@@ -1477,11 +1477,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                           </tbody>
                         </table>
                       </div>
-                    ) : (
-                      <div style={{ fontSize: 12, color: "var(--t3)" }}>
-                        No meal charges added. Click + Add Meal to pick a package, or add pets to show pet charges.
-                      </div>
-                    )}
+                    ) : null}
                   </div>
 
                   {/* Segment Grand Total */}

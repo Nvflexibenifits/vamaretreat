@@ -155,6 +155,16 @@ export default function BookingsPage() {
               </tr>
             ) : (
               data.map((b) => {
+                // Refund still owed to the guest on a refund-mode cancellation
+                const refundDue =
+                  b.status === "Cancelled" && b.cancellationDetails?.resolution === "refund"
+                    ? Math.max(
+                        0,
+                        (b.cancellationDetails.refundAmount ?? 0) -
+                          (b.cancellationDetails.refundPayouts ?? []).reduce((s, p) => s + p.amount, 0)
+                      )
+                    : 0;
+                const pending = b.status === "Cancelled" || b.status === "Lost" ? 0 : b.balance;
                 return (
                   <tr key={b.id} onClick={() => router.push(`/bookings/${b.id}`)}>
                     <td>
@@ -178,20 +188,21 @@ export default function BookingsPage() {
                       style={{
                         fontWeight: 500,
                         color:
-                          b.status === "Cancelled" || b.status === "Lost"
-                            ? "var(--t3)"
-                            : b.balance > 0
+                          pending > 0
                             ? "var(--amb)"
-                            : "var(--grn)",
+                            : refundDue > 0
+                            ? "var(--pur)"
+                            : "var(--t3)",
                       }}
+                      title={
+                        pending > 0
+                          ? "Amount pending from guest"
+                          : refundDue > 0
+                          ? "Refund due to guest"
+                          : "Settled"
+                      }
                     >
-                      {/* Dead bookings have no collectible balance; refunds and
-                          retention live in the cancellation details instead. */}
-                      {b.status === "Cancelled" || b.status === "Lost"
-                        ? "—"
-                        : b.balance > 0
-                        ? fmt(b.balance)
-                        : "Paid"}
+                      {pending > 0 ? fmt(pending) : refundDue > 0 ? `−${fmt(refundDue)}` : "0"}
                     </td>
                     <td><StatusBadge status={b.status} /></td>
                     <td style={{ fontSize: 11, color: "var(--t3)" }}>{b.rex}</td>

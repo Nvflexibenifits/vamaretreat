@@ -112,10 +112,6 @@ export default function RevenuePage() {
           ? (b.cancellationDetails?.cancellationCharge ?? 0) + (b.cancellationDetails?.creditNoteAmount ?? 0)
           : 0;
         const total = isRefundCancel ? retained : b.grandTotal;
-        // Total Charges card: full billed charges ex-GST for every booking,
-        // regardless of cancellation outcome (per client: plain charges, not
-        // realized revenue).
-        const cardCharges = roomNetRaw + mealNetRaw + otherRaw;
 
         let bank = 0, cash = 0, crNote = 0;
         (b.payments ?? []).forEach((p) => {
@@ -142,7 +138,7 @@ export default function RevenuePage() {
         if (!isCancelled) bal = Math.round(total - received);
         else if (isRefundCancel) bal = Math.min(0, Math.round(retained + refundsPaid - received));
         else bal = 0;
-        return { b, roomNet, mealNet, other, gst5, gst18, total, cardCharges, bank, cash, crNote, bal, isCancelled };
+        return { b, roomNet, mealNet, other, gst5, gst18, total, bank, cash, crNote, bal, isCancelled };
       });
   }, [bookings, search, rangeFrom, rangeTo]);
 
@@ -156,13 +152,12 @@ export default function RevenuePage() {
           gst5: t.gst5 + r.gst5,
           gst18: t.gst18 + r.gst18,
           total: t.total + r.total,
-          cardCharges: t.cardCharges + r.cardCharges,
           bank: t.bank + r.bank,
           cash: t.cash + r.cash,
           crNote: t.crNote + r.crNote,
           bal: t.bal + r.bal,
         }),
-        { roomNet: 0, mealNet: 0, other: 0, gst5: 0, gst18: 0, total: 0, cardCharges: 0, bank: 0, cash: 0, crNote: 0, bal: 0 }
+        { roomNet: 0, mealNet: 0, other: 0, gst5: 0, gst18: 0, total: 0, bank: 0, cash: 0, crNote: 0, bal: 0 }
       ),
     [tableRows]
   );
@@ -284,9 +279,9 @@ export default function RevenuePage() {
             Total Charges ({rangeLabel})
           </div>
           <div style={{ fontSize: 22, fontWeight: 800, color: "var(--sb)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>
-            {fmt(totals.cardCharges)}
+            {fmt(totals.roomNet + totals.mealNet + totals.other)}
           </div>
-          <div style={{ fontSize: 10, color: "var(--t3)", marginTop: 2 }}>Excluding GST · all bookings incl. cancelled</div>
+          <div style={{ fontSize: 10, color: "var(--t3)", marginTop: 2 }}>Excluding GST</div>
         </div>
         <div style={{ background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r4)", padding: "14px 18px" }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>
@@ -386,15 +381,15 @@ export default function RevenuePage() {
                           <span className="badge bd-lost" style={{ marginLeft: 5, fontSize: 8 }}>Cancelled</span>
                         )}
                       </td>
-                      <td style={{ ...numTd, ...sectionBorder }}>{r.roomNet > 0 ? nfmt(r.roomNet) : "—"}</td>
-                      <td style={numTd}>{r.mealNet > 0 ? nfmt(r.mealNet) : "—"}</td>
-                      <td style={numTd}>{r.other > 0 ? nfmt(r.other) : "—"}</td>
-                      <td style={{ ...numTd, color: "var(--t3)" }}>{r.gst5 > 0 ? nfmt(r.gst5) : "—"}</td>
-                      <td style={{ ...numTd, color: "var(--t3)" }}>{r.gst18 > 0 ? nfmt(r.gst18) : "—"}</td>
+                      <td style={{ ...numTd, ...sectionBorder }}>{nfmt(r.roomNet)}</td>
+                      <td style={numTd}>{nfmt(r.mealNet)}</td>
+                      <td style={numTd}>{nfmt(r.other)}</td>
+                      <td style={{ ...numTd, color: "var(--t3)" }}>{nfmt(r.gst5)}</td>
+                      <td style={{ ...numTd, color: "var(--t3)" }}>{nfmt(r.gst18)}</td>
                       <td style={{ ...numTd, fontWeight: 700 }}>{nfmt(r.total)}</td>
-                      <td style={{ ...numTd, ...sectionBorder }}>{r.bank > 0 ? nfmt(r.bank) : "—"}</td>
-                      <td style={numTd}>{r.cash > 0 ? nfmt(r.cash) : "—"}</td>
-                      <td style={numTd}>{r.crNote > 0 ? nfmt(r.crNote) : "—"}</td>
+                      <td style={{ ...numTd, ...sectionBorder }}>{nfmt(r.bank)}</td>
+                      <td style={numTd}>{nfmt(r.cash)}</td>
+                      <td style={numTd}>{nfmt(r.crNote)}</td>
                       <td
                         style={{
                           ...numTd,
