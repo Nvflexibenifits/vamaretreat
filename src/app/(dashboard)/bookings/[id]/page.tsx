@@ -905,6 +905,54 @@ export default function BookingDetailPage() {
             </>
           )}
 
+          {/* Add-on Charges — itemized extras saved on the booking */}
+          {(b.extras ?? []).length > 0 && (
+            <>
+              <SectionHeader>Add-on Charges</SectionHeader>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1000 }}>
+                  <thead>
+                    <tr style={{ background: "var(--surf2)", borderBottom: "2px solid var(--bd)" }}>
+                      {["Charge", "", "", "", "Charges", "", "", "", "", "GST %", "GST Amt", "Total"].map((h, i) => (
+                        <th key={i} style={{ padding: "8px 10px", fontSize: 11, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".3px", textAlign: i === 0 ? "left" : "right", whiteSpace: "nowrap" }}>
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(b.extras ?? []).map((e, i) => {
+                      const gst = e.gst ?? 0;
+                      const pct = e.amount > 0 ? Math.round((gst / e.amount) * 100) : 0;
+                      return (
+                        <tr key={i} style={{ borderBottom: "1px solid var(--bd)" }}>
+                          <td style={{ padding: "8px 10px", fontSize: 12, color: "var(--t1)", fontWeight: 500 }}>
+                            {e.name}
+                            <div style={{ fontSize: 10, color: "var(--t3)", fontWeight: 500 }}>{fmtIN(e.date)} · {e.by}</div>
+                          </td>
+                          <td></td><td></td><td></td>
+                          <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right" }}>{fmt(e.amount)}</td>
+                          <td></td><td></td><td></td><td></td>
+                          <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right" }}>{pct}%</td>
+                          <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right" }}>{fmt(gst)}</td>
+                          <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right", fontWeight: 700 }}>{fmt(e.amount + gst)}</td>
+                        </tr>
+                      );
+                    })}
+                    <tr style={{ background: "var(--surf2)", fontWeight: 700, borderTop: "2px solid var(--bd)" }}>
+                      <td colSpan={4} style={{ padding: "9px 10px", fontSize: 12, color: "var(--t1)" }}>Total Add-on Charges</td>
+                      <td style={{ padding: "9px 10px", fontSize: 12, textAlign: "right" }}>{fmt((b.extras ?? []).reduce((s, e) => s + e.amount, 0))}</td>
+                      <td></td><td></td><td></td><td></td>
+                      <td></td>
+                      <td style={{ padding: "9px 10px", fontSize: 12, textAlign: "right" }}>{fmt((b.extras ?? []).reduce((s, e) => s + (e.gst ?? 0), 0))}</td>
+                      <td style={{ padding: "9px 10px", fontSize: 12, textAlign: "right", color: "var(--t1)" }}>{fmt((b.extras ?? []).reduce((s, e) => s + e.amount + (e.gst ?? 0), 0))}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
           {/* Grand Total / Advance / Balance */}
           <div style={{ borderTop: "2px solid var(--bd)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", background: "var(--amb-lt)", borderBottom: "1px solid var(--bd)" }}>

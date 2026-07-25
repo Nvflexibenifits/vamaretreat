@@ -16,7 +16,7 @@ import {
   todayStr,
   tryAssignRooms,
 } from "@/lib/utils";
-import type { Booking, BookingSegment, BookingStatus, PackageRates, PricingRow, PricingRowType, SegmentMealItem, SegmentRoom } from "@/types";
+import type { Booking, BookingSegment, BookingStatus, Extra, PackageRates, PricingRow, PricingRowType, SegmentMealItem, SegmentRoom } from "@/types";
 import { COUNTRY_CODES } from "@/lib/data";
 
 type FormRow = {
@@ -240,8 +240,19 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
 
   const [errors, setErrors] = useState<FieldErrors>({});
 
-  type AddOnRow = { uid: string; category: string; amount: string; gstPct: string };
-  const [addOnRows, setAddOnRows] = useState<AddOnRow[]>([]);
+  type AddOnRow = { uid: string; category: string; amount: string; gstPct: string; date?: string; by?: string };
+  // Edit mode: load saved extras back as editable add-on rows so they stay
+  // visible and keep counting toward the grand total on re-save.
+  const [addOnRows, setAddOnRows] = useState<AddOnRow[]>(() =>
+    (initial?.extras ?? []).map((e) => ({
+      uid: newUid(),
+      category: e.name,
+      amount: String(e.amount),
+      gstPct: e.amount > 0 && e.gst ? String(Math.round((e.gst / e.amount) * 10000) / 100) : "0",
+      date: e.date,
+      by: e.by,
+    }))
+  );
 
   type PaymentRow = { uid: string; date: string; amount: string; mode: string; cnCode: string };
   const todayDate = typeof window !== "undefined" ? new Date().toISOString().split("T")[0] : "";
@@ -594,6 +605,20 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   const totalAddOnGst = addOnTotals.reduce((s, r) => s + r.gstAmt, 0);
   const totalAddOn = addOnTotals.reduce((s, r) => s + r.total, 0);
 
+  // Add-on rows persisted on the booking as itemized extras (gst = GST amount)
+  const builtExtras: Extra[] = addOnRows
+    .map((r) => {
+      const amt = parseFloat(r.amount) || 0;
+      return {
+        name: r.category.trim() || "Add-on Charge",
+        amount: amt,
+        gst: (amt * (parseFloat(r.gstPct) || 0)) / 100,
+        date: r.date || todayDate,
+        by: r.by || currentUser,
+      };
+    })
+    .filter((e) => e.amount > 0);
+
   const grandTotal = totalRoomCharges + totalMealPet + totalAddOn;
   const balance = Math.max(0, grandTotal - totalReceived);
 
@@ -757,7 +782,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
           by: currentUser,
           ...(p.mode === "Credit Note" && p.cnCode.trim() ? { creditNoteCode: p.cnCode.trim() } : {}),
         })),
-      extras: [],
+      extras: builtExtras,
     };
   };
 
@@ -847,6 +872,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       totalRoomCharges,
       totalMealCharges: totalMealPet,
       grandTotal,
+      extras: builtExtras,
 
       ...(allPayments !== undefined && { payments: allPayments }),
       ...(newAdvance !== undefined && {

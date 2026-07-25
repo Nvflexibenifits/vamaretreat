@@ -101,8 +101,13 @@ export default function ConfirmationPage() {
   const totalMealPetGst = mealGst + petGstAmt + driverMealGstAmt;
   const totalMealPet = totalMealAmt + totalPetAmt + totalDriverMealAmt;
 
-  const grandTotal = totalRoomAmt + totalMealPet;
-  const grandRaw = totalRoomBaseCharges + totalMealPetCharges;
+  const extras = b.extras ?? [];
+  const extrasBasic = extras.reduce((s, e) => s + e.amount, 0);
+  const extrasGst = extras.reduce((s, e) => s + (e.gst ?? 0), 0);
+  const extrasTotal = extrasBasic + extrasGst;
+
+  const grandTotal = totalRoomAmt + totalMealPet + extrasTotal;
+  const grandRaw = totalRoomBaseCharges + totalMealPetCharges + extrasBasic;
 
   const showMealTable = b.mealOn || (b.pets || 0) > 0 || (b.driverMealOn ?? false);
 
@@ -490,6 +495,53 @@ export default function ConfirmationPage() {
                 <td style={TD_HEAD}></td>
                 <td style={TD_HEAD_NUM}>{fmt(totalMealPetGst)}</td>
                 <td style={TD_HEAD_NUM}>{fmt(totalMealPet)}</td>
+              </tr>
+            </tbody>
+          </table>
+        )}
+
+        {/* Add-on Charges */}
+        {extras.length > 0 && (
+          <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 4 }}>
+            <thead>
+              <tr>
+                <th style={TH}>Add-on Charge</th>
+                <th style={TH}></th>
+                <th style={TH}></th>
+                <th style={TH}></th>
+                <th style={{ ...TH, textAlign: "right" }}>Charges</th>
+                <th style={TH}></th>
+                <th style={TH}></th>
+                <th style={TH}></th>
+                <th style={TH}></th>
+                <th style={{ ...TH, textAlign: "right" }}>GST %</th>
+                <th style={{ ...TH, textAlign: "right" }}>GST Amt</th>
+                <th style={{ ...TH, textAlign: "right" }}>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {extras.map((e, i) => {
+                const gst = e.gst ?? 0;
+                const pct = e.amount > 0 ? Math.round((gst / e.amount) * 100) : 0;
+                return (
+                  <tr key={i}>
+                    <td style={TD}>{e.name}</td>
+                    <td style={TD}></td><td style={TD}></td><td style={TD}></td>
+                    <td style={TD_NUM}>{fmt(e.amount)}</td>
+                    <td style={TD}></td><td style={TD}></td><td style={TD}></td><td style={TD}></td>
+                    <td style={TD_NUM}>{pct}%</td>
+                    <td style={TD_NUM}>{fmt(gst)}</td>
+                    <td style={TD_NUM}>{fmt(e.amount + gst)}</td>
+                  </tr>
+                );
+              })}
+              <tr>
+                <td style={TD_HEAD} colSpan={4}>Total Add-on Charges</td>
+                <td style={TD_HEAD_NUM}>{fmt(extrasBasic)}</td>
+                <td style={TD_HEAD}></td><td style={TD_HEAD}></td><td style={TD_HEAD}></td><td style={TD_HEAD}></td>
+                <td style={TD_HEAD}></td>
+                <td style={TD_HEAD_NUM}>{fmt(extrasGst)}</td>
+                <td style={TD_HEAD_NUM}>{fmt(extrasTotal)}</td>
               </tr>
             </tbody>
           </table>

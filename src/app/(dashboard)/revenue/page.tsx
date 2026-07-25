@@ -97,14 +97,33 @@ export default function RevenuePage() {
         });
         const mealNetRaw = b.mealTotal + b.petTotal + (b.driverMealTotal ?? 0);
         gst18Raw += b.mealGst + b.petGst + (b.driverMealGst ?? 0);
-        // Add-on charges are stored rolled into grandTotal (incl. their GST)
-        const otherRaw = Math.max(0, b.grandTotal - b.totalRoomCharges - b.totalMealCharges);
+        // Itemized add-ons: net amount in Other, GST bucketed by its actual
+        // rate — 5% and 18% join their columns, anything else goes to GST Other.
+        const extrasList = b.extras ?? [];
+        const extrasNetRaw = extrasList.reduce((s, e) => s + e.amount, 0);
+        let extrasGst = 0;
+        let gstOtherRaw = 0;
+        extrasList.forEach((e) => {
+          const gst = e.gst ?? 0;
+          if (gst <= 0) return;
+          const pct = e.amount > 0 ? Math.round((gst / e.amount) * 100) : 0;
+          if (pct === 5) gst5Raw += gst;
+          else if (pct === 18) gst18Raw += gst;
+          else gstOtherRaw += gst;
+          extrasGst += gst;
+        });
+        // Legacy bookings rolled add-ons into grandTotal without itemizing;
+        // whatever the itemized extras don't explain stays as a gross remainder.
+        const otherRaw =
+          extrasNetRaw +
+          Math.max(0, b.grandTotal - b.totalRoomCharges - b.totalMealCharges - extrasNetRaw - extrasGst);
 
         const roomNet = isRefundCancel ? 0 : roomNetRaw;
         const mealNet = isRefundCancel ? 0 : mealNetRaw;
         const other = isRefundCancel ? 0 : otherRaw;
         const gst5 = isRefundCancel ? 0 : gst5Raw;
         const gst18 = isRefundCancel ? 0 : gst18Raw;
+        const gstOther = isRefundCancel ? 0 : gstOtherRaw;
         // Value a cancelled booking actually keeps: cancellation charge
         // retained plus any credit note issued (the CN worth stays with the
         // hotel; the uncollected balance never arrives).
@@ -138,7 +157,7 @@ export default function RevenuePage() {
         if (!isCancelled) bal = Math.round(total - received);
         else if (isRefundCancel) bal = Math.min(0, Math.round(retained + refundsPaid - received));
         else bal = 0;
-        return { b, roomNet, mealNet, other, gst5, gst18, total, bank, cash, crNote, bal, isCancelled };
+        return { b, roomNet, mealNet, other, gst5, gst18, gstOther, total, bank, cash, crNote, bal, isCancelled };
       });
   }, [bookings, search, rangeFrom, rangeTo]);
 
@@ -151,13 +170,14 @@ export default function RevenuePage() {
           other: t.other + r.other,
           gst5: t.gst5 + r.gst5,
           gst18: t.gst18 + r.gst18,
+          gstOther: t.gstOther + r.gstOther,
           total: t.total + r.total,
           bank: t.bank + r.bank,
           cash: t.cash + r.cash,
           crNote: t.crNote + r.crNote,
           bal: t.bal + r.bal,
         }),
-        { roomNet: 0, mealNet: 0, other: 0, gst5: 0, gst18: 0, total: 0, bank: 0, cash: 0, crNote: 0, bal: 0 }
+        { roomNet: 0, mealNet: 0, other: 0, gst5: 0, gst18: 0, gstOther: 0, total: 0, bank: 0, cash: 0, crNote: 0, bal: 0 }
       ),
     [tableRows]
   );
@@ -191,19 +211,19 @@ export default function RevenuePage() {
   const exportExcel = () => {
     const headers = [
       "SL No.", "Check-in", "Check-out", "Guest Name", "Mobile", "Booking ID", "Status",
-      "Room Charges", "Meal Charges", "Other Charges", "GST 5%", "GST 18%", "Total Charges",
+      "Room Charges", "Meal Charges", "Other Charges", "GST 5%", "GST 18%", "GST Other", "Total Charges",
       "Received - Bank", "Received - Cash", "Credit Note", "Balance",
     ];
     const lines = tableRows.map((r, i) => [
       i + 1, fmtShort(r.b.checkin), fmtShort(r.b.checkout), r.b.guest, r.b.mobile, r.b.id, r.b.status,
       Math.round(r.roomNet), Math.round(r.mealNet), Math.round(r.other),
-      Math.round(r.gst5), Math.round(r.gst18), Math.round(r.total),
+      Math.round(r.gst5), Math.round(r.gst18), Math.round(r.gstOther), Math.round(r.total),
       Math.round(r.bank), Math.round(r.cash), Math.round(r.crNote), Math.round(r.bal),
     ]);
     lines.push([
       "", "", "", "", "", "Total", "",
       Math.round(totals.roomNet), Math.round(totals.mealNet), Math.round(totals.other),
-      Math.round(totals.gst5), Math.round(totals.gst18), Math.round(totals.total),
+      Math.round(totals.gst5), Math.round(totals.gst18), Math.round(totals.gstOther), Math.round(totals.total),
       Math.round(totals.bank), Math.round(totals.cash), Math.round(totals.crNote), Math.round(totals.bal),
     ]);
     const csv = [headers, ...lines]
@@ -219,7 +239,7 @@ export default function RevenuePage() {
   };
 
   const numTd: React.CSSProperties = { textAlign: "right", whiteSpace: "nowrap", fontSize: 12 };
-  const chargesCols = 6;
+  const chargesCols = 7;
   const allCols = 5 + chargesCols + 3 + 2;
 
   return (
@@ -342,6 +362,7 @@ export default function RevenuePage() {
                 <th style={{ textAlign: "right" }}>Other</th>
                 <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>GST 5%</th>
                 <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>GST 18%</th>
+                <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>GST Other</th>
                 <th style={{ textAlign: "right" }}>Total</th>
                 <th style={{ textAlign: "right", ...sectionBorder }}>Bank</th>
                 <th style={{ textAlign: "right" }}>Cash</th>
@@ -386,6 +407,7 @@ export default function RevenuePage() {
                       <td style={numTd}>{nfmt(r.other)}</td>
                       <td style={{ ...numTd, color: "var(--t3)" }}>{nfmt(r.gst5)}</td>
                       <td style={{ ...numTd, color: "var(--t3)" }}>{nfmt(r.gst18)}</td>
+                      <td style={{ ...numTd, color: "var(--t3)" }}>{nfmt(r.gstOther)}</td>
                       <td style={{ ...numTd, fontWeight: 700 }}>{nfmt(r.total)}</td>
                       <td style={{ ...numTd, ...sectionBorder }}>{nfmt(r.bank)}</td>
                       <td style={numTd}>{nfmt(r.cash)}</td>
@@ -414,6 +436,7 @@ export default function RevenuePage() {
                     <td style={{ ...numTd, fontWeight: 700 }}>{nfmt(totals.other)}</td>
                     <td style={{ ...numTd, fontWeight: 700, color: "var(--t3)" }}>{nfmt(totals.gst5)}</td>
                     <td style={{ ...numTd, fontWeight: 700, color: "var(--t3)" }}>{nfmt(totals.gst18)}</td>
+                    <td style={{ ...numTd, fontWeight: 700, color: "var(--t3)" }}>{nfmt(totals.gstOther)}</td>
                     <td style={{ ...numTd, fontWeight: 800 }}>{nfmt(totals.total)}</td>
                     <td style={{ ...numTd, ...sectionBorder, fontWeight: 700 }}>{nfmt(totals.bank)}</td>
                     <td style={{ ...numTd, fontWeight: 700 }}>{nfmt(totals.cash)}</td>
