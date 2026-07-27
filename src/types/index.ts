@@ -366,7 +366,9 @@ export type BulkRoomBlock = {
   checkout: string;
   pax: number;
   amount: number;
-  status: "Tentative" | "Confirmed";
+  status: "Tentative" | "Confirmed" | "Maintenance";
+  // Maintenance blocks only — why the rooms are out of service
+  reason?: string;
   rows: BulkRoomBlockRow[];
   createdBy: string;
   createdAt: string;
@@ -380,7 +382,9 @@ export type VenueBlock = {
   name: string;
   pax: number;
   amount: number;
-  status?: "Tentative" | "Confirmed";
+  status?: "Tentative" | "Confirmed" | "Maintenance";
+  // Maintenance blocks only — why the venue is out of service
+  reason?: string;
   createdBy: string;
   createdAt: string;
 };
