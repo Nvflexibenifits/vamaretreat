@@ -9,6 +9,7 @@ import {
   SEED_CANCELLATION_POLICY,
   ROOMS as SEED_ROOMS,
 } from "@/lib/data";
+import { compareRoomLabels } from "@/lib/utils";
 import type {
   CancellationPolicy,
   CancellationPolicyCell,
@@ -875,10 +876,13 @@ function RoomInventorySection() {
   const [renamingCat, setRenamingCat] = useState<{ id: string; value: string } | null>(null);
   const [removeCatConfirm, setRemoveCatConfirm] = useState<string | null>(null);
 
-  // Group inventory by category, preserve master ROOMS order.
+  // Group inventory by category, preserve master ROOMS order; rooms within a
+  // category sort by label numerically (same order as the room chart).
   const grouped = useMemo(() => {
     return rooms.map((cat) => {
-      const items = roomInventory.filter((r) => r.cat === cat.id);
+      const items = roomInventory
+        .filter((r) => r.cat === cat.id)
+        .sort((a, b) => compareRoomLabels(a.label, b.label));
       const active = items.filter((r) => r.active).length;
       return { cat, items, active, total: items.length };
     });

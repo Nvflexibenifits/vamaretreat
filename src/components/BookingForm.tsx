@@ -188,6 +188,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     updateBooking,
     showNotif,
     creditNotes,
+    creditNoteSettings,
     redeemCreditNote,
     mealCategories,
     rooms,
@@ -1839,15 +1840,36 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                     </select>
                     {row.mode === "Credit Note" && (
                       <div style={{ marginTop: 5 }}>
-                        <input
-                          type="text"
-                          placeholder="Credit note code"
-                          value={row.cnCode}
-                          onChange={(e) => setNewPaymentRows((prev) =>
-                            prev.map((r) => r.uid === row.uid ? { ...r, cnCode: e.target.value } : r)
-                          )}
-                          style={{ width: "100%", padding: "5px 8px", border: "1px solid var(--bd)", borderRadius: "var(--r3)", fontSize: 12, background: "var(--surf)", outline: "none" }}
-                        />
+                        {(() => {
+                          // The code prefix is fixed (Master Setup); users type
+                          // only the number. cnCode still stores the full code.
+                          const cnPrefix = `${creditNoteSettings.prefix}-`;
+                          const typed = row.cnCode.toLowerCase().startsWith(cnPrefix.toLowerCase())
+                            ? row.cnCode.slice(cnPrefix.length)
+                            : row.cnCode;
+                          return (
+                            <div style={{ display: "flex", alignItems: "center", border: "1px solid var(--bd)", borderRadius: "var(--r3)", background: "var(--surf)", overflow: "hidden" }}>
+                              <span style={{ padding: "5px 0 5px 8px", fontSize: 12, fontWeight: 600, color: "var(--t3)", whiteSpace: "nowrap" }}>
+                                {cnPrefix}
+                              </span>
+                              <input
+                                type="text"
+                                placeholder="0001"
+                                value={typed}
+                                onChange={(e) => {
+                                  let v = e.target.value.trim();
+                                  // Pasting a full code must not double the prefix
+                                  if (v.toLowerCase().startsWith(cnPrefix.toLowerCase())) v = v.slice(cnPrefix.length);
+                                  const full = v ? `${creditNoteSettings.prefix}-${v}` : "";
+                                  setNewPaymentRows((prev) =>
+                                    prev.map((r) => r.uid === row.uid ? { ...r, cnCode: full } : r)
+                                  );
+                                }}
+                                style={{ flex: 1, minWidth: 0, padding: "5px 8px 5px 2px", border: "none", fontSize: 12, background: "transparent", outline: "none" }}
+                              />
+                            </div>
+                          );
+                        })()}
                         {row.cnCode.trim() && (() => {
                           const cn = creditNotes.find((c) => c.code.toLowerCase() === row.cnCode.trim().toLowerCase());
                           if (!cn) return <div style={{ fontSize: 10, marginTop: 3, color: "var(--red)" }}>Code not found</div>;

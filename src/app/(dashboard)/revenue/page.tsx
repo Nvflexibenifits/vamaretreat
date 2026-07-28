@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { fmt, getBookingPricingRows, todayStr } from "@/lib/utils";
+import { bookingChargesBreakdown, fmt, todayStr } from "@/lib/utils";
 
 // dd/mm/yy
 function fmtShort(d: string): string {
@@ -80,50 +80,12 @@ export default function RevenuePage() {
       })
       .sort((a, b) => a.checkin.localeCompare(b.checkin))
       .map((b) => {
-        const pricingRows = getBookingPricingRows(b);
         const isCancelled = b.status === "Cancelled";
         // Refund cancellations remove the booking's revenue (only a
         // cancellation charge, if any, is kept). Credit-note cancellations
         // keep full revenue: no money leaves, the stay obligation remains.
         const isRefundCancel = isCancelled && b.cancellationDetails?.resolution === "refund";
-
-        const roomNetRaw = pricingRows.reduce((s, r) => s + r.netCharges, 0);
-        let gst5Raw = 0;
-        let gst18Raw = 0;
-        pricingRows.forEach((r) => {
-          if (r.gstAmt <= 0) return;
-          if (r.gstRate === 5) gst5Raw += r.gstAmt;
-          else gst18Raw += r.gstAmt;
-        });
-        const mealNetRaw = b.mealTotal + b.petTotal + (b.driverMealTotal ?? 0);
-        gst18Raw += b.mealGst + b.petGst + (b.driverMealGst ?? 0);
-        // Itemized add-ons: net amount in Other, GST bucketed by its actual
-        // rate — 5% and 18% join their columns, anything else goes to GST Other.
-        const extrasList = b.extras ?? [];
-        const extrasNetRaw = extrasList.reduce((s, e) => s + e.amount, 0);
-        let extrasGst = 0;
-        let gstOtherRaw = 0;
-        extrasList.forEach((e) => {
-          const gst = e.gst ?? 0;
-          if (gst <= 0) return;
-          const pct = e.amount > 0 ? Math.round((gst / e.amount) * 100) : 0;
-          if (pct === 5) gst5Raw += gst;
-          else if (pct === 18) gst18Raw += gst;
-          else gstOtherRaw += gst;
-          extrasGst += gst;
-        });
-        // Legacy bookings rolled add-ons into grandTotal without itemizing;
-        // whatever the itemized extras don't explain stays as a gross remainder.
-        const otherRaw =
-          extrasNetRaw +
-          Math.max(0, b.grandTotal - b.totalRoomCharges - b.totalMealCharges - extrasNetRaw - extrasGst);
-
-        const roomNet = isRefundCancel ? 0 : roomNetRaw;
-        const mealNet = isRefundCancel ? 0 : mealNetRaw;
-        const other = isRefundCancel ? 0 : otherRaw;
-        const gst5 = isRefundCancel ? 0 : gst5Raw;
-        const gst18 = isRefundCancel ? 0 : gst18Raw;
-        const gstOther = isRefundCancel ? 0 : gstOtherRaw;
+        const { roomNet, mealNet, other, gst5, gst18, gstOther } = bookingChargesBreakdown(b);
         // Value a cancelled booking actually keeps: cancellation charge
         // retained plus any credit note issued (the CN worth stays with the
         // hotel; the uncollected balance never arrives).

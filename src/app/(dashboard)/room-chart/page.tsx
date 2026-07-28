@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "@/lib/store";
-import { blockOccupancyEnd, findAvailableRoomIds, fmt, fmtIN, roomsHeldOnDate, todayStr } from "@/lib/utils";
+import { blockOccupancyEnd, compareRoomLabels, findAvailableRoomIds, fmt, fmtIN, roomsHeldOnDate, sortRoomInventory, todayStr } from "@/lib/utils";
 import type {
   Booking,
   BulkRoomBlock,
@@ -294,6 +294,12 @@ export default function RoomChartPage() {
     venues.forEach((v) => (m[v.id] = v));
     return m;
   }, [venues]);
+
+  // Chart rows: category blocks in master order, labels sorted numerically
+  const sortedInventory = useMemo(
+    () => sortRoomInventory(roomInventory, rooms),
+    [roomInventory, rooms]
+  );
 
   const showHover = (state: HoverState) => {
     if (hoverTimer.current) clearTimeout(hoverTimer.current);
@@ -1098,7 +1104,7 @@ export default function RoomChartPage() {
                 </>
               )}
 
-              {roomInventory.map((room) => (
+              {sortedInventory.map((room) => (
                 <tr key={room.id} style={!room.active ? { opacity: 0.55 } : undefined}>
                   <td
                     className="rc-room-label"
@@ -1405,7 +1411,9 @@ export default function RoomChartPage() {
                   <div style={{ padding: "12px 14px", borderTop: "1px solid var(--bd)" }}>
                     {mRoomRows.map((row, idx) => {
                       const catRooms = row.catId
-                        ? roomInventory.filter((r) => r.cat === row.catId && r.active)
+                        ? roomInventory
+                            .filter((r) => r.cat === row.catId && r.active)
+                            .sort((a, b) => compareRoomLabels(a.label, b.label))
                         : [];
                       const free = row.catId ? maintFreeRooms[row.catId] : undefined;
                       return (
@@ -1852,7 +1860,7 @@ export default function RoomChartPage() {
             <div style={{ marginTop: 10 }}>
               {bulkDetail.rows.map((row) => (
                 <div key={row.catId} style={{ fontSize: 12, color: "var(--t3)", marginTop: 4 }}>
-                  {rooms.find((r) => r.id === row.catId)?.name ?? row.catName}: {row.roomIds.join(", ")} ({row.roomIds.length} room{row.roomIds.length !== 1 ? "s" : ""})
+                  {rooms.find((r) => r.id === row.catId)?.name ?? row.catName}: {[...row.roomIds].sort(compareRoomLabels).join(", ")} ({row.roomIds.length} room{row.roomIds.length !== 1 ? "s" : ""})
                 </div>
               ))}
             </div>

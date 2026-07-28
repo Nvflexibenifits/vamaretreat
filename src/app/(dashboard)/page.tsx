@@ -3,13 +3,11 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { addDays, fmt, fmtIN, nightsBetween, sevenDaysFrom, todayStr, weekRange } from "@/lib/utils";
-
-type RevFilter = "month";
+import { addDays, bookingChargesBreakdown, fmt, fmtIN, nightsBetween, sevenDaysFrom, todayStr, weekRange } from "@/lib/utils";
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { bookings, revenueEntries, currentRole, rooms, roomInventory } = useApp();
+  const { bookings, currentRole, rooms, roomInventory } = useApp();
   const isFrontOffice = currentRole === "Front Office";
 
   const roomCategories = useMemo(() => {
@@ -22,7 +20,6 @@ export default function DashboardPage() {
   }, [rooms, roomInventory]);
 
   const [today, setToday] = useState("");
-  const [revFilter, setRevFilter] = useState<RevFilter>("month");
   const [pendingOpen, setPendingOpen] = useState(false);
   const [foFilter, setFoFilter] = useState<"today" | "tomorrow" | "custom">("today");
   const [foCustomDate, setFoCustomDate] = useState("");
@@ -37,17 +34,21 @@ export default function DashboardPage() {
   }, []);
 
   // ───── Revenue ─────
+  // Mirrors the Revenue Register's Total Charges for the current month:
+  // net charges excluding GST for Confirmed + Cancelled bookings checking in
+  // this month, so the two screens always show the same number.
   const revData = useMemo(() => {
-    if (!today) return { total: 0, count: 0, label: "" };
-    const entries = revenueEntries.filter((e) => e.amount > 0);
+    if (!today) return { total: 0 };
     const month = today.slice(0, 7);
-    const filtered = entries.filter((e) => e.date.startsWith(month));
-    return {
-      total: filtered.reduce((s, e) => s + e.amount, 0),
-      count: filtered.length,
-      label: "This Month",
-    };
-  }, [revenueEntries, today]);
+    const total = bookings
+      .filter((b) => b.status === "Confirmed" || b.status === "Cancelled")
+      .filter((b) => b.checkin.startsWith(month))
+      .reduce((s, b) => {
+        const c = bookingChargesBreakdown(b);
+        return s + c.roomNet + c.mealNet + c.other;
+      }, 0);
+    return { total };
+  }, [bookings, today]);
 
   // ───── Payment Pending ─────
   const pendingBookings = useMemo(

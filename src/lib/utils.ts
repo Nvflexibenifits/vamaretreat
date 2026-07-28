@@ -242,6 +242,64 @@ export function getBookingPricingRows(b: Booking): PricingRow[] {
   );
 }
 
+export type BookingChargesBreakdown = {
+  roomNet: number;
+  mealNet: number;
+  other: number;
+  gst5: number;
+  gst18: number;
+  gstOther: number;
+};
+
+// Charge-side view of a booking as the Revenue Register reports it: net
+// room/meal/other excluding GST, with GST split by rate. Refund cancellations
+// contribute nothing here — their revenue leaves with the refund and only the
+// cancellation charge (handled by the caller) is kept. Credit-note
+// cancellations keep full revenue: no money leaves, the stay obligation
+// remains. The dashboard Revenue card sums roomNet + mealNet + other so it
+// always matches the register's Total Charges.
+export function bookingChargesBreakdown(b: Booking): BookingChargesBreakdown {
+  const isRefundCancel =
+    b.status === "Cancelled" && b.cancellationDetails?.resolution === "refund";
+  if (isRefundCancel) {
+    return { roomNet: 0, mealNet: 0, other: 0, gst5: 0, gst18: 0, gstOther: 0 };
+  }
+
+  const pricingRows = getBookingPricingRows(b);
+  const roomNet = pricingRows.reduce((s, r) => s + r.netCharges, 0);
+  let gst5 = 0;
+  let gst18 = 0;
+  pricingRows.forEach((r) => {
+    if (r.gstAmt <= 0) return;
+    if (r.gstRate === 5) gst5 += r.gstAmt;
+    else gst18 += r.gstAmt;
+  });
+  const mealNet = b.mealTotal + b.petTotal + (b.driverMealTotal ?? 0);
+  gst18 += b.mealGst + b.petGst + (b.driverMealGst ?? 0);
+  // Itemized add-ons: net amount in Other, GST bucketed by its actual rate —
+  // 5% and 18% join their columns, anything else goes to GST Other.
+  const extrasList = b.extras ?? [];
+  const extrasNet = extrasList.reduce((s, e) => s + e.amount, 0);
+  let extrasGst = 0;
+  let gstOther = 0;
+  extrasList.forEach((e) => {
+    const gst = e.gst ?? 0;
+    if (gst <= 0) return;
+    const pct = e.amount > 0 ? Math.round((gst / e.amount) * 100) : 0;
+    if (pct === 5) gst5 += gst;
+    else if (pct === 18) gst18 += gst;
+    else gstOther += gst;
+    extrasGst += gst;
+  });
+  // Legacy bookings rolled add-ons into grandTotal without itemizing;
+  // whatever the itemized extras don't explain stays as a gross remainder.
+  const other =
+    extrasNet +
+    Math.max(0, b.grandTotal - b.totalRoomCharges - b.totalMealCharges - extrasNet - extrasGst);
+
+  return { roomNet, mealNet, other, gst5, gst18, gstOther };
+}
+
 // ─────── ROOM ALLOCATION ───────
 function bookingOccupiesDate(b: Booking, date: string): boolean {
   return b.checkin <= date && date < b.checkout;
@@ -265,6 +323,26 @@ export function roomsHeldOnDate(b: Booking, date: string): string[] {
     }
   });
   return [...held];
+}
+
+// Numeric-aware label comparison so V10 sorts after V9, not after V1.
+export function compareRoomLabels(a: string, b: string): number {
+  return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+}
+
+// Canonical display order for physical rooms: category blocks follow the
+// room-master order, rooms within a block sort by label numerically.
+export function sortRoomInventory<T extends { label: string; cat: string }>(
+  inventory: T[],
+  catOrder: { id: string }[]
+): T[] {
+  const idx = new Map(catOrder.map((c, i) => [c.id, i]));
+  return [...inventory].sort((a, b) => {
+    const ca = idx.get(a.cat) ?? catOrder.length;
+    const cb = idx.get(b.cat) ?? catOrder.length;
+    if (ca !== cb) return ca - cb;
+    return compareRoomLabels(a.label, b.label);
+  });
 }
 
 // Occupancy end for venue/bulk room blocks: a same-day block (dayout) holds
