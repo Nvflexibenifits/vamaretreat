@@ -111,7 +111,7 @@ export default function RoomChartPage() {
   const [uBulkOpen, setUBulkOpen] = useState(false);
   const [uCatRows, setUCatRows] = useState<BulkCatRow[]>([{ catId: "", count: 1 }]);
   const [uVenueOpen, setUVenueOpen] = useState(false);
-  const [uVenueId, setUVenueId] = useState("");
+  const [uVenueIds, setUVenueIds] = useState<string[]>([""]);
 
   // Maintenance mode fields (dates reuse uCheckin/uCheckout; end date inclusive)
   const [mReason, setMReason] = useState("");
@@ -378,7 +378,7 @@ export default function RoomChartPage() {
     setUBulkOpen(false);
     setUCatRows([{ catId: "", count: 1 }]);
     setUVenueOpen(false);
-    setUVenueId("");
+    setUVenueIds([""]);
     setMReason("");
     setMRoomRows([{ catId: "", roomIds: [] }]);
     setMVenueRows([{ type: "", venueIds: [] }]);
@@ -409,7 +409,7 @@ export default function RoomChartPage() {
     setUPax(String(block.pax || ""));
     setUAmount(String(block.amount || ""));
     setUVenueOpen(true);
-    setUVenueId(block.venueId);
+    setUVenueIds([block.venueId]);
     setUBulkOpen(false);
     setUCatRows([{ catId: "", count: 1 }]);
     setHover(null);
@@ -438,7 +438,7 @@ export default function RoomChartPage() {
     setUBulkOpen(true);
     setUCatRows(blk.rows.map((r) => ({ catId: r.catId, count: r.roomIds.length })));
     setUVenueOpen(false);
-    setUVenueId("");
+    setUVenueIds([""]);
     setBulkDetail(null);
     setHover(null);
     setUnifiedModal({ open: true, editingBulkId: blk.id });
@@ -613,17 +613,29 @@ export default function RoomChartPage() {
     const editingVenueId = unifiedModal.open ? unifiedModal.editingVenueId : undefined;
 
     if (uVenueOpen) {
-      if (!uVenueId) { showNotif("Pick a venue in the Venue section", "error"); return; }
-      const conflict = overlapsExisting(uVenueId, uCheckin, uCheckout, editingVenueId);
-      if (conflict) {
-        const vname = venueById[conflict.venueId]?.name || "Venue";
-        showNotif(`${vname} already booked (${fmtIN(conflict.checkin)} to ${fmtIN(conflict.checkout)})`, "error");
-        return;
+      const venueIds = [...new Set(uVenueIds.filter(Boolean))];
+      if (venueIds.length === 0) { showNotif("Pick a venue in the Venue section", "error"); return; }
+      for (const vid of venueIds) {
+        const conflict = overlapsExisting(vid, uCheckin, uCheckout, editingVenueId);
+        if (conflict) {
+          const vname = venueById[conflict.venueId]?.name || "Venue";
+          showNotif(`${vname} already booked (${fmtIN(conflict.checkin)} to ${fmtIN(conflict.checkout)})`, "error");
+          return;
+        }
       }
+      // Amount is entered once for the whole group; it lives on the first
+      // venue block so hover cards don't repeat it per venue.
+      const mkVenueBlock = (venueId: string, amt: number): VenueBlock => ({
+        id: uid(), venueId, checkin: uCheckin, checkout: uCheckout,
+        name: uName.trim(), pax, amount: amt, status,
+        createdBy: currentUser, createdAt: todayStr(),
+      });
       if (editingVenueId) {
-        updateVenueBlock(editingVenueId, { venueId: uVenueId, checkin: uCheckin, checkout: uCheckout, name: uName.trim(), pax, amount, status });
+        const [first, ...rest] = venueIds;
+        updateVenueBlock(editingVenueId, { venueId: first, checkin: uCheckin, checkout: uCheckout, name: uName.trim(), pax, amount, status });
+        rest.forEach((vid) => addVenueBlock(mkVenueBlock(vid, 0)));
       } else {
-        addVenueBlock({ id: uid(), venueId: uVenueId, checkin: uCheckin, checkout: uCheckout, name: uName.trim(), pax, amount, status, createdBy: currentUser, createdAt: todayStr() });
+        venueIds.forEach((vid, i) => addVenueBlock(mkVenueBlock(vid, i === 0 ? amount : 0)));
       }
     }
 
@@ -1699,9 +1711,11 @@ export default function RoomChartPage() {
                 }}
               >
                 <span style={{ fontSize: 13, fontWeight: 600, color: "var(--t1)", flex: 1 }}>Venue</span>
-                {uVenueOpen && uVenueId && (
+                {uVenueOpen && uVenueIds.some(Boolean) && (
                   <span className="badge" style={{ background: "#ede9fe", color: "#5b21b6" }}>
-                    {venueById[uVenueId]?.name || "Selected"}
+                    {uVenueIds.filter(Boolean).length === 1
+                      ? venueById[uVenueIds.find(Boolean)!]?.name || "Selected"
+                      : `${uVenueIds.filter(Boolean).length} venues`}
                   </span>
                 )}
                 <span style={{ fontSize: 16, color: "var(--t3)", display: "inline-block", transform: uVenueOpen ? "rotate(180deg)" : "none", transition: "transform .15s" }}>&#8964;</span>
@@ -1709,21 +1723,52 @@ export default function RoomChartPage() {
 
               {uVenueOpen && (
                 <div style={{ padding: "12px 14px", borderTop: "1px solid var(--bd)" }}>
-                  <div className="field" style={{ marginBottom: 0 }}>
-                    <label>Venue *</label>
-                    <select value={uVenueId} onChange={(e) => setUVenueId(e.target.value)}>
-                      <option value="">— Select venue —</option>
-                      {allVenueTypes.map((type) => {
-                        const items = venues.filter((v) => v.type === type && v.active);
-                        if (items.length === 0) return null;
-                        return (
-                          <optgroup key={type} label={type}>
-                            {items.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-                          </optgroup>
-                        );
-                      })}
-                    </select>
+                  <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
+                    <span style={{ fontSize: 12, color: "var(--t3)" }}>Select venues to book</span>
+                    <button
+                      className="btn btn-ghost btn-xs"
+                      style={{ marginLeft: "auto" }}
+                      onClick={() => setUVenueIds((p) => [...p, ""])}
+                    >
+                      + Add Row
+                    </button>
                   </div>
+                  {uVenueIds.map((vid, idx) => (
+                    <div
+                      key={idx}
+                      style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: idx === uVenueIds.length - 1 ? 0 : 8 }}
+                    >
+                      <select
+                        value={vid}
+                        style={{ flex: 1 }}
+                        onChange={(e) => setUVenueIds((p) => p.map((v, i) => (i === idx ? e.target.value : v)))}
+                      >
+                        <option value="">— Select venue —</option>
+                        {allVenueTypes.map((type) => {
+                          const items = venues.filter((v) => v.type === type && v.active);
+                          if (items.length === 0) return null;
+                          return (
+                            <optgroup key={type} label={type}>
+                              {items.map((v) => (
+                                <option key={v.id} value={v.id} disabled={v.id !== vid && uVenueIds.includes(v.id)}>
+                                  {v.name}
+                                </option>
+                              ))}
+                            </optgroup>
+                          );
+                        })}
+                      </select>
+                      {uVenueIds.length > 1 && (
+                        <button
+                          className="btn btn-ghost btn-xs"
+                          style={{ color: "var(--red)" }}
+                          onClick={() => setUVenueIds((p) => p.filter((_, i) => i !== idx))}
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
