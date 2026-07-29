@@ -173,19 +173,19 @@ export default function RevenuePage() {
   const exportExcel = () => {
     const headers = [
       "SL No.", "Check-in", "Check-out", "Guest Name", "Mobile", "Booking ID", "Status",
-      "Room Charges", "Meal Charges", "Other Charges", "GST 5%", "GST 18%", "GST Other", "Total Charges",
+      "Room Charges", "Meal Charges", "Other Charges", "GST 5%", "GST 18%", "Total Charges",
       "Received - Bank", "Received - Cash", "Credit Note", "Balance",
     ];
     const lines = tableRows.map((r, i) => [
       i + 1, fmtShort(r.b.checkin), fmtShort(r.b.checkout), r.b.guest, r.b.mobile, r.b.id, r.b.status,
       Math.round(r.roomNet), Math.round(r.mealNet), Math.round(r.other),
-      Math.round(r.gst5), Math.round(r.gst18), Math.round(r.gstOther), Math.round(r.total),
+      Math.round(r.gst5), Math.round(r.gst18), Math.round(r.total),
       Math.round(r.bank), Math.round(r.cash), Math.round(r.crNote), Math.round(r.bal),
     ]);
     lines.push([
       "", "", "", "", "", "Total", "",
       Math.round(totals.roomNet), Math.round(totals.mealNet), Math.round(totals.other),
-      Math.round(totals.gst5), Math.round(totals.gst18), Math.round(totals.gstOther), Math.round(totals.total),
+      Math.round(totals.gst5), Math.round(totals.gst18), Math.round(totals.total),
       Math.round(totals.bank), Math.round(totals.cash), Math.round(totals.crNote), Math.round(totals.bal),
     ]);
     const csv = [headers, ...lines]
@@ -201,7 +201,7 @@ export default function RevenuePage() {
   };
 
   const numTd: React.CSSProperties = { textAlign: "right", whiteSpace: "nowrap", fontSize: 12 };
-  const chargesCols = 7;
+  const chargesCols = 6;
   const allCols = 5 + chargesCols + 3 + 2;
 
   return (
@@ -324,7 +324,6 @@ export default function RevenuePage() {
                 <th style={{ textAlign: "right" }}>Other</th>
                 <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>GST 5%</th>
                 <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>GST 18%</th>
-                <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>GST Other</th>
                 <th style={{ textAlign: "right" }}>Total</th>
                 <th style={{ textAlign: "right", ...sectionBorder }}>Bank</th>
                 <th style={{ textAlign: "right" }}>Cash</th>
@@ -369,7 +368,6 @@ export default function RevenuePage() {
                       <td style={numTd}>{nfmt(r.other)}</td>
                       <td style={{ ...numTd, color: "var(--t3)" }}>{nfmt(r.gst5)}</td>
                       <td style={{ ...numTd, color: "var(--t3)" }}>{nfmt(r.gst18)}</td>
-                      <td style={{ ...numTd, color: "var(--t3)" }}>{nfmt(r.gstOther)}</td>
                       <td style={{ ...numTd, fontWeight: 700 }}>{nfmt(r.total)}</td>
                       <td style={{ ...numTd, ...sectionBorder }}>{nfmt(r.bank)}</td>
                       <td style={numTd}>{nfmt(r.cash)}</td>
@@ -398,7 +396,6 @@ export default function RevenuePage() {
                     <td style={{ ...numTd, fontWeight: 700 }}>{nfmt(totals.other)}</td>
                     <td style={{ ...numTd, fontWeight: 700, color: "var(--t3)" }}>{nfmt(totals.gst5)}</td>
                     <td style={{ ...numTd, fontWeight: 700, color: "var(--t3)" }}>{nfmt(totals.gst18)}</td>
-                    <td style={{ ...numTd, fontWeight: 700, color: "var(--t3)" }}>{nfmt(totals.gstOther)}</td>
                     <td style={{ ...numTd, fontWeight: 800 }}>{nfmt(totals.total)}</td>
                     <td style={{ ...numTd, ...sectionBorder, fontWeight: 700 }}>{nfmt(totals.bank)}</td>
                     <td style={{ ...numTd, fontWeight: 700 }}>{nfmt(totals.cash)}</td>
