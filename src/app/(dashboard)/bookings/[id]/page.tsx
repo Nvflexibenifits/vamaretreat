@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
 import { fmt, fmtIN, dayName, getBookingPricingRows, nightsBetween, todayStr, tryAssignRooms } from "@/lib/utils";
 import { StatusBadge } from "@/components/StatusBadge";
-import type { CancellationDetails, CancellationPolicy, SpecialDay } from "@/types";
+import type { CancellationDetails, CancellationPolicy, Extra, SpecialDay } from "@/types";
 
 // ─── helpers ───────────────────────────────────────────────────────────────
 
@@ -103,6 +103,12 @@ function computeCancel(
 
 // ─── main page ─────────────────────────────────────────────────────────────
 
+type AddOnEditRow = { uid: string; category: string; amount: string; gstPct: string; date?: string; by?: string };
+
+function rowUid() {
+  return Math.random().toString(36).slice(2, 9);
+}
+
 export default function BookingDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -139,6 +145,10 @@ export default function BookingDetailPage() {
   const [refDate, setRefDate] = useState("");
   const [refMode, setRefMode] = useState("Bank Transfer");
   const [refNote, setRefNote] = useState("");
+
+  // Add-on edit modal (cancelled bookings: only add-on charges stay editable)
+  const [showAddOnEdit, setShowAddOnEdit] = useState(false);
+  const [addOnEditRows, setAddOnEditRows] = useState<AddOnEditRow[]>([]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -205,6 +215,45 @@ export default function BookingDetailPage() {
 
   const handleBookTentative = () => allocateAndSetStatus("Tentative");
   const handleConfirm = () => allocateAndSetStatus("Confirmed");
+
+  // Cancelled bookings stay locked except for add-on charges — services that
+  // were actually consumed can still be corrected after cancellation.
+  const canEditAddOns = !isFrontOffice && b.status === "Cancelled";
+
+  const openAddOnEdit = () => {
+    const rows: AddOnEditRow[] = (b.extras ?? []).map((e) => ({
+      uid: rowUid(),
+      category: e.name,
+      amount: String(e.amount),
+      gstPct: e.amount > 0 && e.gst ? String(Math.round((e.gst / e.amount) * 10000) / 100) : "0",
+      date: e.date,
+      by: e.by,
+    }));
+    setAddOnEditRows(rows.length > 0 ? rows : [{ uid: rowUid(), category: "Room Charges", amount: "0", gstPct: "0" }]);
+    setShowAddOnEdit(true);
+  };
+
+  const saveAddOnEdit = () => {
+    const built: Extra[] = addOnEditRows
+      .map((r) => {
+        const amt = parseFloat(r.amount) || 0;
+        return {
+          name: r.category.trim() || "Add-on Charge",
+          amount: amt,
+          gst: (amt * (parseFloat(r.gstPct) || 0)) / 100,
+          date: r.date || today,
+          by: r.by || currentUser,
+        };
+      })
+      .filter((e) => e.amount > 0);
+    const gross = (list: Extra[]) => list.reduce((s, e) => s + e.amount + (e.gst ?? 0), 0);
+    // Swap old add-on value for new in the grand total; room/meal stay as-is.
+    const grandTotal = Math.round((b.grandTotal - gross(b.extras ?? []) + gross(built)) * 100) / 100;
+    const balance = Math.max(0, Math.round(grandTotal - b.advance));
+    updateBooking(b.id, { extras: built, grandTotal, balance });
+    setShowAddOnEdit(false);
+    showNotif("Add-on charges updated", "success");
+  };
 
   const totalKids = b.kidsAbove10 + b.kids6to10;
   const pricingRows = getBookingPricingRows(b);
@@ -311,6 +360,107 @@ export default function BookingDetailPage() {
   return (
     <div className="view">
       {/* Record Refund Modal */}
+      {showAddOnEdit && (
+        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setShowAddOnEdit(false); }}>
+          <div className="modal" style={{ maxWidth: 640, width: "100%" }}>
+            <h3>Edit Add-on Charges</h3>
+            <p className="modal-desc">
+              Only add-on charges can be changed on a cancelled booking. The booking total and the Revenue Register update to match.
+            </p>
+
+            <div style={{ marginTop: 12, overflowX: "auto" }}>
+              <table style={{ width: "100%" }}>
+                <thead>
+                  <tr>
+                    <th style={{ whiteSpace: "nowrap" }}>Category</th>
+                    <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Amount (₹)</th>
+                    <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>GST %</th>
+                    <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Total</th>
+                    <th style={{ width: 44 }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {addOnEditRows.map((row) => {
+                    const amt = parseFloat(row.amount) || 0;
+                    const gstAmt = (amt * (parseFloat(row.gstPct) || 0)) / 100;
+                    return (
+                      <tr key={row.uid}>
+                        <td>
+                          <select
+                            value={row.category}
+                            onChange={(e) => setAddOnEditRows((p) => p.map((r) => r.uid === row.uid ? { ...r, category: e.target.value } : r))}
+                            style={{ width: "100%", padding: "5px 8px", border: "1px solid var(--bd)", borderRadius: "var(--r3)", fontSize: 12, background: "var(--surf)", outline: "none" }}
+                          >
+                            <option>Room Charges</option>
+                            <option>Meal Charges</option>
+                            <option>Venue Charges</option>
+                          </select>
+                        </td>
+                        <td>
+                          <input
+                            type="number"
+                            min={0}
+                            value={row.amount}
+                            onChange={(e) => setAddOnEditRows((p) => p.map((r) => r.uid === row.uid ? { ...r, amount: e.target.value } : r))}
+                            style={{ width: "100%", padding: "5px 8px", border: "1px solid var(--bd)", borderRadius: "var(--r3)", fontSize: 12, textAlign: "right", background: "var(--surf)", outline: "none" }}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="number"
+                            min={0}
+                            max={28}
+                            value={row.gstPct}
+                            onChange={(e) => setAddOnEditRows((p) => p.map((r) => r.uid === row.uid ? { ...r, gstPct: e.target.value } : r))}
+                            style={{ width: 70, padding: "5px 8px", border: "1px solid var(--bd)", borderRadius: "var(--r3)", fontSize: 12, textAlign: "right", background: "var(--surf)", outline: "none" }}
+                          />
+                        </td>
+                        <td style={{ textAlign: "right", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}>
+                          {fmt(amt + gstAmt)}
+                        </td>
+                        <td style={{ textAlign: "center" }}>
+                          <button
+                            className="btn btn-ghost btn-xs"
+                            style={{ color: "var(--red)" }}
+                            onClick={() => setAddOnEditRows((p) => p.filter((r) => r.uid !== row.uid))}
+                          >
+                            ×
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              style={{ marginTop: 10 }}
+              onClick={() => setAddOnEditRows((p) => [...p, { uid: rowUid(), category: "Room Charges", amount: "0", gstPct: "0" }])}
+            >
+              + Add Row
+            </button>
+
+            <div style={{ marginTop: 12, padding: "8px 12px", background: "var(--surf2)", borderRadius: "var(--r3)", display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 700 }}>
+              <span>Total Add-on Charges (incl. GST)</span>
+              <span>
+                {fmt(addOnEditRows.reduce((s, r) => {
+                  const amt = parseFloat(r.amount) || 0;
+                  return s + amt + (amt * (parseFloat(r.gstPct) || 0)) / 100;
+                }, 0))}
+              </span>
+            </div>
+
+            <div className="modal-actions" style={{ marginTop: 16 }}>
+              <button className="btn btn-ghost" onClick={() => setShowAddOnEdit(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={saveAddOnEdit}>Save Changes</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showRefundModal && (
         <div
           className="modal-overlay"
@@ -906,9 +1056,28 @@ export default function BookingDetailPage() {
           )}
 
           {/* Add-on Charges — itemized extras saved on the booking */}
-          {(b.extras ?? []).length > 0 && (
+          {((b.extras ?? []).length > 0 || canEditAddOns) && (
             <>
-              <SectionHeader>Add-on Charges</SectionHeader>
+              <SectionHeader>
+                <div style={{ display: "flex", alignItems: "center" }}>
+                  <span style={{ flex: 1 }}>Add-on Charges</span>
+                  {canEditAddOns && (
+                    <button
+                      className="btn btn-ghost btn-xs"
+                      style={{ color: "#fff", border: "1px solid rgba(255,255,255,.4)" }}
+                      onClick={openAddOnEdit}
+                    >
+                      Edit
+                    </button>
+                  )}
+                </div>
+              </SectionHeader>
+              {(b.extras ?? []).length === 0 && canEditAddOns && (
+                <div style={{ padding: "12px 16px", fontSize: 12, color: "var(--t3)", borderBottom: "1px solid var(--bd)" }}>
+                  No add-on charges. Click Edit to add charges to this cancelled booking.
+                </div>
+              )}
+              {(b.extras ?? []).length > 0 && (
               <div style={{ overflowX: "auto" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1000 }}>
                   <thead>
@@ -950,6 +1119,7 @@ export default function BookingDetailPage() {
                   </tbody>
                 </table>
               </div>
+              )}
             </>
           )}
 
