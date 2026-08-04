@@ -11,6 +11,7 @@ const TITLES: Record<string, string> = {
   "/bookings/new": "New Booking — B2C",
   "/room-chart": "Room Chart",
   "/revenue": "Revenue",
+  "/credit-notes": "Credit Notes",
   "/crm": "Guest CRM",
   "/master-setup": "Master Setup",
 };

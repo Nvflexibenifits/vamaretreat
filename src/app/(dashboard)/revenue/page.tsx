@@ -113,13 +113,14 @@ export default function RevenuePage() {
 
         // Balance convention: positive = pending from guest (amber),
         // negative = refund the hotel owes the guest (purple).
-        // Cancelled bookings never have a pending side — credit-note
-        // cancellations settle to 0, refund cancellations show only the
-        // unpaid refund as negative until Record Refund clears it.
+        // Credit-note cancellations keep showing the unpaid balance until it
+        // is waived off — the waive-off reduces `total` to what was received,
+        // which drives this to 0. Refund cancellations show only the unpaid
+        // refund as negative until Record Refund clears it.
         let bal: number;
         if (!isCancelled) bal = Math.round(total - received);
         else if (isRefundCancel) bal = Math.min(0, Math.round(retained + refundsPaid - received));
-        else bal = 0;
+        else bal = Math.max(0, Math.round(total - received));
         return { b, roomNet, mealNet, other, gst5, gst18, gstOther, total, bank, cash, crNote, bal, isCancelled };
       });
   }, [bookings, search, rangeFrom, rangeTo]);
@@ -152,10 +153,22 @@ export default function RevenuePage() {
   );
   const pendingPayments = pendingBookings.reduce((s, b) => s + b.balance, 0);
 
-  const refundsDue = useMemo(
-    () => tableRows.filter((r) => r.bal < 0).reduce((s, r) => s - r.bal, 0),
-    [tableRows]
-  );
+  // Refunds due (global, unaffected by filters) — unpaid refund balance on
+  // refund-cancelled bookings, same formula as the table's balance column.
+  const refundsDue = useMemo(() => {
+    let sum = 0;
+    bookings.forEach((b) => {
+      if (b.status !== "Cancelled" || b.cancellationDetails?.resolution !== "refund") return;
+      const retained =
+        (b.cancellationDetails?.cancellationCharge ?? 0) +
+        (b.cancellationDetails?.creditNoteAmount ?? 0);
+      let received = (b.payments ?? []).reduce((s, p) => s + p.amount, 0);
+      if (received === 0 && b.advance > 0) received = b.advance;
+      const refundsPaid = (b.cancellationDetails?.refundPayouts ?? []).reduce((s, p) => s + p.amount, 0);
+      sum += Math.max(0, Math.round(received - retained - refundsPaid));
+    });
+    return sum;
+  }, [bookings]);
 
   if (currentRole === "Front Office") {
     return (
@@ -268,7 +281,7 @@ export default function RevenuePage() {
         </div>
         <div style={{ background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r4)", padding: "14px 18px" }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>
-            Received
+            Received ({rangeLabel})
           </div>
           <div style={{ fontSize: 22, fontWeight: 800, color: "var(--grn)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>
             {fmt(totals.bank + totals.cash + totals.crNote)}
@@ -276,7 +289,7 @@ export default function RevenuePage() {
         </div>
         <div style={{ background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r4)", padding: "14px 18px" }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>
-            Pending Payments
+            Pending Payments (Overall)
           </div>
           <div style={{ fontSize: 22, fontWeight: 800, color: "var(--amb)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>
             {fmt(pendingPayments)}
@@ -284,7 +297,7 @@ export default function RevenuePage() {
         </div>
         <div style={{ background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r4)", padding: "14px 18px" }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>
-            Refunds Due ({rangeLabel})
+            Refunds Due (Overall)
           </div>
           <div style={{ fontSize: 22, fontWeight: 800, color: refundsDue > 0 ? "var(--pur)" : "var(--t2)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>
             {fmt(refundsDue)}
@@ -381,7 +394,15 @@ export default function RevenuePage() {
                           background: r.bal > 0 ? "var(--amb-lt)" : r.bal < 0 ? "var(--pur-lt)" : undefined,
                           color: r.bal > 0 ? "var(--amb)" : r.bal < 0 ? "var(--pur)" : "var(--grn)",
                         }}
-                        title={r.bal > 0 ? "Amount pending from guest" : r.bal < 0 ? "Refund due to guest" : "Settled"}
+                        title={
+                          r.bal > 0
+                            ? r.isCancelled
+                              ? "Unpaid balance — waive off pending"
+                              : "Amount pending from guest"
+                            : r.bal < 0
+                            ? "Refund due to guest"
+                            : "Settled"
+                        }
                       >
                         {r.bal === 0 ? "0" : r.bal > 0 ? nfmt(r.bal) : `−${nfmt(-r.bal)}`}
                       </td>

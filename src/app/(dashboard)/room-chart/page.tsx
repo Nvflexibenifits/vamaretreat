@@ -53,14 +53,24 @@ function nightsBetween(checkin: string, checkout: string): number {
   );
 }
 
-type DragState = {
-  bookingId: string;
-  // The booking's original allocated room for this night (i.e. the slot key).
-  fromRoomId: string;
-  // The room currently being displayed for the dragged cell (override target if any).
-  currentRoomId: string;
-  sourceDate: string;
-};
+type DragState =
+  | {
+      kind: "booking";
+      bookingId: string;
+      // The booking's original allocated room for this night (i.e. the slot key).
+      fromRoomId: string;
+      // The room currently being displayed for the dragged cell (override target if any).
+      currentRoomId: string;
+      sourceDate: string;
+    }
+  | {
+      // Group/corporate block made via the Block button: dragging moves the
+      // room for the block's whole stay (blocks have no per-night rows).
+      kind: "bulk";
+      blockId: string;
+      fromRoomId: string;
+      sourceDate: string;
+    };
 
 type PendingUpgrade = {
   bookingId: string;
@@ -741,8 +751,63 @@ export default function RoomChartPage() {
     return { ok: true };
   };
 
+  // Move a bulk (group/corporate) block's room for its entire stay. Blocks
+  // have no per-night allocation, so the swap applies to every night.
+  const handleBulkDrop = (drag: Extract<DragState, { kind: "bulk" }>, targetRoomId: string) => {
+    const blk = bulkRoomBlocks.find((x) => x.id === drag.blockId);
+    if (!blk || targetRoomId === drag.fromRoomId) return;
+    if (blk.rows.some((r) => r.roomIds.includes(targetRoomId))) {
+      showNotif("That room is already part of this block", "error");
+      return;
+    }
+    const toInv = roomInventory.find((r) => r.id === targetRoomId);
+    if (!toInv || !toInv.active) {
+      showNotif("Target room is not available", "error");
+      return;
+    }
+    const effEnd = blockOccupancyEnd(blk.checkin, blk.checkout);
+    const freeIds = findAvailableRoomIds(
+      toInv.cat, blk.checkin, effEnd, bookings, roomInventory,
+      undefined, bulkRoomBlocks, blk.id
+    );
+    if (!freeIds.includes(targetRoomId)) {
+      showNotif(`${toInv.label} is not free for ${fmtIN(blk.checkin)} to ${fmtIN(blk.checkout)}`, "error");
+      return;
+    }
+
+    const fromInv = roomInventory.find((r) => r.id === drag.fromRoomId);
+    // Remove the dragged room from its row, add the target to its category's
+    // row (rows are grouped per category; create/drop rows as needed).
+    let rows = blk.rows
+      .map((r) => ({ ...r, roomIds: r.roomIds.filter((id) => id !== drag.fromRoomId) }))
+      .filter((r) => r.roomIds.length > 0);
+    const targetRow = rows.find((r) => r.catId === toInv.cat);
+    if (targetRow) {
+      rows = rows.map((r) => r.catId === toInv.cat ? { ...r, roomIds: [...r.roomIds, targetRoomId] } : r);
+    } else {
+      rows = [...rows, {
+        catId: toInv.cat,
+        catName: rooms.find((r) => r.id === toInv.cat)?.name ?? toInv.type,
+        roomIds: [targetRoomId],
+      }];
+    }
+    updateBulkRoomBlock(blk.id, { rows });
+    const catChanged = fromInv && fromInv.cat !== toInv.cat;
+    showNotif(
+      `${blk.label || blk.guestName} — ${fromInv?.label ?? drag.fromRoomId} changed to ${toInv.label} for the full stay${catChanged ? ` (${rooms.find((r) => r.id === toInv.cat)?.name ?? toInv.type})` : ""}`,
+      "success"
+    );
+  };
+
   const handleDrop = (targetRoomId: string, targetDate: string) => {
     if (!drag) return;
+    if (drag.kind === "bulk") {
+      if (targetDate === drag.sourceDate) handleBulkDrop(drag, targetRoomId);
+      else showNotif("Drag to a different room in the same date column", "error");
+      setDrag(null);
+      setDropTarget(null);
+      return;
+    }
     const booking = bookings.find((b) => b.id === drag.bookingId);
     if (!booking) {
       setDrag(null);
@@ -1173,12 +1238,30 @@ export default function RoomChartPage() {
                     if (bulkCell) {
                       const blk = bulkCell.block;
                       const cls = "rc-cell-booked" + (blk.status === "Tentative" ? " status-tentative" : "");
+                      const isDragSource = drag?.kind === "bulk" && drag.blockId === blk.id && drag.fromRoomId === room.id;
                       return (
                         <td key={d} className={isToday ? "rc-today" : ""} style={{ padding: 4 }}>
                           <div
                             className={cls}
-                            style={{ cursor: "pointer" }}
-                            onClick={() => { setBulkDetail(blk); setHover(null); }}
+                            draggable
+                            onDragStart={(e) => {
+                              setDrag({ kind: "bulk", blockId: blk.id, fromRoomId: room.id, sourceDate: d });
+                              setHover(null);
+                              e.dataTransfer.effectAllowed = "move";
+                              try {
+                                e.dataTransfer.setData("text/plain", blk.id);
+                              } catch {}
+                            }}
+                            onDragEnd={() => {
+                              setDrag(null);
+                              setDropTarget(null);
+                            }}
+                            style={{
+                              cursor: "grab",
+                              opacity: isDragSource ? 0.5 : 1,
+                            }}
+                            title="Drag to change room (whole stay) · Click to view"
+                            onClick={() => { if (drag) return; setBulkDetail(blk); setHover(null); }}
                             onMouseEnter={(e) => showHover({ kind: "bulk", block: blk, rect: e.currentTarget.getBoundingClientRect() })}
                             onMouseLeave={hideHover}
                           >
@@ -1196,6 +1279,7 @@ export default function RoomChartPage() {
                       // For per-night drag: drop is allowed only on the same date column.
                       const isDragSourceDate =
                         drag !== null &&
+                        drag.kind === "booking" &&
                         drag.bookingId === booking.id &&
                         drag.sourceDate === d;
                       return (
@@ -1231,6 +1315,7 @@ export default function RoomChartPage() {
                                 return;
                               }
                               setDrag({
+                                kind: "booking",
                                 bookingId: booking.id,
                                 fromRoomId: cell.fromRoomId,
                                 currentRoomId: room.id,
@@ -1260,7 +1345,7 @@ export default function RoomChartPage() {
                             }
                             onMouseLeave={hideHover}
                             style={{
-                              opacity: drag?.bookingId === booking.id ? 0.5 : 1,
+                              opacity: drag?.kind === "booking" && drag.bookingId === booking.id ? 0.5 : 1,
                               cursor: draggable ? "grab" : "pointer",
                               // Subtle ring for nights with overrides so they're visually distinct
                               boxShadow: cell.kind === "booking" && cell.isOverridden

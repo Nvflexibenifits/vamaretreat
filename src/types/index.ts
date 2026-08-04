@@ -209,6 +209,8 @@ export type Booking = {
   source: string;
   notes: string;
   rex: string;
+  // Date the booking was made (YYYY-MM-DD); legacy bookings may lack it
+  createdAt?: string;
 
   checkin: string;
   checkout: string;

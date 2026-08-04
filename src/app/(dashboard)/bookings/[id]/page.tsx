@@ -1181,7 +1181,7 @@ export default function BookingDetailPage() {
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", background: b.balance > 0 ? "var(--amb-lt)" : "var(--grn-lt)" }}>
               <span style={{ fontSize: 12, fontWeight: 700, color: b.balance > 0 ? "var(--amb)" : "var(--grn)" }}>
-                {b.balance > 0 ? "Balance Amount Payable at Check-In" : "Fully Paid"}
+                {b.balance > 0 ? "Balance Amount" : "Fully Paid"}
               </span>
               <span style={{ fontSize: 14, fontWeight: 800, color: b.balance > 0 ? "var(--amb)" : "var(--grn)" }}>
                 {b.balance > 0 ? fmt(b.balance) : "Paid"}

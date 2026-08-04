@@ -735,6 +735,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       source,
       notes: notes.trim(),
       rex: currentUser,
+      createdAt: todayDate,
 
       checkin,
       checkout,
@@ -1511,7 +1512,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                             )}
                             <tr style={{ background: "var(--surf2)" }}>
                               <td colSpan={8} style={{ textAlign: "right", fontWeight: 700, color: "var(--t1)" }}>
-                                Meal Total (this date)
+                                Meal Total
                               </td>
                               <td style={{ textAlign: "right", fontWeight: 800, color: "var(--sb)", fontSize: 14 }}>
                                 {fmt(segMeal.total)}

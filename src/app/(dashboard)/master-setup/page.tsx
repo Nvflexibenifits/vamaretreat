@@ -2,13 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import {
-  SEED_DISCOUNT_CAPS,
-  SEED_PACKAGE_RATES,
-  SEED_GST_SETTINGS,
-  SEED_CANCELLATION_POLICY,
-  ROOMS as SEED_ROOMS,
-} from "@/lib/data";
 import { compareRoomLabels } from "@/lib/utils";
 import type {
   CancellationPolicy,
@@ -715,12 +708,6 @@ function RoomPricingSection() {
       <div className="sp-hd">
         <h3>Room Pricing</h3>
         <div style={{ display: "flex", gap: 8 }}>
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={() => { setDraftRooms(SEED_ROOMS); setDraftGst(SEED_GST_SETTINGS); }}
-          >
-            Reset to defaults
-          </button>
           <button className="btn btn-primary btn-sm" onClick={save}>
             Save Changes
           </button>
@@ -1643,9 +1630,6 @@ function CancellationLogicSection() {
       <div className="sp-hd">
         <h3>Cancellation Policy</h3>
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn btn-ghost btn-sm" onClick={() => setDraft(SEED_CANCELLATION_POLICY)}>
-            Reset to defaults
-          </button>
           <button className="btn btn-primary btn-sm" onClick={save}>
             Save Changes
           </button>

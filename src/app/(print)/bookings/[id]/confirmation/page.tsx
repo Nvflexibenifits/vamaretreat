@@ -45,14 +45,6 @@ const TD_YELLOW: React.CSSProperties = {
   fontWeight: 700,
   textAlign: "right",
 };
-const REX_TAG: React.CSSProperties = {
-  background: "#fff3a3",
-  padding: "2px 8px",
-  borderRadius: 3,
-  fontWeight: 700,
-  fontSize: 11,
-};
-
 export default function ConfirmationPage() {
   const params = useParams<{ id: string }>();
   const { bookings, hydrated } = useApp();
@@ -246,12 +238,20 @@ export default function ConfirmationPage() {
                 ? "BOOKING CONFIRMATION"
                 : "BOOKING PRICING"}
             </div>
-            <div style={{ fontSize: 11, color: "#52524a", marginTop: 3 }}>{b.id}</div>
+            <div style={{ fontSize: 11, color: "#52524a", marginTop: 3 }}>
+              {b.id}
+              {(() => {
+                // Date the booking was made; legacy bookings fall back to
+                // their earliest recorded payment date.
+                const made = b.createdAt || [...(b.payments ?? [])].map((p) => p.date).sort()[0];
+                return made ? ` · ${fmtIN(made)}` : "";
+              })()}
+            </div>
           </div>
 
           {/* REX */}
           <div style={{ textAlign: "right", fontSize: 12, color: "#52524a" }}>
-            REX: <span style={REX_TAG}>{b.rex}</span>
+            REX: {b.rex}
           </div>
         </div>
 
@@ -263,7 +263,8 @@ export default function ConfirmationPage() {
           }}
         >
           <GuestRow label="Guest Name" value={b.guest} />
-          <GuestRow label="Mobile No." value={b.mobile} last />
+          <GuestRow label="Mobile No." value={b.mobile} />
+          <GuestRow label="Source" value={b.source || "—"} last />
         </div>
 
         {/* PAX Count — one row per date range */}
@@ -418,7 +419,7 @@ export default function ConfirmationPage() {
           <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 4 }}>
             <thead>
               <tr>
-                <th style={TH}>Charge Type</th>
+                <th style={TH}>Meal Charges</th>
                 <th style={{ ...TH, textAlign: "right" }}>Rate</th>
                 <th style={{ ...TH, textAlign: "right" }}>Nights</th>
                 <th style={{ ...TH, textAlign: "right" }}>Pax</th>
@@ -563,7 +564,7 @@ export default function ConfirmationPage() {
             </tr>
             <tr>
               <td style={TD} colSpan={11}>
-                <strong>Balance Amount Payable at the time of Check-In</strong>
+                <strong>Balance Amount</strong>
               </td>
               <td style={TD_YELLOW}>{fmt(b.balance)}</td>
             </tr>
