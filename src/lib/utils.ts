@@ -266,7 +266,7 @@ export function bookingChargesBreakdown(b: Booking): BookingChargesBreakdown {
   }
 
   const pricingRows = getBookingPricingRows(b);
-  const roomNet = pricingRows.reduce((s, r) => s + r.netCharges, 0);
+  let roomNet = pricingRows.reduce((s, r) => s + r.netCharges, 0);
   let gst5 = 0;
   let gst18 = 0;
   pricingRows.forEach((r) => {
@@ -274,7 +274,7 @@ export function bookingChargesBreakdown(b: Booking): BookingChargesBreakdown {
     if (r.gstRate === 5) gst5 += r.gstAmt;
     else gst18 += r.gstAmt;
   });
-  const mealNet = b.mealTotal + b.petTotal + (b.driverMealTotal ?? 0);
+  let mealNet = b.mealTotal + b.petTotal + (b.driverMealTotal ?? 0);
   gst18 += b.mealGst + b.petGst + (b.driverMealGst ?? 0);
   // Itemized add-ons: net amount in Other, GST bucketed by its actual rate —
   // 5% and 18% join their columns, anything else goes to GST Other.
@@ -293,9 +293,29 @@ export function bookingChargesBreakdown(b: Booking): BookingChargesBreakdown {
   });
   // Legacy bookings rolled add-ons into grandTotal without itemizing;
   // whatever the itemized extras don't explain stays as a gross remainder.
-  const other =
+  let other =
     extrasNet +
     Math.max(0, b.grandTotal - b.totalRoomCharges - b.totalMealCharges - extrasNet - extrasGst);
+
+  // Cancellation waive-off: the unpaid balance written off per head leaves
+  // the booking's stored figures intact but comes out of reported revenue.
+  (b.waiveOff?.lines ?? []).forEach((l) => {
+    if (l.head === "room") roomNet -= l.amount;
+    else if (l.head === "meal") mealNet -= l.amount;
+    else other -= l.amount;
+    if (l.gstAmt > 0) {
+      const pct = Math.round(l.gstPct);
+      if (pct === 5) gst5 -= l.gstAmt;
+      else if (pct === 18) gst18 -= l.gstAmt;
+      else gstOther -= l.gstAmt;
+    }
+  });
+  roomNet = Math.max(0, roomNet);
+  mealNet = Math.max(0, mealNet);
+  other = Math.max(0, other);
+  gst5 = Math.max(0, gst5);
+  gst18 = Math.max(0, gst18);
+  gstOther = Math.max(0, gstOther);
 
   return { roomNet, mealNet, other, gst5, gst18, gstOther };
 }

@@ -255,7 +255,26 @@ export type Booking = {
   lostNotes?: string;
   cancellationDetails?: CancellationDetails;
 
+  // Cancellation settlement: unpaid balance written off across the three
+  // charge heads. Original charge figures stay untouched for audit; revenue
+  // reporting subtracts these lines.
+  waiveOff?: WaiveOff;
+
   nightOverrides?: RoomNightOverride[];
+};
+
+export type WaiveOffLine = {
+  head: "room" | "meal" | "other";
+  amount: number; // net (pre-GST) amount waived from this head
+  gstPct: number;
+  gstAmt: number;
+};
+
+export type WaiveOff = {
+  lines: WaiveOffLine[];
+  totalGross: number; // sum of amount + gstAmt across lines
+  date: string;
+  by: string;
 };
 
 export type RevenueEntry = Payment & {

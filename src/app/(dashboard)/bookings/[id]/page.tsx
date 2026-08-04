@@ -4,9 +4,9 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { fmt, fmtIN, dayName, getBookingPricingRows, nightsBetween, todayStr, tryAssignRooms } from "@/lib/utils";
+import { bookingChargesBreakdown, fmt, fmtIN, dayName, getBookingPricingRows, nightsBetween, todayStr, tryAssignRooms } from "@/lib/utils";
 import { StatusBadge } from "@/components/StatusBadge";
-import type { CancellationDetails, CancellationPolicy, Extra, SpecialDay } from "@/types";
+import type { CancellationDetails, CancellationPolicy, SpecialDay, WaiveOffLine } from "@/types";
 
 // ─── helpers ───────────────────────────────────────────────────────────────
 
@@ -103,11 +103,8 @@ function computeCancel(
 
 // ─── main page ─────────────────────────────────────────────────────────────
 
-type AddOnEditRow = { uid: string; category: string; amount: string; gstPct: string; date?: string; by?: string };
-
-function rowUid() {
-  return Math.random().toString(36).slice(2, 9);
-}
+// Waive-off modal rows: one fixed row per charge head.
+type WaiveRow = { head: "room" | "meal" | "other"; label: string; amount: string; gstPct: string };
 
 export default function BookingDetailPage() {
   const params = useParams<{ id: string }>();
@@ -146,9 +143,9 @@ export default function BookingDetailPage() {
   const [refMode, setRefMode] = useState("Bank Transfer");
   const [refNote, setRefNote] = useState("");
 
-  // Add-on edit modal (cancelled bookings: only add-on charges stay editable)
-  const [showAddOnEdit, setShowAddOnEdit] = useState(false);
-  const [addOnEditRows, setAddOnEditRows] = useState<AddOnEditRow[]>([]);
+  // Waive-off modal (cancelled bookings: write off the unpaid balance)
+  const [showWaiveModal, setShowWaiveModal] = useState(false);
+  const [waiveRows, setWaiveRows] = useState<WaiveRow[]>([]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -216,43 +213,80 @@ export default function BookingDetailPage() {
   const handleBookTentative = () => allocateAndSetStatus("Tentative");
   const handleConfirm = () => allocateAndSetStatus("Confirmed");
 
-  // Cancelled bookings stay locked except for add-on charges — services that
-  // were actually consumed can still be corrected after cancellation.
-  const canEditAddOns = !isFrontOffice && b.status === "Cancelled";
+  // Cancelled bookings stay locked except for the waive-off: the unpaid
+  // balance is written off across the three charge heads so the booking's
+  // reported value matches what the hotel actually keeps. Refund
+  // cancellations already drop their revenue, so nothing to waive there.
+  const waiveTarget = Math.max(0, Math.round(b.grandTotal - b.advance));
+  const canWaiveOff =
+    !isFrontOffice &&
+    b.status === "Cancelled" &&
+    b.cancellationDetails?.resolution !== "refund" &&
+    (waiveTarget > 0 || !!b.waiveOff);
 
-  const openAddOnEdit = () => {
-    const rows: AddOnEditRow[] = (b.extras ?? []).map((e) => ({
-      uid: rowUid(),
-      category: e.name,
-      amount: String(e.amount),
-      gstPct: e.amount > 0 && e.gst ? String(Math.round((e.gst / e.amount) * 10000) / 100) : "0",
-      date: e.date,
-      by: e.by,
-    }));
-    setAddOnEditRows(rows.length > 0 ? rows : [{ uid: rowUid(), category: "Room Charges", amount: "0", gstPct: "0" }]);
-    setShowAddOnEdit(true);
+  // Charge heads before any waive-off — the per-head caps for the modal
+  const rawCharges = bookingChargesBreakdown({ ...b, waiveOff: undefined });
+
+  const defaultRoomGstPct = (() => {
+    const row = getBookingPricingRows(b).find((r) => r.netCharges > 0 && r.gstAmt > 0);
+    return row ? String(row.gstRate) : "5";
+  })();
+
+  const openWaiveOff = () => {
+    const saved = (head: WaiveRow["head"]) => b.waiveOff?.lines.find((l) => l.head === head);
+    const mk = (head: WaiveRow["head"], label: string, defPct: string): WaiveRow => {
+      const s = saved(head);
+      return {
+        head,
+        label,
+        amount: s ? String(s.amount) : "0",
+        gstPct: s ? String(s.gstPct) : defPct,
+      };
+    };
+    setWaiveRows([
+      mk("room", "Room Charges", defaultRoomGstPct),
+      mk("meal", "Meal Charges", "18"),
+      mk("other", "Add-on Charges", "18"),
+    ]);
+    setShowWaiveModal(true);
   };
 
-  const saveAddOnEdit = () => {
-    const built: Extra[] = addOnEditRows
+  const waiveHeadCap = (head: WaiveRow["head"]) =>
+    head === "room" ? rawCharges.roomNet : head === "meal" ? rawCharges.mealNet : rawCharges.other;
+
+  const waiveRowGross = (r: WaiveRow) => {
+    const amt = parseFloat(r.amount) || 0;
+    return amt + (amt * (parseFloat(r.gstPct) || 0)) / 100;
+  };
+  const waiveTotalGross = waiveRows.reduce((s, r) => s + waiveRowGross(r), 0);
+
+  const saveWaiveOff = () => {
+    for (const r of waiveRows) {
+      const amt = parseFloat(r.amount) || 0;
+      if (amt < 0) { showNotif("Waive-off amounts cannot be negative", "error"); return; }
+      if (amt > waiveHeadCap(r.head) + 0.01) {
+        showNotif(`${r.label}: cannot waive more than ${fmt(waiveHeadCap(r.head))} (net charges on this head)`, "error");
+        return;
+      }
+    }
+    if (Math.abs(waiveTotalGross - waiveTarget) > 1) {
+      showNotif(`Total waived (incl. GST) must equal the unpaid balance of ${fmt(waiveTarget)}`, "error");
+      return;
+    }
+    const lines: WaiveOffLine[] = waiveRows
       .map((r) => {
-        const amt = parseFloat(r.amount) || 0;
-        return {
-          name: r.category.trim() || "Add-on Charge",
-          amount: amt,
-          gst: (amt * (parseFloat(r.gstPct) || 0)) / 100,
-          date: r.date || today,
-          by: r.by || currentUser,
-        };
+        const amount = Math.round((parseFloat(r.amount) || 0) * 100) / 100;
+        const gstPct = parseFloat(r.gstPct) || 0;
+        return { head: r.head, amount, gstPct, gstAmt: Math.round(amount * gstPct) / 100 };
       })
-      .filter((e) => e.amount > 0);
-    const gross = (list: Extra[]) => list.reduce((s, e) => s + e.amount + (e.gst ?? 0), 0);
-    // Swap old add-on value for new in the grand total; room/meal stay as-is.
-    const grandTotal = Math.round((b.grandTotal - gross(b.extras ?? []) + gross(built)) * 100) / 100;
-    const balance = Math.max(0, Math.round(grandTotal - b.advance));
-    updateBooking(b.id, { extras: built, grandTotal, balance });
-    setShowAddOnEdit(false);
-    showNotif("Add-on charges updated", "success");
+      .filter((l) => l.amount > 0);
+    const totalGross = Math.round(lines.reduce((s, l) => s + l.amount + l.gstAmt, 0) * 100) / 100;
+    updateBooking(b.id, {
+      waiveOff: { lines, totalGross, date: today, by: currentUser },
+      balance: Math.max(0, Math.round(b.grandTotal - totalGross - b.advance)),
+    });
+    setShowWaiveModal(false);
+    showNotif("Unpaid balance waived off", "success");
   };
 
   const totalKids = b.kidsAbove10 + b.kids6to10;
@@ -360,50 +394,63 @@ export default function BookingDetailPage() {
   return (
     <div className="view">
       {/* Record Refund Modal */}
-      {showAddOnEdit && (
-        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setShowAddOnEdit(false); }}>
-          <div className="modal" style={{ maxWidth: 640, width: "100%" }}>
-            <h3>Edit Add-on Charges</h3>
+      {showWaiveModal && (
+        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setShowWaiveModal(false); }}>
+          <div className="modal" style={{ maxWidth: 680, width: "100%" }}>
+            <h3>Waive Off Unpaid Balance</h3>
             <p className="modal-desc">
-              Only add-on charges can be changed on a cancelled booking. The booking total and the Revenue Register update to match.
+              Write the unpaid balance off across the charge heads. Original figures stay on record; the booking value and Revenue Register report the reduced amounts.
             </p>
 
-            <div style={{ marginTop: 12, overflowX: "auto" }}>
+            <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
+              <div style={{ flex: 1, padding: "8px 12px", background: "var(--surf2)", borderRadius: "var(--r3)" }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase" }}>To Waive (incl. GST)</div>
+                <div style={{ fontSize: 16, fontWeight: 800 }}>{fmt(waiveTarget)}</div>
+              </div>
+              <div style={{ flex: 1, padding: "8px 12px", background: "var(--surf2)", borderRadius: "var(--r3)" }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase" }}>Allocated</div>
+                <div style={{ fontSize: 16, fontWeight: 800 }}>{fmt(waiveTotalGross)}</div>
+              </div>
+              <div style={{ flex: 1, padding: "8px 12px", background: Math.abs(waiveTarget - waiveTotalGross) <= 1 ? "var(--grn-bg)" : "var(--amb-bg)", borderRadius: "var(--r3)" }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase" }}>Remaining</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: Math.abs(waiveTarget - waiveTotalGross) <= 1 ? "var(--grn)" : "var(--amb)" }}>
+                  {fmt(Math.max(0, waiveTarget - waiveTotalGross))}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 14, overflowX: "auto" }}>
               <table style={{ width: "100%" }}>
                 <thead>
                   <tr>
-                    <th style={{ whiteSpace: "nowrap" }}>Category</th>
-                    <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Amount (₹)</th>
+                    <th>Charge Head</th>
+                    <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Available (net)</th>
+                    <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Waive Amount (₹)</th>
                     <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>GST %</th>
-                    <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Total</th>
-                    <th style={{ width: 44 }}></th>
+                    <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Incl. GST</th>
+                    <th style={{ width: 50 }}></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {addOnEditRows.map((row) => {
+                  {waiveRows.map((row) => {
+                    const cap = waiveHeadCap(row.head);
                     const amt = parseFloat(row.amount) || 0;
-                    const gstAmt = (amt * (parseFloat(row.gstPct) || 0)) / 100;
+                    const overCap = amt > cap + 0.01;
                     return (
-                      <tr key={row.uid}>
-                        <td>
-                          <select
-                            value={row.category}
-                            onChange={(e) => setAddOnEditRows((p) => p.map((r) => r.uid === row.uid ? { ...r, category: e.target.value } : r))}
-                            style={{ width: "100%", padding: "5px 8px", border: "1px solid var(--bd)", borderRadius: "var(--r3)", fontSize: 12, background: "var(--surf)", outline: "none" }}
-                          >
-                            <option>Room Charges</option>
-                            <option>Meal Charges</option>
-                            <option>Venue Charges</option>
-                          </select>
-                        </td>
+                      <tr key={row.head}>
+                        <td style={{ fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}>{row.label}</td>
+                        <td style={{ textAlign: "right", fontSize: 12, color: "var(--t3)", whiteSpace: "nowrap" }}>{fmt(cap)}</td>
                         <td>
                           <input
                             type="number"
                             min={0}
                             value={row.amount}
-                            onChange={(e) => setAddOnEditRows((p) => p.map((r) => r.uid === row.uid ? { ...r, amount: e.target.value } : r))}
-                            style={{ width: "100%", padding: "5px 8px", border: "1px solid var(--bd)", borderRadius: "var(--r3)", fontSize: 12, textAlign: "right", background: "var(--surf)", outline: "none" }}
+                            onChange={(e) => setWaiveRows((p) => p.map((r) => r.head === row.head ? { ...r, amount: e.target.value } : r))}
+                            style={{ width: 110, padding: "5px 8px", border: `1px solid ${overCap ? "var(--red)" : "var(--bd)"}`, borderRadius: "var(--r3)", fontSize: 12, textAlign: "right", background: "var(--surf)", outline: "none" }}
                           />
+                          {overCap && (
+                            <div style={{ fontSize: 10, color: "var(--red)", marginTop: 2 }}>Exceeds available</div>
+                          )}
                         </td>
                         <td>
                           <input
@@ -411,20 +458,24 @@ export default function BookingDetailPage() {
                             min={0}
                             max={28}
                             value={row.gstPct}
-                            onChange={(e) => setAddOnEditRows((p) => p.map((r) => r.uid === row.uid ? { ...r, gstPct: e.target.value } : r))}
-                            style={{ width: 70, padding: "5px 8px", border: "1px solid var(--bd)", borderRadius: "var(--r3)", fontSize: 12, textAlign: "right", background: "var(--surf)", outline: "none" }}
+                            onChange={(e) => setWaiveRows((p) => p.map((r) => r.head === row.head ? { ...r, gstPct: e.target.value } : r))}
+                            style={{ width: 64, padding: "5px 8px", border: "1px solid var(--bd)", borderRadius: "var(--r3)", fontSize: 12, textAlign: "right", background: "var(--surf)", outline: "none" }}
                           />
                         </td>
-                        <td style={{ textAlign: "right", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}>
-                          {fmt(amt + gstAmt)}
-                        </td>
+                        <td style={{ textAlign: "right", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>{fmt(waiveRowGross(row))}</td>
                         <td style={{ textAlign: "center" }}>
                           <button
                             className="btn btn-ghost btn-xs"
-                            style={{ color: "var(--red)" }}
-                            onClick={() => setAddOnEditRows((p) => p.filter((r) => r.uid !== row.uid))}
+                            title="Fill this row with the remaining amount"
+                            onClick={() => {
+                              const othersGross = waiveRows.filter((r) => r.head !== row.head).reduce((s, r) => s + waiveRowGross(r), 0);
+                              const pct = parseFloat(row.gstPct) || 0;
+                              const base = Math.max(0, (waiveTarget - othersGross) / (1 + pct / 100));
+                              const capped = Math.min(base, waiveHeadCap(row.head));
+                              setWaiveRows((p) => p.map((r) => r.head === row.head ? { ...r, amount: String(Math.round(capped * 100) / 100) } : r));
+                            }}
                           >
-                            ×
+                            Fill
                           </button>
                         </td>
                       </tr>
@@ -433,29 +484,15 @@ export default function BookingDetailPage() {
                 </tbody>
               </table>
             </div>
-
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              style={{ marginTop: 10 }}
-              onClick={() => setAddOnEditRows((p) => [...p, { uid: rowUid(), category: "Room Charges", amount: "0", gstPct: "0" }])}
-            >
-              + Add Row
-            </button>
-
-            <div style={{ marginTop: 12, padding: "8px 12px", background: "var(--surf2)", borderRadius: "var(--r3)", display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 700 }}>
-              <span>Total Add-on Charges (incl. GST)</span>
-              <span>
-                {fmt(addOnEditRows.reduce((s, r) => {
-                  const amt = parseFloat(r.amount) || 0;
-                  return s + amt + (amt * (parseFloat(r.gstPct) || 0)) / 100;
-                }, 0))}
-              </span>
+            <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 8 }}>
+              Fill computes the amount so that amount plus its GST settles the remaining balance exactly.
             </div>
 
             <div className="modal-actions" style={{ marginTop: 16 }}>
-              <button className="btn btn-ghost" onClick={() => setShowAddOnEdit(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={saveAddOnEdit}>Save Changes</button>
+              <button className="btn btn-ghost" onClick={() => setShowWaiveModal(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={saveWaiveOff} disabled={Math.abs(waiveTotalGross - waiveTarget) > 1}>
+                Waive Off {fmt(waiveTotalGross)}
+              </button>
             </div>
           </div>
         </div>
@@ -645,6 +682,11 @@ export default function BookingDetailPage() {
           <div className="status-actions">
             {canEdit && (
               <Link href={`/bookings/${b.id}/edit`} className="btn btn-ghost btn-sm">Edit</Link>
+            )}
+            {canWaiveOff && (
+              <button className="btn btn-ghost btn-sm" onClick={openWaiveOff}>
+                {b.waiveOff ? "Edit Waive Off" : "Waive Off Balance"}
+              </button>
             )}
             <a
               className="btn btn-ghost btn-sm"
@@ -1056,28 +1098,9 @@ export default function BookingDetailPage() {
           )}
 
           {/* Add-on Charges — itemized extras saved on the booking */}
-          {((b.extras ?? []).length > 0 || canEditAddOns) && (
+          {(b.extras ?? []).length > 0 && (
             <>
-              <SectionHeader>
-                <div style={{ display: "flex", alignItems: "center" }}>
-                  <span style={{ flex: 1 }}>Add-on Charges</span>
-                  {canEditAddOns && (
-                    <button
-                      className="btn btn-ghost btn-xs"
-                      style={{ color: "#fff", border: "1px solid rgba(255,255,255,.4)" }}
-                      onClick={openAddOnEdit}
-                    >
-                      Edit
-                    </button>
-                  )}
-                </div>
-              </SectionHeader>
-              {(b.extras ?? []).length === 0 && canEditAddOns && (
-                <div style={{ padding: "12px 16px", fontSize: 12, color: "var(--t3)", borderBottom: "1px solid var(--bd)" }}>
-                  No add-on charges. Click Edit to add charges to this cancelled booking.
-                </div>
-              )}
-              {(b.extras ?? []).length > 0 && (
+              <SectionHeader>Add-on Charges</SectionHeader>
               <div style={{ overflowX: "auto" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1000 }}>
                   <thead>
@@ -1119,7 +1142,6 @@ export default function BookingDetailPage() {
                   </tbody>
                 </table>
               </div>
-              )}
             </>
           )}
 
@@ -1133,6 +1155,26 @@ export default function BookingDetailPage() {
                 {fmt(b.grandTotal)}
               </span>
             </div>
+            {b.waiveOff && (
+              <>
+                {b.waiveOff.lines.map((l) => (
+                  <div key={l.head} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 16px", borderBottom: "1px solid var(--bd)" }}>
+                    <span style={{ fontSize: 12, color: "var(--t2)", fontWeight: 600 }}>
+                      Waived Off — {l.head === "room" ? "Room Charges" : l.head === "meal" ? "Meal Charges" : "Add-on Charges"}
+                      <span style={{ color: "var(--t3)", fontWeight: 500 }}> ({fmt(l.amount)} + {l.gstPct}% GST)</span>
+                    </span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: "var(--red)" }}>−{fmt(l.amount + l.gstAmt)}</span>
+                  </div>
+                ))}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", background: "var(--surf2)", borderBottom: "1px solid var(--bd)" }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "var(--t1)" }}>
+                    Net Value After Waive Off
+                    <span style={{ color: "var(--t3)", fontWeight: 500 }}> · {fmtIN(b.waiveOff.date)} by {b.waiveOff.by}</span>
+                  </span>
+                  <span style={{ fontSize: 15, fontWeight: 800, color: "var(--t1)" }}>{fmt(b.grandTotal - b.waiveOff.totalGross)}</span>
+                </div>
+              </>
+            )}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", borderBottom: "1px solid var(--bd)" }}>
               <span style={{ fontSize: 12, color: "var(--t2)", fontWeight: 600 }}>Amount Received</span>
               <span style={{ fontSize: 14, fontWeight: 700, color: "var(--grn)" }}>{fmt(b.advance)}</span>

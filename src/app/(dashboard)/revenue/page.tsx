@@ -92,7 +92,8 @@ export default function RevenuePage() {
         const retained = isCancelled
           ? (b.cancellationDetails?.cancellationCharge ?? 0) + (b.cancellationDetails?.creditNoteAmount ?? 0)
           : 0;
-        const total = isRefundCancel ? retained : b.grandTotal;
+        // A waive-off writes the unpaid balance out of the booking's value
+        const total = isRefundCancel ? retained : b.grandTotal - (b.waiveOff?.totalGross ?? 0);
 
         let bank = 0, cash = 0, crNote = 0;
         (b.payments ?? []).forEach((p) => {
