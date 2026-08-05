@@ -896,6 +896,11 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       showNotif("Enter advance amount to confirm", "error");
       return;
     }
+    // Money received means a firm commitment — only Confirm is allowed then
+    if (intent !== "Confirmed" && createAdvance > 0) {
+      showNotif("Payment entered — use Confirm Booking", "error");
+      return;
+    }
     // B2C-<fiscal year>-<sequence>, e.g. B2C-2627-001. Sequence is the highest
     // existing number for the prefix + 1, so deletions never cause ID reuse.
     const idPrefix = `B2C-${fiscalYearCode()}-`;
@@ -936,12 +941,17 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   const saveEdit = (alsoOpenConfirmation: boolean) => {
     if (!validate() || !initial) return;
     if (!validateCreditNoteRows()) return;
+    // Payment received means a firm commitment: an Enquiry or Tentative
+    // booking with money against it auto-promotes to Confirmed on save.
+    const promoteToConfirmed =
+      (initial.status === "Enquiry" || initial.status === "Tentative") &&
+      totalReceived > 0;
     let allocatedRooms = initial.allocatedRooms;
     // Default: carry over each segment's existing allocation (matched by id)
     let segAlloc: Record<string, string[]> = Object.fromEntries(
       (initial.segments ?? []).map((s) => [s.id, s.allocatedRooms ?? []])
     );
-    if (initial.status === "Tentative" || initial.status === "Confirmed") {
+    if (initial.status === "Tentative" || initial.status === "Confirmed" || promoteToConfirmed) {
       const result = tryAssignRooms(
         computedSegments,
         checkin,
@@ -962,9 +972,16 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       allocatedRooms = [];
       segAlloc = {};
     }
-    updateBooking(initial.id, buildEditPatch(allocatedRooms, segAlloc));
+    const patch = buildEditPatch(allocatedRooms, segAlloc);
+    if (promoteToConfirmed) patch.status = "Confirmed";
+    updateBooking(initial.id, patch);
     redeemCreditNoteRows(initial.id);
-    showNotif(`Booking ${initial.id} updated`, "success");
+    showNotif(
+      promoteToConfirmed
+        ? `Booking ${initial.id} updated — Confirmed (payment received)`
+        : `Booking ${initial.id} updated`,
+      "success"
+    );
     if (alsoOpenConfirmation && typeof window !== "undefined") {
       window.open(`/bookings/${initial.id}/confirmation`, "_blank");
     }
@@ -977,6 +994,8 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   };
 
   const confirmDisabled = createAdvance <= 0;
+  // Money received means a firm commitment — Enquiry/Tentative are off the table
+  const nonConfirmDisabled = createAdvance > 0;
 
   return (
     <div className="view">
@@ -1981,16 +2000,28 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
             <button
               type="button"
               className="btn btn-ghost"
-              style={{ padding: "12px 18px" }}
+              style={{
+                padding: "12px 18px",
+                opacity: nonConfirmDisabled ? 0.5 : 1,
+                cursor: nonConfirmDisabled ? "not-allowed" : "pointer",
+              }}
               onClick={() => saveCreate("Enquiry")}
+              disabled={nonConfirmDisabled}
+              title={nonConfirmDisabled ? "Payment entered — use Confirm Booking" : ""}
             >
               Save as Enquiry
             </button>
             <button
               type="button"
               className="btn btn-primary"
-              style={{ padding: "12px 18px" }}
+              style={{
+                padding: "12px 18px",
+                opacity: nonConfirmDisabled ? 0.5 : 1,
+                cursor: nonConfirmDisabled ? "not-allowed" : "pointer",
+              }}
               onClick={() => saveCreate("Tentative")}
+              disabled={nonConfirmDisabled}
+              title={nonConfirmDisabled ? "Payment entered — use Confirm Booking" : ""}
             >
               Book Tentatively
             </button>

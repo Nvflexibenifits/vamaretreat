@@ -166,12 +166,17 @@ export default function BookingsPage() {
                     : 0;
                 const pending = b.status === "Cancelled" || b.status === "Lost" ? 0 : b.balance;
                 // Refund cancellations owe nothing beyond what the hotel
-                // retains — mirror the revenue register's Total column.
+                // retains — mirror the revenue register's Total column. A
+                // waive-off writes the unpaid balance out of the due amount.
                 const amountDue =
                   b.status === "Cancelled" && b.cancellationDetails?.resolution === "refund"
                     ? (b.cancellationDetails.cancellationCharge ?? 0) +
                       (b.cancellationDetails.creditNoteAmount ?? 0)
-                    : b.grandTotal;
+                    : b.grandTotal - (b.waiveOff?.totalGross ?? 0);
+                // Money actually received — never derived from balance, which
+                // can settle without money (waive-offs).
+                const received =
+                  (b.payments ?? []).reduce((s, p) => s + p.amount, 0) || b.advance;
                 return (
                   <tr key={b.id} onClick={() => router.push(`/bookings/${b.id}`)}>
                     <td>
@@ -190,7 +195,7 @@ export default function BookingsPage() {
                     <td>{fmtIN(b.checkout)}</td>
                     <td>{b.nights}</td>
                     <td style={{ fontWeight: 600 }}>{fmt(amountDue)}</td>
-                    <td style={{ fontWeight: 500, color: "var(--grn)" }}>{fmt(b.grandTotal - b.balance)}</td>
+                    <td style={{ fontWeight: 500, color: "var(--grn)" }}>{fmt(received)}</td>
                     <td
                       style={{
                         fontWeight: 500,
