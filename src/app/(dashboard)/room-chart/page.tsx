@@ -400,8 +400,9 @@ export default function RoomChartPage() {
     setMVenueRows([{ type: "", venueIds: [] }]);
   };
 
-  const openUnifiedCreate = () => {
+  const openUnifiedCreate = (mode: "book" | "maintenance") => {
     resetUnifiedForm();
+    setUMode(mode);
     setHover(null);
     setUnifiedModal({ open: true });
   };
@@ -949,7 +950,7 @@ export default function RoomChartPage() {
           <h2>Room Chart</h2>
         </div>
         <div className="pg-hd-actions">
-          <button className="btn btn-ghost btn-sm" onClick={goNextMonth}>
+          <button className="btn btn-primary btn-sm" onClick={goNextMonth}>
             Next Month
           </button>
           <select
@@ -972,8 +973,11 @@ export default function RoomChartPage() {
               </option>
             ))}
           </select>
-          <button className="btn btn-primary btn-sm" onClick={openUnifiedCreate}>
-            Block
+          <button className="btn btn-danger btn-sm" onClick={() => openUnifiedCreate("maintenance")}>
+            Maintenance Block
+          </button>
+          <button className="btn btn-primary btn-sm" onClick={() => openUnifiedCreate("book")}>
+            Booking
           </button>
         </div>
       </div>
@@ -1421,38 +1425,14 @@ export default function RoomChartPage() {
           <div className="modal" style={{ maxWidth: 580, width: "100%" }}>
             <h3>
               {(unifiedModal.editingBulkId || unifiedModal.editingVenueId)
-                ? uMode === "maintenance" ? "Edit Maintenance Block" : "Edit Block"
-                : "New Block"}
+                ? uMode === "maintenance" ? "Edit Maintenance Block" : "Edit Booking"
+                : uMode === "maintenance" ? "Maintenance Block" : "New Booking"}
             </h3>
             <p className="modal-desc">
               {uMode === "maintenance"
                 ? "Take rooms or venues out of service — they cannot be assigned for the blocked dates."
-                : "Block rooms, a venue, or both for a group in one step."}
+                : "Book rooms, a venue, or both for a group in one step."}
             </p>
-
-            {/* Mode selector — only when creating; an existing block keeps its kind */}
-            {!unifiedModal.editingBulkId && !unifiedModal.editingVenueId && (
-              <div style={{ display: "flex", gap: 18, marginTop: 12 }}>
-                <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13, fontWeight: 500 }}>
-                  <input
-                    type="radio"
-                    name="rc-block-mode"
-                    checked={uMode === "book"}
-                    onChange={() => setUMode("book")}
-                  />
-                  Book
-                </label>
-                <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13, fontWeight: 500 }}>
-                  <input
-                    type="radio"
-                    name="rc-block-mode"
-                    checked={uMode === "maintenance"}
-                    onChange={() => setUMode("maintenance")}
-                  />
-                  Maintenance Block
-                </label>
-              </div>
-            )}
 
             {uMode === "maintenance" ? (
               <>

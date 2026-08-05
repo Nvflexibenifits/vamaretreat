@@ -3,11 +3,11 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { addDays, bookingChargesBreakdown, fmt, fmtIN, nightsBetween, sevenDaysFrom, todayStr, weekRange } from "@/lib/utils";
+import { addDays, bookingChargesBreakdown, findAvailableRoomIds, fmt, fmtIN, formatLongDate, nightsBetween, sevenDaysFrom, todayStr, weekRange } from "@/lib/utils";
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { bookings, currentRole, rooms, roomInventory } = useApp();
+  const { bookings, bulkRoomBlocks, currentRole, rooms, roomInventory } = useApp();
   const isFrontOffice = currentRole === "Front Office";
 
   const roomCategories = useMemo(() => {
@@ -127,21 +127,24 @@ export default function DashboardPage() {
         });
       return qty;
     };
-    return rooms
-      .map((r) => {
-        let rollOver = 0;
-        let newCheckin = 0;
-        bookings.forEach((b) => {
-          if (b.status !== "Confirmed" && b.status !== "Completed") return;
-          const qty = getRoomCount(b, r.id);
-          if (qty === 0) return;
-          if (b.checkin < d && b.checkout > d) rollOver += qty;
-          else if (b.checkin === d && b.checkout > d) newCheckin += qty;
-        });
-        return { category: r.name, rollOver, newCheckin, total: rollOver + newCheckin };
-      })
-      .filter((row) => row.total > 0);
-  }, [rooms, bookings, foDate]);
+    // Every category is listed (booked or not); available counts physical
+    // rooms free that night — bookings, blocks, and maintenance all consume.
+    return rooms.map((r) => {
+      let rollOver = 0;
+      let newCheckin = 0;
+      bookings.forEach((b) => {
+        if (b.status !== "Confirmed" && b.status !== "Completed") return;
+        const qty = getRoomCount(b, r.id);
+        if (qty === 0) return;
+        if (b.checkin < d && b.checkout > d) rollOver += qty;
+        else if (b.checkin === d && b.checkout > d) newCheckin += qty;
+      });
+      const available = findAvailableRoomIds(
+        r.id, d, addDays(d, 1), bookings, roomInventory, undefined, bulkRoomBlocks
+      ).length;
+      return { category: r.name, rollOver, newCheckin, total: rollOver + newCheckin, available };
+    });
+  }, [rooms, bookings, roomInventory, bulkRoomBlocks, foDate]);
 
   // ───── Front Office: PAX Count for the selected date ─────
   // Counts come from the segment covering the date (bookings with multiple
@@ -355,6 +358,13 @@ export default function DashboardPage() {
           )}
         </div>
 
+        {/* Selected report date — shared by both tabs */}
+        {foDate && (
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--t2)", margin: "-8px 0 16px" }}>
+            {formatLongDate(new Date(foDate + "T00:00:00"))}
+          </div>
+        )}
+
         {foTab === "movement" && (
         <>
         {/* Check-ins */}
@@ -427,15 +437,16 @@ export default function DashboardPage() {
                 <th style={{ textAlign: "center" }}>Roll Over Rooms</th>
                 <th style={{ textAlign: "center" }}>New Check-ins</th>
                 <th style={{ textAlign: "center" }}>Total Occupancy</th>
+                <th style={{ textAlign: "center" }}>Available Rooms</th>
               </tr>
             </thead>
             <tbody>
               {roomSummaryToday.length === 0 ? (
                 <tr>
-                  <td colSpan={4}>
+                  <td colSpan={5}>
                     <div className="empty-state">
-                      <h3>No occupied rooms</h3>
-                      <p>No confirmed or completed bookings are active on this date</p>
+                      <h3>No room categories</h3>
+                      <p>Set up room categories in Master Setup first</p>
                     </div>
                   </td>
                 </tr>
@@ -459,7 +470,16 @@ export default function DashboardPage() {
                         )}
                       </td>
                       <td style={{ textAlign: "center" }}>
-                        <span style={{ fontWeight: 700, color: "var(--t1)" }}>{row.total}</span>
+                        {row.total > 0 ? (
+                          <span style={{ fontWeight: 700, color: "var(--t1)" }}>{row.total}</span>
+                        ) : (
+                          <span style={{ color: "var(--t4)" }}>—</span>
+                        )}
+                      </td>
+                      <td style={{ textAlign: "center" }}>
+                        <span style={{ fontWeight: 700, color: row.available > 0 ? "var(--grn)" : "var(--red)" }}>
+                          {row.available}
+                        </span>
                       </td>
                     </tr>
                   ))}
@@ -473,6 +493,9 @@ export default function DashboardPage() {
                     </td>
                     <td style={{ textAlign: "center", color: "var(--t1)" }}>
                       {roomSummaryToday.reduce((s, r) => s + r.total, 0)}
+                    </td>
+                    <td style={{ textAlign: "center", color: "var(--grn)" }}>
+                      {roomSummaryToday.reduce((s, r) => s + r.available, 0)}
                     </td>
                   </tr>
                 </>
