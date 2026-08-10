@@ -178,10 +178,6 @@ function VenueMasterTab() {
       <div className="sp-hd">
         <h3>Venue &amp; Services</h3>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 12, color: "var(--t3)" }}>
-            {venues.length} venue{venues.length === 1 ? "" : "s"} across{" "}
-            {venueTypes.length} categories
-          </span>
           <button
             className="btn btn-ghost btn-sm"
             onClick={() => { setAddCatOpen((v) => !v); setNewCatName(""); }}

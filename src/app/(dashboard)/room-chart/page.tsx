@@ -1446,15 +1446,6 @@ export default function RoomChartPage() {
                     <input type="date" value={uCheckout} min={uCheckin} onChange={(e) => setUCheckout(e.target.value)} />
                     <div className="field-hint">Blocked through the end date (inclusive)</div>
                   </div>
-                  <div className="field" style={{ gridColumn: "span 2" }}>
-                    <label>Reason</label>
-                    <input
-                      type="text"
-                      value={mReason}
-                      onChange={(e) => setMReason(e.target.value)}
-                      placeholder="e.g. Painting, plumbing work"
-                    />
-                  </div>
                 </div>
 
                 {/* Rooms to block */}
@@ -1865,7 +1856,7 @@ export default function RoomChartPage() {
                 )}
               </div>
               <div style={{ display: "flex", gap: 8 }}>
-                <button className="btn btn-ghost" onClick={closeUnifiedModal}>Cancel</button>
+                <button className="btn btn-ghost" onClick={closeUnifiedModal}>Close</button>
                 {uMode === "maintenance" ? (
                   <button className="btn btn-primary" onClick={saveMaintenance}>
                     {(unifiedModal.editingBulkId || unifiedModal.editingVenueId) ? "Save Changes" : "Block for Maintenance"}
@@ -1891,9 +1882,11 @@ export default function RoomChartPage() {
                 <h3 style={{ marginBottom: 2 }}>
                   {bulkDetail.status === "Maintenance" ? "Maintenance Block" : bulkDetail.label}
                 </h3>
-                <div style={{ fontSize: 13, color: "var(--t3)" }}>
-                  {bulkDetail.status === "Maintenance" ? (bulkDetail.reason || "No reason given") : bulkDetail.guestName}
-                </div>
+                {(bulkDetail.status !== "Maintenance" || bulkDetail.reason) && (
+                  <div style={{ fontSize: 13, color: "var(--t3)" }}>
+                    {bulkDetail.status === "Maintenance" ? bulkDetail.reason : bulkDetail.guestName}
+                  </div>
+                )}
               </div>
               <span
                 className="badge"
@@ -2274,9 +2267,9 @@ function VenueHoverCard({
       </div>
 
       {isMaint ? (
-        <div style={{ fontSize: 11, color: "var(--t2)" }}>
-          {block.reason || "No reason given"}
-        </div>
+        block.reason ? (
+          <div style={{ fontSize: 11, color: "var(--t2)" }}>{block.reason}</div>
+        ) : null
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
           <HoverRow label="Pax" value={String(block.pax || 0)} />
@@ -2332,9 +2325,11 @@ function BulkHoverCard({ block, rect, rooms }: { block: BulkRoomBlock; rect: DOM
           {block.status}
         </span>
       </div>
-      <div style={{ fontSize: 11, color: "var(--t3)", marginBottom: 6 }}>
-        {isMaint ? (block.reason || "No reason given") : block.guestName}
-      </div>
+      {(!isMaint || block.reason) && (
+        <div style={{ fontSize: 11, color: "var(--t3)", marginBottom: 6 }}>
+          {isMaint ? block.reason : block.guestName}
+        </div>
+      )}
       <div style={{ fontSize: 11, color: "var(--t3)", marginBottom: 6 }}>
         {isMaint
           ? block.checkin === maintEnd

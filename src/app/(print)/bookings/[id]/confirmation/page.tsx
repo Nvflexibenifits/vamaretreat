@@ -291,9 +291,10 @@ export default function ConfirmationPage() {
               <th style={TH}>C-out</th>
               <th style={{ ...TH, textAlign: "center" }}>AD</th>
               <th style={{ ...TH, textAlign: "center" }}>Sr. Ct</th>
-              <th style={{ ...TH, textAlign: "center" }}>K &gt; 6</th>
-              <th style={{ ...TH, textAlign: "center" }}>K 3-6</th>
-              <th style={{ ...TH, textAlign: "center" }}>Inf 0-3</th>
+              <th style={{ ...TH, textAlign: "center" }}>K &gt; 10</th>
+              <th style={{ ...TH, textAlign: "center" }}>K 6-10</th>
+              <th style={{ ...TH, textAlign: "center" }}>K 2-6</th>
+              <th style={{ ...TH, textAlign: "center" }}>Inf &lt; 2</th>
               <th style={{ ...TH, textAlign: "center" }}>Pets</th>
             </tr>
           </thead>
@@ -303,12 +304,12 @@ export default function ConfirmationPage() {
                 ? {
                     checkin: seg.checkin, checkout: seg.checkout,
                     adults: seg.adults, seniors: seg.seniors, kidsAbove10: seg.kidsAbove10,
-                    kids6to10: seg.kids6to10, infants: seg.infantsBelow2 + seg.kids2to6, pets: seg.pets,
+                    kids6to10: seg.kids6to10, kids2to6: seg.kids2to6, infants: seg.infantsBelow2, pets: seg.pets,
                   }
                 : {
                     checkin: b.checkin, checkout: b.checkout,
                     adults: b.adults, seniors: b.seniors, kidsAbove10: b.kidsAbove10,
-                    kids6to10: b.kids6to10, infants: b.infantsBelow2 + b.kids2to6, pets: b.pets,
+                    kids6to10: b.kids6to10, kids2to6: b.kids2to6, infants: b.infantsBelow2, pets: b.pets,
                   };
               return (
                 <tr key={seg?.id ?? i}>
@@ -324,6 +325,7 @@ export default function ConfirmationPage() {
                   <td style={{ ...TD, textAlign: "center", fontWeight: counts.seniors > 0 ? 700 : 400 }}>{counts.seniors}</td>
                   <td style={{ ...TD, textAlign: "center", fontWeight: counts.kidsAbove10 > 0 ? 700 : 400 }}>{counts.kidsAbove10}</td>
                   <td style={{ ...TD, textAlign: "center", fontWeight: counts.kids6to10 > 0 ? 700 : 400 }}>{counts.kids6to10}</td>
+                  <td style={{ ...TD, textAlign: "center", fontWeight: counts.kids2to6 > 0 ? 700 : 400 }}>{counts.kids2to6}</td>
                   <td style={{ ...TD, textAlign: "center", fontWeight: counts.infants > 0 ? 700 : 400 }}>{counts.infants}</td>
                   <td style={{ ...TD, textAlign: "center", fontWeight: counts.pets > 0 ? 700 : 400 }}>{counts.pets}</td>
                 </tr>

@@ -336,6 +336,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   }, [hydrated]);
 
+  // Auto-mark Confirmed bookings as Completed once the checkout date has passed
+  useEffect(() => {
+    if (!hydrated) return;
+    const today = todayStr();
+    setBookings((prev) => {
+      const done = prev.filter((b) => b.status === "Confirmed" && b.checkout < today);
+      if (done.length === 0) return prev;
+      lastMutationRef.current = Date.now();
+      done.forEach((b) => {
+        fetch(`/api/app/bookings/${b.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "Completed" }),
+        }).catch(console.error);
+      });
+      return prev.map((b) =>
+        b.status === "Confirmed" && b.checkout < today
+          ? { ...b, status: "Completed" as const }
+          : b
+      );
+    });
+  }, [hydrated]);
+
   // Notification auto-dismiss
   useEffect(() => {
     if (!notif) return;

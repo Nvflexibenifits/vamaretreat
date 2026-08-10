@@ -47,6 +47,7 @@ type FormSeg = {
   seniors: string;
   kidsAbove10: string;
   kids6to10: string;
+  kids2to6: string;
   infants: string;
   pets: string;
   petRate: string;
@@ -125,8 +126,8 @@ function segsFromBooking(b: Booking, rates: PackageRates): FormSeg[] {
     seniors: String(seg.seniors ?? b.seniors ?? 0),
     kidsAbove10: String(seg.kidsAbove10 ?? b.kidsAbove10 ?? 0),
     kids6to10: String(seg.kids6to10 ?? b.kids6to10 ?? 0),
-    // Legacy 2–6 bucket folds into the Infants (0–6) bucket
-    infants: String((seg.infantsBelow2 ?? b.infantsBelow2 ?? 0) + (seg.kids2to6 ?? b.kids2to6 ?? 0)),
+    kids2to6: String(seg.kids2to6 ?? b.kids2to6 ?? 0),
+    infants: String(seg.infantsBelow2 ?? b.infantsBelow2 ?? 0),
     pets: String(seg.pets ?? b.pets ?? 0),
     petRate: String(seg.petRate ?? rates.petPerPetPerNight),
     drivers: String(seg.drivers ?? b.driverCount ?? 0),
@@ -136,30 +137,33 @@ function segsFromBooking(b: Booking, rates: PackageRates): FormSeg[] {
 
 // Default meal pax from the segment's pax counts, based on who the package
 // is for (inferred from its name since the meal master has no audience field).
-// Buckets: kidsAbove10 = "Kids > 6" (eat as adults), kids6to10 = "Kids 3-6"
-// (free), infants = "Infants 0-3" (free). Seniors have their own packages.
+// Buckets: kidsAbove10 = "Kids > 10" (eat as adults), kids6to10 = "Kids 6-10",
+// kids2to6 = "Kids 2-6" (free unless a matching kid package is chosen),
+// infants = "Infants < 2" (free). Seniors have their own packages.
 function mealPaxFor(seg: FormSeg, pkgName: string): number {
   const n = pkgName.toLowerCase();
   const adults = parseInt(seg.adults) || 0;
   const seniors = parseInt(seg.seniors) || 0;
-  const kidsOver6 = parseInt(seg.kidsAbove10) || 0;
-  const kids3to6 = parseInt(seg.kids6to10) || 0;
+  const kidsOver10 = parseInt(seg.kidsAbove10) || 0;
+  const kids6to10 = parseInt(seg.kids6to10) || 0;
+  const kids2to6 = parseInt(seg.kids2to6) || 0;
   const infants = parseInt(seg.infants) || 0;
   if (/driver|attendant/.test(n)) return parseInt(seg.drivers) || 0;
   if (/pet/.test(n)) return parseInt(seg.pets) || 0;
   if (/infant/.test(n)) return infants;
   if (/child|kid/.test(n)) {
-    if (/>\s*6|above\s*6|10\s*[-–—]\s*16|above\s*10/.test(n)) return kidsOver6;
-    if (/3\s*[-–—]\s*6|6\s*[-–—]\s*10/.test(n)) return kids3to6;
+    if (/>\s*10|above\s*10|10\s*[-–—]\s*16|>\s*6|above\s*6/.test(n)) return kidsOver10;
+    if (/6\s*[-–—]\s*10|3\s*[-–—]\s*6/.test(n)) return kids6to10;
+    if (/2\s*[-–—]\s*6/.test(n)) return kids2to6;
     if (/0\s*[-–—]\s*3|0\s*[-–—]\s*6/.test(n)) return infants;
-    return kidsOver6 + kids3to6;
+    return kids6to10 + kids2to6;
   }
   if (/senior|sr\.?\s*citizen/.test(n)) return seniors;
-  // Adult packages cover kids above 6; seniors have separate packages.
-  if (/adult/.test(n)) return adults + kidsOver6;
+  // Adult packages cover kids above 10; seniors have separate packages.
+  if (/adult/.test(n)) return adults + kidsOver10;
   // Individual meals and anything unrecognized: everyone on a paid meal
-  // (kids 3-6 and infants eat free).
-  return adults + seniors + kidsOver6;
+  // (kids 6-10, 2-6 and infants eat free unless their package is chosen).
+  return adults + seniors + kidsOver10;
 }
 
 const cellInputStyle: React.CSSProperties = {
@@ -221,7 +225,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
 
   const defaultSegGuests = {
     adults: "2", seniors: "0", kidsAbove10: "0", kids6to10: "0",
-    infants: "0", pets: "0", drivers: "0",
+    kids2to6: "0", infants: "0", pets: "0", drivers: "0",
     petRate: String(packageRates.petPerPetPerNight),
     mealRows: [] as MealFormRow[],
   };
@@ -411,7 +415,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   };
 
   const updateSegField = (segId: string, field: keyof FormSeg, value: string | boolean) => {
-    const paxFields: (keyof FormSeg)[] = ["adults", "seniors", "kidsAbove10", "kids6to10", "infants", "pets", "drivers"];
+    const paxFields: (keyof FormSeg)[] = ["adults", "seniors", "kidsAbove10", "kids6to10", "kids2to6", "infants", "pets", "drivers"];
     setFormSegs((prev) =>
       prev.map((s) => {
         if (s.id !== segId) return s;
@@ -533,7 +537,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
           seniors: parseInt(seg.seniors) || 0,
           kidsAbove10: parseInt(seg.kidsAbove10) || 0,
           kids6to10: parseInt(seg.kids6to10) || 0,
-          kids2to6: 0,
+          kids2to6: parseInt(seg.kids2to6) || 0,
           infantsBelow2: parseInt(seg.infants) || 0,
           pets: parseInt(seg.pets) || 0,
           mealOn: seg.mealRows.length > 0,
@@ -621,7 +625,9 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     .filter((e) => e.amount > 0);
 
   const grandTotal = totalRoomCharges + totalMealPet + totalAddOn;
-  const balance = Math.max(0, grandTotal - totalReceived);
+  // Whole rupees: GST math produces paise, guests pay rounded amounts — a
+  // sub-rupee remainder must never count as a pending balance.
+  const balance = Math.max(0, Math.round(grandTotal - totalReceived));
 
   // ─── Validation ───
   const validate = (): boolean => {
@@ -709,7 +715,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
           seniors: parseInt(fs?.seniors ?? "0") || 0,
           kidsAbove10: parseInt(fs?.kidsAbove10 ?? "0") || 0,
           kids6to10: parseInt(fs?.kids6to10 ?? "0") || 0,
-          kids2to6: 0,
+          kids2to6: parseInt(fs?.kids2to6 ?? "0") || 0,
           infantsBelow2: parseInt(fs?.infants ?? "0") || 0,
           pets: mc?.petsN ?? 0,
           mealOn: (mc?.meal ?? 0) > 0 || (mc?.pet ?? 0) > 0,
@@ -821,7 +827,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
           seniors: parseInt(fs?.seniors ?? "0") || 0,
           kidsAbove10: parseInt(fs?.kidsAbove10 ?? "0") || 0,
           kids6to10: parseInt(fs?.kids6to10 ?? "0") || 0,
-          kids2to6: 0,
+          kids2to6: parseInt(fs?.kids2to6 ?? "0") || 0,
           infantsBelow2: parseInt(fs?.infants ?? "0") || 0,
           pets: mc?.petsN ?? 0,
           mealOn: (mc?.meal ?? 0) > 0 || (mc?.pet ?? 0) > 0,
@@ -879,10 +885,10 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       ...(allPayments !== undefined && { payments: allPayments }),
       ...(newAdvance !== undefined && {
         advance: newAdvance,
-        balance: Math.max(0, grandTotal - newAdvance),
+        balance: Math.max(0, Math.round(grandTotal - newAdvance)),
       }),
       ...(newAdvance === undefined && {
-        balance: Math.max(0, grandTotal - initialAdvance),
+        balance: Math.max(0, Math.round(grandTotal - initialAdvance)),
       }),
       allocatedRooms,
     };
@@ -1209,9 +1215,10 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                       {[
                         { label: "Adults", field: "adults" as keyof FormSeg, min: 1 },
                         { label: "Sr. Citizens", field: "seniors" as keyof FormSeg, min: 0 },
-                        { label: "Kids > 6", field: "kidsAbove10" as keyof FormSeg, min: 0 },
-                        { label: "Kids 3–6", field: "kids6to10" as keyof FormSeg, min: 0 },
-                        { label: "Infants (0–3)", field: "infants" as keyof FormSeg, min: 0 },
+                        { label: "Kids > 10", field: "kidsAbove10" as keyof FormSeg, min: 0 },
+                        { label: "Kids 6–10", field: "kids6to10" as keyof FormSeg, min: 0 },
+                        { label: "Kids 2–6", field: "kids2to6" as keyof FormSeg, min: 0 },
+                        { label: "Infants (< 2)", field: "infants" as keyof FormSeg, min: 0 },
                         { label: "Pets", field: "pets" as keyof FormSeg, min: 0 },
                         { label: "Drivers", field: "drivers" as keyof FormSeg, min: 0 },
                       ].map(({ label, field, min }) => (

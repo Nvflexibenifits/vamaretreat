@@ -289,7 +289,6 @@ export default function BookingDetailPage() {
     showNotif("Unpaid balance waived off", "success");
   };
 
-  const totalKids = b.kidsAbove10 + b.kids6to10;
   const pricingRows = getBookingPricingRows(b);
 
   // Per-segment meal rows (new bookings store rates per segment); legacy
@@ -866,9 +865,10 @@ export default function BookingDetailPage() {
                     { h: "C-out", left: true },
                     { h: "AD", left: false },
                     { h: "Sr. Ct", left: false },
-                    { h: "K > 6", left: false },
-                    { h: "K 3-6", left: false },
-                    { h: "Inf 0-3", left: false },
+                    { h: "K > 10", left: false },
+                    { h: "K 6-10", left: false },
+                    { h: "K 2-6", left: false },
+                    { h: "Inf < 2", left: false },
                     { h: "Pets", left: false },
                   ].map(({ h, left }, i) => (
                     <th key={i} style={{ padding: "8px 10px", fontSize: 11, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".3px", textAlign: left ? "left" : "center", whiteSpace: "nowrap" }}>
@@ -883,12 +883,12 @@ export default function BookingDetailPage() {
                     ? {
                         checkin: seg.checkin, checkout: seg.checkout,
                         adults: seg.adults, seniors: seg.seniors, kidsAbove10: seg.kidsAbove10,
-                        kids6to10: seg.kids6to10, infants: seg.infantsBelow2 + seg.kids2to6, pets: seg.pets,
+                        kids6to10: seg.kids6to10, kids2to6: seg.kids2to6, infants: seg.infantsBelow2, pets: seg.pets,
                       }
                     : {
                         checkin: b.checkin, checkout: b.checkout,
                         adults: b.adults, seniors: b.seniors, kidsAbove10: b.kidsAbove10,
-                        kids6to10: b.kids6to10, infants: b.infantsBelow2 + b.kids2to6, pets: b.pets,
+                        kids6to10: b.kids6to10, kids2to6: b.kids2to6, infants: b.infantsBelow2, pets: b.pets,
                       };
                   const num = (v: number) => (
                     <span style={{ fontWeight: v > 0 ? 700 : 500, color: v > 0 ? "var(--t1)" : "var(--t4)" }}>{v}</span>
@@ -907,6 +907,7 @@ export default function BookingDetailPage() {
                       <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "center" }}>{num(counts.seniors)}</td>
                       <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "center" }}>{num(counts.kidsAbove10)}</td>
                       <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "center" }}>{num(counts.kids6to10)}</td>
+                      <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "center" }}>{num(counts.kids2to6)}</td>
                       <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "center" }}>{num(counts.infants)}</td>
                       <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "center" }}>{num(counts.pets)}</td>
                     </tr>
@@ -1179,12 +1180,12 @@ export default function BookingDetailPage() {
               <span style={{ fontSize: 12, color: "var(--t2)", fontWeight: 600 }}>Amount Received</span>
               <span style={{ fontSize: 14, fontWeight: 700, color: "var(--grn)" }}>{fmt(b.advance)}</span>
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", background: b.balance > 0 ? "var(--amb-lt)" : "var(--grn-lt)" }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: b.balance > 0 ? "var(--amb)" : "var(--grn)" }}>
-                {b.balance > 0 ? "Balance Amount" : "Fully Paid"}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", background: b.balance >= 1 ? "var(--amb-lt)" : "var(--grn-lt)" }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: b.balance >= 1 ? "var(--amb)" : "var(--grn)" }}>
+                {b.balance >= 1 ? "Balance Amount" : "Fully Paid"}
               </span>
-              <span style={{ fontSize: 14, fontWeight: 800, color: b.balance > 0 ? "var(--amb)" : "var(--grn)" }}>
-                {b.balance > 0 ? fmt(b.balance) : "Paid"}
+              <span style={{ fontSize: 14, fontWeight: 800, color: b.balance >= 1 ? "var(--amb)" : "var(--grn)" }}>
+                {b.balance >= 1 ? fmt(b.balance) : "Paid"}
               </span>
             </div>
           </div>

@@ -148,7 +148,7 @@ export default function RevenuePage() {
 
   // Pending payments (global, unaffected by filters)
   const pendingBookings = useMemo(
-    () => bookings.filter((b) => b.status === "Confirmed" && b.balance > 0),
+    () => bookings.filter((b) => b.status === "Confirmed" && b.balance >= 1),
     [bookings]
   );
   const pendingPayments = pendingBookings.reduce((s, b) => s + b.balance, 0);

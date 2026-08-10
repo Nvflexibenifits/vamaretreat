@@ -46,22 +46,25 @@ export default function BookingsPage() {
     [bookings, today]
   );
 
-  const data = bookings.filter((b) => {
-    // Lost and Completed bookings are excluded from this list entirely
-    if (b.status === "Lost" || b.status === "Completed") return false;
-    if (statusFilter !== "All" && b.status !== statusFilter) return false;
-    const s = search.toLowerCase();
-    if (
-      s &&
-      !b.guest.toLowerCase().includes(s) &&
-      !b.id.toLowerCase().includes(s) &&
-      !b.mobile.includes(s)
-    )
-      return false;
-    if (from && b.checkin < from) return false;
-    if (to && b.checkin > to) return false;
-    return true;
-  });
+  const data = bookings
+    .filter((b) => {
+      // Lost and Completed bookings are excluded from this list entirely
+      if (b.status === "Lost" || b.status === "Completed") return false;
+      if (statusFilter !== "All" && b.status !== statusFilter) return false;
+      const s = search.toLowerCase();
+      if (
+        s &&
+        !b.guest.toLowerCase().includes(s) &&
+        !b.id.toLowerCase().includes(s) &&
+        !b.mobile.includes(s)
+      )
+        return false;
+      if (from && b.checkin < from) return false;
+      if (to && b.checkin > to) return false;
+      return true;
+    })
+    // Earliest check-in first; same-day check-ins tie-break on booking id
+    .sort((a, b) => a.checkin.localeCompare(b.checkin) || a.id.localeCompare(b.id));
 
   return (
     <div className="view">
@@ -200,21 +203,21 @@ export default function BookingsPage() {
                       style={{
                         fontWeight: 500,
                         color:
-                          pending > 0
+                          pending >= 1
                             ? "var(--amb)"
                             : refundDue > 0
                             ? "var(--pur)"
                             : "var(--t3)",
                       }}
                       title={
-                        pending > 0
+                        pending >= 1
                           ? "Amount pending from guest"
                           : refundDue > 0
                           ? "Refund due to guest"
                           : "Settled"
                       }
                     >
-                      {pending > 0 ? fmt(pending) : refundDue > 0 ? `−${fmt(refundDue)}` : "0"}
+                      {pending >= 1 ? fmt(pending) : refundDue > 0 ? `−${fmt(refundDue)}` : "0"}
                     </td>
                     <td><StatusBadge status={b.status} /></td>
                     <td style={{ fontSize: 11, color: "var(--t3)" }}>{b.rex}</td>

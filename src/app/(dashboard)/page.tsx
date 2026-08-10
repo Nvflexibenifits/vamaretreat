@@ -54,7 +54,7 @@ export default function DashboardPage() {
   const pendingBookings = useMemo(
     () =>
       bookings
-        .filter((b) => b.balance > 0 && b.status !== "Cancelled" && b.status !== "Lost")
+        .filter((b) => b.balance >= 1 && b.status !== "Cancelled" && b.status !== "Lost")
         .sort((a, b) => a.checkin.localeCompare(b.checkin)),
     [bookings]
   );
@@ -260,12 +260,14 @@ export default function DashboardPage() {
       <tr>
         <th style={{ width: 36, textAlign: "center" }}>Sl.</th>
         <th>Guest Name</th>
+        <th style={{ whiteSpace: "nowrap", width: 92 }}>C-in</th>
+        <th style={{ whiteSpace: "nowrap", width: 92 }}>C-out</th>
         <th style={{ textAlign: "center", width: 48 }}>Day</th>
         <th>Room No's</th>
         <th style={{ textAlign: "center", width: 44 }}>AD</th>
         <th style={{ textAlign: "center", width: 52 }}>Sr.Ct</th>
-        <th style={{ textAlign: "center", width: 52 }}>K&gt;6</th>
-        <th style={{ textAlign: "center", width: 52 }}>K&le;6</th>
+        <th style={{ textAlign: "center", width: 52 }}>K&gt;10</th>
+        <th style={{ textAlign: "center", width: 56 }}>K&le;10</th>
         <th style={{ textAlign: "center", width: 48 }}>Pets</th>
         <th style={{ textAlign: "center", width: 60 }}>Meals</th>
         <th style={{ textAlign: "right", width: 110, whiteSpace: "nowrap" }}>Pmt Pending</th>
@@ -280,6 +282,8 @@ export default function DashboardPage() {
           <div style={{ fontWeight: 500, color: "var(--t1)" }}>{b.guest}</div>
           <div style={{ fontSize: 11, color: "var(--t3)" }}>{b.mobile}</div>
         </td>
+        <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{fmtIN(b.checkin)}</td>
+        <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{fmtIN(b.checkout)}</td>
         <td style={{ textAlign: "center", fontWeight: 600 }}>{day}</td>
         <td style={{ fontSize: 12, color: "var(--t2)" }}>{b.allocatedRooms.join(", ") || "—"}</td>
         <td style={{ textAlign: "center" }}>{b.adults || "—"}</td>
@@ -292,8 +296,8 @@ export default function DashboardPage() {
             {b.mealOn ? "Yes" : "No"}
           </span>
         </td>
-        <td style={{ textAlign: "right", fontWeight: 600, color: b.balance > 0 ? "var(--amb)" : "var(--grn)" }}>
-          {b.balance > 0 ? fmt(b.balance) : "Nil"}
+        <td style={{ textAlign: "right", fontWeight: 600, color: b.balance >= 1 ? "var(--amb)" : "var(--grn)" }}>
+          {b.balance >= 1 ? fmt(b.balance) : "Nil"}
         </td>
         <td style={{ textAlign: "center" }}>
           <button className="btn btn-ghost btn-xs" onClick={() => router.push(`/bookings/${b.id}`)}>
@@ -305,7 +309,7 @@ export default function DashboardPage() {
 
     const foTotalsRow = (totals: ReturnType<typeof paxTotals>, label: string) => (
       <tr style={{ background: "var(--surf2)", fontWeight: 700 }}>
-        <td colSpan={4} style={{ color: "var(--t1)" }}>{label}</td>
+        <td colSpan={6} style={{ color: "var(--t1)" }}>{label}</td>
         <td style={{ textAlign: "center" }}>{totals.adults || "—"}</td>
         <td style={{ textAlign: "center" }}>{totals.seniors || "—"}</td>
         <td style={{ textAlign: "center" }}>{totals.kGt14 || "—"}</td>
@@ -376,7 +380,7 @@ export default function DashboardPage() {
             <thead>{foTblHead}</thead>
             <tbody>
               {foCheckIns.length === 0 ? (
-                <tr><td colSpan={12}><div className="empty-state"><h3>No check-ins</h3><p>No arrivals on this date</p></div></td></tr>
+                <tr><td colSpan={14}><div className="empty-state"><h3>No check-ins</h3><p>No arrivals on this date</p></div></td></tr>
               ) : (
                 foCheckIns.map((b, i) => foRow(b, 1, i))
               )}
@@ -393,7 +397,7 @@ export default function DashboardPage() {
             <thead>{foTblHead}</thead>
             <tbody>
               {foStayovers.length === 0 ? (
-                <tr><td colSpan={12}><div className="empty-state"><h3>No stayovers</h3><p>No in-house guests on this date</p></div></td></tr>
+                <tr><td colSpan={14}><div className="empty-state"><h3>No stayovers</h3><p>No in-house guests on this date</p></div></td></tr>
               ) : (
                 <>
                   {foStayovers.map((b, i) => foRow(b, nightsBetween(b.checkin, foDate) + 1, i))}
@@ -413,7 +417,7 @@ export default function DashboardPage() {
             <thead>{foTblHead}</thead>
             <tbody>
               {foCheckOuts.length === 0 ? (
-                <tr><td colSpan={12}><div className="empty-state"><h3>No check-outs</h3><p>No departures on this date</p></div></td></tr>
+                <tr><td colSpan={14}><div className="empty-state"><h3>No check-outs</h3><p>No departures on this date</p></div></td></tr>
               ) : (
                 foCheckOuts.map((b, i) => foRow(b, 0, i))
               )}
