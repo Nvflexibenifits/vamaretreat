@@ -84,17 +84,13 @@ export function maxDiscountForRole(role: Role, caps: DiscountCaps): number {
 }
 
 export function maxDiscountForRowAndRole(
-  rowType: PricingRow["rowType"],
-  role: Role,
-  caps: DiscountCaps
+  _rowType: PricingRow["rowType"],
+  _role: Role,
+  _caps: DiscountCaps
 ): number {
-  // Per-day-type hard caps regardless of role.
-  const rowCap =
-    rowType === "sat" ? 10
-    : rowType === "fri" ? 15
-    : rowType === "fri-sat" ? 15   // legacy rows
-    : 24;
-  return Math.min(rowCap, maxDiscountForRole(role, caps));
+  // Caps disabled for now — any discount up to 100% is allowed for every
+  // role and day type. Restore day/role rules here if they come back.
+  return 100;
 }
 
 export function todayStr(): string {
