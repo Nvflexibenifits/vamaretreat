@@ -170,12 +170,14 @@ export default function BookingsPage() {
                 const pending = b.status === "Cancelled" || b.status === "Lost" ? 0 : b.balance;
                 // Refund cancellations owe nothing beyond what the hotel
                 // retains — mirror the revenue register's Total column. A
-                // waive-off writes the unpaid balance out of the due amount.
+                // waive-off writes the unpaid balance out of the due amount,
+                // and OTA deductions never arrive, so they come off too.
+                const dedTotal = (b.deductions ?? []).reduce((s, d) => s + d.amount + d.gst, 0);
                 const amountDue =
                   b.status === "Cancelled" && b.cancellationDetails?.resolution === "refund"
                     ? (b.cancellationDetails.cancellationCharge ?? 0) +
                       (b.cancellationDetails.creditNoteAmount ?? 0)
-                    : b.grandTotal - (b.waiveOff?.totalGross ?? 0);
+                    : b.grandTotal - (b.waiveOff?.totalGross ?? 0) - dedTotal;
                 // Money actually received — never derived from balance, which
                 // can settle without money (waive-offs).
                 const received =

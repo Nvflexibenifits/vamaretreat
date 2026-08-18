@@ -1161,6 +1161,56 @@ export default function BookingDetailPage() {
             </>
           )}
 
+          {/* OTA Deductions — commission / TDS / special discount withheld */}
+          {(b.deductions ?? []).length > 0 && (
+            <>
+              <SectionHeader>Deductions (OTA)</SectionHeader>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ background: "var(--surf2)", borderBottom: "2px solid var(--bd)" }}>
+                      {["Deduction", "Amount", "GST %", "GST Amt", "Total"].map((h, i) => (
+                        <th key={i} style={{ padding: "8px 10px", fontSize: 11, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".3px", textAlign: i === 0 ? "left" : "right", whiteSpace: "nowrap" }}>
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(b.deductions ?? []).map((d, i) => {
+                      const pct = d.amount > 0 ? Math.round((d.gst / d.amount) * 100) : 0;
+                      return (
+                        <tr key={i} style={{ borderBottom: "1px solid var(--bd)" }}>
+                          <td style={{ padding: "8px 10px", fontSize: 12, color: "var(--t1)", fontWeight: 500 }}>
+                            {d.type}
+                            <div style={{ fontSize: 10, color: "var(--t3)", fontWeight: 500 }}>{fmtIN(d.date)} · {d.by}</div>
+                          </td>
+                          <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right", color: "var(--red)" }}>−{fmt(d.amount)}</td>
+                          <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right" }}>{pct}%</td>
+                          <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right", color: "var(--red)" }}>−{fmt(d.gst)}</td>
+                          <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right", fontWeight: 700, color: "var(--red)" }}>−{fmt(d.amount + d.gst)}</td>
+                        </tr>
+                      );
+                    })}
+                    <tr style={{ background: "var(--surf2)", fontWeight: 700, borderTop: "2px solid var(--bd)" }}>
+                      <td style={{ padding: "9px 10px", fontSize: 12, color: "var(--t1)" }}>Total Deductions</td>
+                      <td style={{ padding: "9px 10px", fontSize: 12, textAlign: "right", color: "var(--red)" }}>
+                        −{fmt((b.deductions ?? []).reduce((s, d) => s + d.amount, 0))}
+                      </td>
+                      <td></td>
+                      <td style={{ padding: "9px 10px", fontSize: 12, textAlign: "right", color: "var(--red)" }}>
+                        −{fmt((b.deductions ?? []).reduce((s, d) => s + d.gst, 0))}
+                      </td>
+                      <td style={{ padding: "9px 10px", fontSize: 12, textAlign: "right", color: "var(--red)" }}>
+                        −{fmt((b.deductions ?? []).reduce((s, d) => s + d.amount + d.gst, 0))}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
           {/* Grand Total / Advance / Balance */}
           <div style={{ borderTop: "2px solid var(--bd)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", background: "var(--amb-lt)", borderBottom: "1px solid var(--bd)" }}>
@@ -1191,6 +1241,25 @@ export default function BookingDetailPage() {
                 </div>
               </>
             )}
+            {(b.deductions ?? []).length > 0 && (() => {
+              const dedTotal = (b.deductions ?? []).reduce((s, d) => s + d.amount + d.gst, 0);
+              const net = b.grandTotal - (b.waiveOff?.totalGross ?? 0) - dedTotal;
+              return (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 16px", borderBottom: "1px solid var(--bd)" }}>
+                    <span style={{ fontSize: 12, color: "var(--t2)", fontWeight: 600 }}>
+                      Deductions (OTA)
+                      <span style={{ color: "var(--t3)", fontWeight: 500 }}> — {(b.deductions ?? []).map((d) => d.type).join(", ")}</span>
+                    </span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: "var(--red)" }}>−{fmt(dedTotal)}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", background: "var(--surf2)", borderBottom: "1px solid var(--bd)" }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "var(--t1)" }}>Net Receivable</span>
+                    <span style={{ fontSize: 15, fontWeight: 800, color: "var(--t1)" }}>{fmt(net)}</span>
+                  </div>
+                </>
+              );
+            })()}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", borderBottom: "1px solid var(--bd)" }}>
               <span style={{ fontSize: 12, color: "var(--t2)", fontWeight: 600 }}>Amount Received</span>
               <span style={{ fontSize: 14, fontWeight: 700, color: "var(--grn)" }}>{fmt(b.advance)}</span>

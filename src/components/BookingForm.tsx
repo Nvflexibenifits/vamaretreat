@@ -17,7 +17,7 @@ import {
   todayStr,
   tryAssignRooms,
 } from "@/lib/utils";
-import type { Booking, BookingSegment, BookingStatus, Extra, PackageRates, PricingRow, PricingRowType, SegmentMealItem, SegmentRoom } from "@/types";
+import type { Booking, BookingSegment, BookingStatus, Deduction, DeductionType, Extra, PackageRates, PricingRow, PricingRowType, SegmentMealItem, SegmentRoom } from "@/types";
 import { COUNTRY_CODES } from "@/lib/data";
 
 type FormRow = {
@@ -257,6 +257,27 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       gstPct: e.amount > 0 && e.gst ? String(Math.round((e.gst / e.amount) * 10000) / 100) : "0",
       date: e.date,
       by: e.by,
+    }))
+  );
+
+  // OTA deductions: commission / TDS / special discount withheld by the OTA.
+  // Mirrors the add-on rows but subtracts from the receivable. The pct field
+  // is a helper — entering a % computes the amount from the gross total.
+  type DeductionRow = { uid: string; dtype: DeductionType; amount: string; gstPct: string; pct: string; date?: string; by?: string };
+  const DEDUCTION_GST_DEFAULTS: Record<DeductionType, string> = {
+    "Commission": "18",
+    "TDS": "0",
+    "Special Discount": "0",
+  };
+  const [deductionRows, setDeductionRows] = useState<DeductionRow[]>(() =>
+    (initial?.deductions ?? []).map((d) => ({
+      uid: newUid(),
+      dtype: d.type,
+      amount: String(d.amount),
+      gstPct: d.amount > 0 && d.gst ? String(Math.round((d.gst / d.amount) * 10000) / 100) : "0",
+      pct: "",
+      date: d.date,
+      by: d.by,
     }))
   );
 
@@ -626,9 +647,36 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     .filter((e) => e.amount > 0);
 
   const grandTotal = totalRoomCharges + totalMealPet + totalAddOn;
+
+  // OTA deductions run in reverse: each row's amount + GST comes OFF the
+  // receivable. Only OTA bookings carry them.
+  const deductionTotals = deductionRows.map((r) => {
+    const amt = parseFloat(r.amount) || 0;
+    const gstAmt = (amt * (parseFloat(r.gstPct) || 0)) / 100;
+    return { amt, gstAmt, total: amt + gstAmt };
+  });
+  const totalDeductions = source === "OTA" ? deductionTotals.reduce((s, r) => s + r.total, 0) : 0;
+
+  const builtDeductions: Deduction[] = source === "OTA"
+    ? deductionRows
+        .map((r) => {
+          const amt = parseFloat(r.amount) || 0;
+          return {
+            type: r.dtype,
+            amount: amt,
+            gst: (amt * (parseFloat(r.gstPct) || 0)) / 100,
+            date: r.date || todayDate,
+            by: r.by || currentUser,
+          };
+        })
+        .filter((d) => d.amount > 0)
+    : [];
+
+  // What the hotel actually expects to receive (gross minus OTA deductions)
+  const netPayable = Math.max(0, grandTotal - totalDeductions);
   // Whole rupees: GST math produces paise, guests pay rounded amounts — a
   // sub-rupee remainder must never count as a pending balance.
-  const balance = Math.max(0, Math.round(grandTotal - totalReceived));
+  const balance = Math.max(0, Math.round(netPayable - totalReceived));
 
   // ─── Validation ───
   const validate = (): boolean => {
@@ -798,6 +846,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
           ...(p.mode === "Credit Note" && p.cnCode.trim() ? { creditNoteCode: p.cnCode.trim() } : {}),
         })),
       extras: builtExtras,
+      deductions: builtDeductions,
     };
   };
 
@@ -888,14 +937,15 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       totalMealCharges: totalMealPet,
       grandTotal,
       extras: builtExtras,
+      deductions: builtDeductions,
 
       ...(allPayments !== undefined && { payments: allPayments }),
       ...(newAdvance !== undefined && {
         advance: newAdvance,
-        balance: Math.max(0, Math.round(grandTotal - newAdvance)),
+        balance: Math.max(0, Math.round(netPayable - newAdvance)),
       }),
       ...(newAdvance === undefined && {
-        balance: Math.max(0, Math.round(grandTotal - initialAdvance)),
+        balance: Math.max(0, Math.round(netPayable - initialAdvance)),
       }),
       allocatedRooms,
     };
@@ -1726,6 +1776,147 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
         </div>
       </div>
 
+      {/* OTA Deductions — commission / TDS / special discount withheld by the OTA */}
+      {source === "OTA" && (
+        <div className="form-panel">
+          <div className="form-sec">
+            <div className="form-sec-title">
+              <span className="form-sec-num">D</span>Deductions (OTA)
+            </div>
+
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              style={{ marginBottom: 12 }}
+              onClick={() =>
+                setDeductionRows((prev) => [
+                  ...prev,
+                  { uid: newUid(), dtype: "Commission", amount: "0", gstPct: DEDUCTION_GST_DEFAULTS["Commission"], pct: "" },
+                ])
+              }
+            >
+              Add Row
+            </button>
+
+            {deductionRows.length === 0 ? (
+              <div style={{ fontSize: 12, color: "var(--t3)" }}>
+                No deductions. Click Add Row to record commission, TDS, or special discount withheld by the OTA.
+              </div>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ minWidth: 760 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ whiteSpace: "nowrap" }}>Deduction Type</th>
+                      <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>% of Gross</th>
+                      <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Amount (₹)</th>
+                      <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>GST %</th>
+                      <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>GST Amt</th>
+                      <th style={{ whiteSpace: "nowrap", textAlign: "right" }}>Total</th>
+                      <th style={{ width: 60 }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {deductionRows.map((row, i) => {
+                      const t = deductionTotals[i];
+                      return (
+                        <tr key={row.uid} style={{ cursor: "default" }}>
+                          <td style={{ verticalAlign: "middle" }}>
+                            <select
+                              value={row.dtype}
+                              onChange={(e) => {
+                                const dtype = e.target.value as DeductionType;
+                                setDeductionRows((prev) =>
+                                  prev.map((r) => r.uid === row.uid ? { ...r, dtype, gstPct: DEDUCTION_GST_DEFAULTS[dtype] } : r)
+                                );
+                              }}
+                              style={{ width: "100%", padding: "5px 8px", border: "1px solid var(--bd)", borderRadius: "var(--r3)", fontSize: 12, background: "var(--surf)", outline: "none" }}
+                            >
+                              <option>Commission</option>
+                              <option>TDS</option>
+                              <option>Special Discount</option>
+                            </select>
+                          </td>
+                          <td style={{ verticalAlign: "middle" }}>
+                            <input
+                              type="number"
+                              value={row.pct}
+                              min={0}
+                              max={100}
+                              placeholder="—"
+                              title="Helper: computes the amount as this % of the gross booking total"
+                              onChange={(e) => {
+                                const pct = parseFloat(e.target.value) || 0;
+                                setDeductionRows((prev) =>
+                                  prev.map((r) =>
+                                    r.uid === row.uid
+                                      ? { ...r, pct: e.target.value, amount: String(Math.round(grandTotal * pct) / 100) }
+                                      : r
+                                  )
+                                );
+                              }}
+                              style={cellInputStyle}
+                            />
+                          </td>
+                          <td style={{ verticalAlign: "middle" }}>
+                            <input
+                              type="number"
+                              value={row.amount}
+                              min={0}
+                              onChange={(e) =>
+                                setDeductionRows((prev) =>
+                                  prev.map((r) => r.uid === row.uid ? { ...r, amount: e.target.value, pct: "" } : r)
+                                )
+                              }
+                              style={cellInputStyle}
+                            />
+                          </td>
+                          <td style={{ verticalAlign: "middle" }}>
+                            <input
+                              type="number"
+                              value={row.gstPct}
+                              min={0}
+                              max={28}
+                              onChange={(e) =>
+                                setDeductionRows((prev) =>
+                                  prev.map((r) => r.uid === row.uid ? { ...r, gstPct: e.target.value } : r)
+                                )
+                              }
+                              style={cellInputStyle}
+                            />
+                          </td>
+                          <td style={{ textAlign: "right", verticalAlign: "middle", color: "var(--red)" }}>
+                            −{fmt(t.gstAmt)}
+                          </td>
+                          <td style={{ textAlign: "right", verticalAlign: "middle", fontWeight: 700, color: "var(--red)" }}>
+                            −{fmt(t.total)}
+                          </td>
+                          <td style={{ verticalAlign: "middle" }}>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-xs"
+                              onClick={() => setDeductionRows((prev) => prev.filter((r) => r.uid !== row.uid))}
+                              title="Remove row"
+                            >
+                              Remove
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    <tr style={{ background: "var(--surf2)", fontWeight: 700, borderTop: "2px solid var(--bd)" }}>
+                      <td colSpan={5} style={{ color: "var(--t1)" }}>Total Deductions</td>
+                      <td style={{ textAlign: "right", color: "var(--red)" }}>−{fmt(totalDeductions)}</td>
+                      <td></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* §4 Amount Due */}
       <div className="form-panel">
         <div className="form-sec">
@@ -1773,8 +1964,30 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                     <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(totalAddOn)}</td>
                   </tr>
                 )}
+                {totalDeductions > 0 && (
+                  <>
+                    <tr style={{ cursor: "default" }}>
+                      <td style={{ color: "var(--t2)" }}>Gross Total</td>
+                      <td style={{ textAlign: "right", color: "var(--t3)" }}>—</td>
+                      <td style={{ textAlign: "right", color: "var(--t3)" }}>—</td>
+                      <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(grandTotal)}</td>
+                    </tr>
+                    <tr style={{ cursor: "default" }}>
+                      <td style={{ color: "var(--red)" }}>Deductions (OTA)</td>
+                      <td style={{ textAlign: "right", color: "var(--red)" }}>
+                        −{fmt(deductionTotals.reduce((s, r) => s + r.amt, 0))}
+                      </td>
+                      <td style={{ textAlign: "right", color: "var(--red)" }}>
+                        −{fmt(deductionTotals.reduce((s, r) => s + r.gstAmt, 0))}
+                      </td>
+                      <td style={{ textAlign: "right", fontWeight: 700, color: "var(--red)" }}>−{fmt(totalDeductions)}</td>
+                    </tr>
+                  </>
+                )}
                 <tr style={{ background: "var(--surf2)", borderTop: "2px solid var(--bd)" }}>
-                  <td style={{ fontWeight: 700, color: "var(--t1)", fontSize: 14 }}>Amount Due</td>
+                  <td style={{ fontWeight: 700, color: "var(--t1)", fontSize: 14 }}>
+                    {totalDeductions > 0 ? "Net Amount Due" : "Amount Due"}
+                  </td>
                   <td style={{ textAlign: "right", color: "var(--t3)" }}>—</td>
                   <td style={{ textAlign: "right", color: "var(--t3)" }}>—</td>
                   <td
@@ -1786,7 +1999,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                       color: "var(--sb)",
                     }}
                   >
-                    {fmt(grandTotal)}
+                    {fmt(netPayable)}
                   </td>
                 </tr>
               </tbody>

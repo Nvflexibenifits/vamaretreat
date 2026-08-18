@@ -69,6 +69,18 @@ export type Extra = {
   by: string;
 };
 
+// OTA settlement deductions: the OTA pays out net of these, so each row
+// subtracts (amount + gst) from the booking's receivable.
+export type DeductionType = "Commission" | "TDS" | "Special Discount";
+
+export type Deduction = {
+  type: DeductionType;
+  amount: number; // base amount deducted
+  gst: number;    // GST on the deduction — also subtracted (reverse of add-ons)
+  date: string;
+  by: string;
+};
+
 export type PricingRowType = "sun-thu" | "fri" | "sat" | "fri-sat" | "custom";
 
 export type PricingRow = {
@@ -255,6 +267,9 @@ export type Booking = {
 
   payments: Payment[];
   extras: Extra[];
+  // OTA bookings only: commission / TDS / special discount withheld by the
+  // OTA. The booking settles against grandTotal minus these.
+  deductions?: Deduction[];
 
   lostReason?: string;
   lostNotes?: string;

@@ -564,6 +564,26 @@ export default function ConfirmationPage() {
               <td style={TD_GRAND}></td>
               <td style={TD_GRAND_NUM}>{fmt(grandTotal)}</td>
             </tr>
+            {(b.deductions ?? []).length > 0 && (() => {
+              const dedTotal = (b.deductions ?? []).reduce((s, d) => s + d.amount + d.gst, 0);
+              return (
+                <>
+                  {(b.deductions ?? []).map((d, i) => (
+                    <tr key={i}>
+                      <td style={TD} colSpan={11}>
+                        Deduction — {d.type}
+                      </td>
+                      <td style={{ ...TD, textAlign: "right", color: "#b83232", fontWeight: 700 }}>−{fmt(d.amount + d.gst)}</td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td style={TD_GRAND} colSpan={10}>Net Receivable</td>
+                    <td style={TD_GRAND}></td>
+                    <td style={TD_GRAND_NUM}>{fmt(grandTotal - dedTotal)}</td>
+                  </tr>
+                </>
+              );
+            })()}
             <tr>
               <td style={TD} colSpan={11}>
                 <strong>Amount Received</strong>
