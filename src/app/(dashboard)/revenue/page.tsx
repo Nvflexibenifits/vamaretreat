@@ -121,7 +121,11 @@ export default function RevenuePage() {
         if (!isCancelled) bal = Math.round(total - received);
         else if (isRefundCancel) bal = Math.min(0, Math.round(retained + refundsPaid - received));
         else bal = Math.max(0, Math.round(total - received));
-        return { b, roomNet, mealNet, other, gst5, gst18, gstOther, total, bank, cash, crNote, bal, isCancelled };
+        // Credit-note cancellation still carrying an unpaid balance — the
+        // waive-off hasn't been done yet; shown in red so it stands apart
+        // from money actually expected from guests.
+        const waivePending = isCancelled && !isRefundCancel && bal >= 1;
+        return { b, roomNet, mealNet, other, gst5, gst18, gstOther, total, bank, cash, crNote, bal, isCancelled, waivePending };
       });
   }, [bookings, search, rangeFrom, rangeTo]);
 
@@ -152,6 +156,27 @@ export default function RevenuePage() {
     [bookings]
   );
   const pendingPayments = pendingBookings.reduce((s, b) => s + b.balance, 0);
+
+  // Waive-offs pending (global) — credit-note cancellations still carrying
+  // an unpaid balance that has to be written off. Mirrors the red balance
+  // cells in the table.
+  const waivePendingTotals = useMemo(() => {
+    let sum = 0;
+    let count = 0;
+    bookings.forEach((b) => {
+      if (b.status !== "Cancelled") return;
+      if (b.cancellationDetails?.resolution === "refund") return;
+      const total = b.grandTotal - (b.waiveOff?.totalGross ?? 0);
+      let received = (b.payments ?? []).reduce((s, p) => s + p.amount, 0);
+      if (received === 0 && b.advance > 0) received = b.advance;
+      const bal = Math.max(0, Math.round(total - received));
+      if (bal >= 1) {
+        sum += bal;
+        count++;
+      }
+    });
+    return { sum, count };
+  }, [bookings]);
 
   // Refunds due (global, unaffected by filters) — unpaid refund balance on
   // refund-cancelled bookings, same formula as the table's balance column.
@@ -269,7 +294,7 @@ export default function RevenuePage() {
       </div>
 
       {/* Summary cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 18 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 14, marginBottom: 18 }}>
         <div style={{ background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r4)", padding: "14px 18px" }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>
             Total Charges ({rangeLabel})
@@ -303,6 +328,19 @@ export default function RevenuePage() {
             {fmt(refundsDue)}
           </div>
         </div>
+        <div style={{ background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r4)", padding: "14px 18px" }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>
+            Waive-off Pending (Overall)
+          </div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: waivePendingTotals.sum > 0 ? "var(--red)" : "var(--t2)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>
+            {fmt(waivePendingTotals.sum)}
+          </div>
+          <div style={{ fontSize: 10, color: "var(--t3)", marginTop: 2 }}>
+            {waivePendingTotals.count === 0
+              ? "Nothing to settle"
+              : `${waivePendingTotals.count} booking${waivePendingTotals.count === 1 ? "" : "s"} to settle`}
+          </div>
+        </div>
       </div>
 
       {/* Revenue Table */}
@@ -315,6 +353,7 @@ export default function RevenuePage() {
           <div style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 14, marginLeft: "auto" }}>
             <strong style={{ color: "var(--amb)" }}>Amount pending from guest</strong>
             <strong style={{ color: "var(--pur)" }}>Refund due to guest</strong>
+            <strong style={{ color: "var(--red)" }}>Waive-off pending</strong>
           </div>
         </div>
         <div style={{ overflowX: "auto" }}>
@@ -391,8 +430,12 @@ export default function RevenuePage() {
                           ...numTd,
                           ...sectionBorder,
                           fontWeight: 700,
-                          background: r.bal > 0 ? "var(--amb-lt)" : r.bal < 0 ? "var(--pur-lt)" : undefined,
-                          color: r.bal > 0 ? "var(--amb)" : r.bal < 0 ? "var(--pur)" : "var(--grn)",
+                          background: r.waivePending
+                            ? "var(--red-lt)"
+                            : r.bal > 0 ? "var(--amb-lt)" : r.bal < 0 ? "var(--pur-lt)" : undefined,
+                          color: r.waivePending
+                            ? "var(--red)"
+                            : r.bal > 0 ? "var(--amb)" : r.bal < 0 ? "var(--pur)" : "var(--grn)",
                         }}
                         title={
                           r.bal > 0

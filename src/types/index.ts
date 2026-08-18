@@ -155,6 +155,9 @@ export type CancellationDetails = {
   cancellationCharge: number;
   refundAmount: number;
   creditNoteAmount: number;
+  // Percentages actually applied (including per-booking overrides)
+  refundPct?: number;
+  creditNotePct?: number;
   resolution: "refund" | "credit-note";
   creditNoteCode?: string;
   processedBy: string;

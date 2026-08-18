@@ -93,6 +93,8 @@ function computeCancel(
     cancellationCharge,
     refundAmount,
     creditNoteAmount,
+    refundPct: cell.refundPct ?? 0,
+    creditNotePct: cell.creditNotePct ?? 0,
     resolution: hasCredit ? "credit-note" : "refund",
     creditNoteCode,
     processedBy: by,
@@ -302,13 +304,13 @@ export default function BookingDetailPage() {
       seg.mealItems.forEach((mi) =>
         rows.push({ key: `${seg.id}-${mi.id}`, label: mi.packageName, dates, rate: mi.rate, nights: segNights, pax: mi.pax, chg: mi.total })
       );
-      if ((seg.pets ?? 0) > 0 && (seg.petRate ?? 0) > 0)
+      if ((seg.pets ?? 0) > 0)
         rows.push({ key: `${seg.id}-pet`, label: "Pet Package", dates, rate: seg.petRate ?? 0, nights: segNights, pax: seg.pets, chg: (seg.petRate ?? 0) * segNights * seg.pets });
       return rows;
     }
     if (seg.mealOn && (seg.mealRate ?? 0) > 0 && seg.adults > 0)
       rows.push({ key: `${seg.id}-meal`, label: "Meal & Activity Package", dates, rate: seg.mealRate ?? 0, nights: segNights, pax: seg.adults, chg: (seg.mealRate ?? 0) * segNights * seg.adults });
-    if ((seg.pets ?? 0) > 0 && (seg.petRate ?? 0) > 0)
+    if ((seg.pets ?? 0) > 0)
       rows.push({ key: `${seg.id}-pet`, label: "Pet Package", dates, rate: seg.petRate ?? 0, nights: segNights, pax: seg.pets, chg: (seg.petRate ?? 0) * segNights * seg.pets });
     if (seg.driverMealOn && (seg.drivers ?? 0) > 0 && (seg.driverMealRate ?? 0) > 0)
       rows.push({ key: `${seg.id}-drv`, label: "Driver / Attendant Meal", dates, rate: seg.driverMealRate ?? 0, nights: segNights, pax: seg.drivers ?? 0, chg: (seg.driverMealRate ?? 0) * segNights * (seg.drivers ?? 0) });
@@ -353,6 +355,8 @@ export default function BookingDetailPage() {
       cancellationCharge: cancelRetained,
       refundAmount: cancelRefundAmt,
       creditNoteAmount: cancelCnAmt,
+      refundPct: parseFloat(cancelRefundPct) || 0,
+      creditNotePct: parseFloat(cancelCnPct) || 0,
       resolution: cancelRefundAmt > 0 ? "refund" : cancelCnAmt > 0 ? "credit-note" : "refund",
       creditNoteCode: cancelCnCode,
       processedBy: currentUser,
@@ -751,8 +755,19 @@ export default function BookingDetailPage() {
               </div>
               <div className="detail-row">
                 <span className="detail-key">Policy</span>
-                <span className="detail-val" style={{ textTransform: "capitalize" }}>
-                  {b.cancellationDetails.policyType}
+                <span className="detail-val">
+                  {(() => {
+                    const cd = b.cancellationDetails;
+                    // Percentages actually applied; older cancellations
+                    // without stored pcts derive them from the amounts.
+                    const paid = b.advance || 0;
+                    const rp = cd.refundPct ?? (paid > 0 ? Math.round((cd.refundAmount / paid) * 100) : 0);
+                    const cp = cd.creditNotePct ?? (paid > 0 ? Math.round((cd.creditNoteAmount / paid) * 100) : 0);
+                    const parts = [];
+                    if (rp > 0) parts.push(`Refund ${rp}%`);
+                    if (cp > 0) parts.push(`Credit Note ${cp}%`);
+                    return parts.length > 0 ? parts.join(" · ") : "No refund / credit note";
+                  })()}
                 </span>
               </div>
               <div className="detail-row">

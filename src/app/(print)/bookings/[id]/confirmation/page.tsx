@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { useParams } from "next/navigation";
 import { useApp } from "@/lib/store";
 import { dayName, fmt, fmtIN, getBookingPricingRows, nightsBetween } from "@/lib/utils";
@@ -50,6 +51,11 @@ export default function ConfirmationPage() {
   const { bookings, hydrated } = useApp();
   const id = params?.id;
   const b = bookings.find((x) => x.id === id);
+
+  // The browser names the downloaded PDF after the page title
+  useEffect(() => {
+    if (b) document.title = `Vama Retreats - ${b.guest}`;
+  }, [b]);
 
   if (!hydrated) {
     return (
@@ -114,13 +120,13 @@ export default function ConfirmationPage() {
       seg.mealItems.forEach((mi) =>
         rows.push({ key: `${seg.id}-${mi.id}`, label: mi.packageName, dates, rate: mi.rate, nights: segNights, pax: mi.pax, chg: mi.total })
       );
-      if ((seg.pets ?? 0) > 0 && (seg.petRate ?? 0) > 0)
+      if ((seg.pets ?? 0) > 0)
         rows.push({ key: `${seg.id}-pet`, label: "Pet Package", dates, rate: seg.petRate ?? 0, nights: segNights, pax: seg.pets, chg: (seg.petRate ?? 0) * segNights * seg.pets });
       return rows;
     }
     if (seg.mealOn && (seg.mealRate ?? 0) > 0 && seg.adults > 0)
       rows.push({ key: `${seg.id}-meal`, label: "Meal & Activity Package", dates, rate: seg.mealRate ?? 0, nights: segNights, pax: seg.adults, chg: (seg.mealRate ?? 0) * segNights * seg.adults });
-    if ((seg.pets ?? 0) > 0 && (seg.petRate ?? 0) > 0)
+    if ((seg.pets ?? 0) > 0)
       rows.push({ key: `${seg.id}-pet`, label: "Pet Package", dates, rate: seg.petRate ?? 0, nights: segNights, pax: seg.pets, chg: (seg.petRate ?? 0) * segNights * seg.pets });
     if (seg.driverMealOn && (seg.drivers ?? 0) > 0 && (seg.driverMealRate ?? 0) > 0)
       rows.push({ key: `${seg.id}-drv`, label: "Driver / Attendant Meal", dates, rate: seg.driverMealRate ?? 0, nights: segNights, pax: seg.drivers ?? 0, chg: (seg.driverMealRate ?? 0) * segNights * (seg.drivers ?? 0) });

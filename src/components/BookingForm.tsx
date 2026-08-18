@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
 import {
+  addDays,
   calcPricingRow,
   fiscalYearCode,
   fmt,
@@ -638,7 +639,13 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     const lenOk = country
       ? digits.length >= country.minLen && digits.length <= country.maxLen
       : digits.length >= 6 && digits.length <= 14;
-    if (!/^\d+$/.test(digits) || !lenOk) errs.mobile = true;
+    // OTA bookings come without a guest phone — mobile is optional there,
+    // but when one is entered it still has to be a valid number.
+    if (source === "OTA" && digits === "") {
+      // valid: no mobile for an OTA booking
+    } else if (!/^\d+$/.test(digits) || !lenOk) {
+      errs.mobile = true;
+    }
     if (!checkin) errs.checkin = true;
     if (!checkout || checkout <= checkin) errs.checkout = true;
     const hasRoom = formSegs.some((s) => s.rows.some((r) => r.roomId));
@@ -736,7 +743,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     return {
       id,
       guest: name.trim(),
-      mobile: `${dial} ${mobile.trim()}`,
+      mobile: mobile.trim() ? `${dial} ${mobile.trim()}` : "",
       email: email.trim(),
       source,
       notes: notes.trim(),
@@ -846,7 +853,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     const totalMealGst = segMealCalcs.reduce((s, c) => s + c.gst, 0);
     return {
       guest: name.trim(),
-      mobile: `${dial} ${mobile.trim()}`,
+      mobile: mobile.trim() ? `${dial} ${mobile.trim()}` : "",
       email: email.trim(),
       source,
       notes: notes.trim(),
@@ -1038,7 +1045,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
               <span className="field-err">Name is required</span>
             </div>
             <div className={`field${errors.mobile ? " error" : ""}`}>
-              <label>Mobile Number *</label>
+              <label>Mobile Number {source === "OTA" ? "" : "*"}</label>
               <div style={{ display: "flex", gap: 6 }}>
                 <div style={{ position: "relative", width: 96, flexShrink: 0 }}>
                   <input
@@ -1174,7 +1181,12 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                         <input
                           type="date"
                           value={seg.checkin}
-                          onChange={(e) => updateSegDates(seg.id, e.target.value, seg.checkout)}
+                          onChange={(e) => {
+                            const ci = e.target.value;
+                            // Check-out follows the new check-in: default to
+                            // the next day, editable forward from there.
+                            updateSegDates(seg.id, ci, ci ? addDays(ci, 1) : seg.checkout);
+                          }}
                           style={{ fontSize: 12, padding: "4px 8px", border: "1px solid var(--bd)", borderRadius: "var(--r3)", background: "var(--surf)", outline: "none" }}
                         />
                         {ciDay && <span style={{ fontSize: 11, color: "var(--acc)", fontWeight: 700 }}>{ciDay}</span>}
@@ -1185,6 +1197,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                         <input
                           type="date"
                           value={seg.checkout}
+                          min={seg.checkin ? addDays(seg.checkin, 1) : undefined}
                           onChange={(e) => updateSegDates(seg.id, seg.checkin, e.target.value)}
                           style={{ fontSize: 12, padding: "4px 8px", border: "1px solid var(--bd)", borderRadius: "var(--r3)", background: "var(--surf)", outline: "none" }}
                         />
@@ -1415,9 +1428,9 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
 
                   {/* Meal charges for this segment — rows from the meal master */}
                   <div style={{ padding: "12px 14px", borderTop: "1px solid var(--bd)", background: "var(--surf)" }}>
-                    <div style={{ display: "flex", alignItems: "center", marginBottom: 10 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
                       <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", textTransform: "uppercase", letterSpacing: "0.04em" }}>Meal Charges</div>
-                      <button type="button" className="btn btn-ghost btn-xs" style={{ marginLeft: "auto" }} onClick={() => addMealRow(seg.id)}>
+                      <button type="button" className="btn btn-ghost btn-xs" onClick={() => addMealRow(seg.id)}>
                         + Add Meal
                       </button>
                     </div>
