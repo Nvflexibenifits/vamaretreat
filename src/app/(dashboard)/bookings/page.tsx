@@ -198,7 +198,7 @@ export default function BookingsPage() {
                     </td>
                     <td>{fmtIN(b.checkin)}</td>
                     <td>{fmtIN(b.checkout)}</td>
-                    <td>{b.nights}</td>
+                    <td>{b.checkin === b.checkout ? "Dayout" : b.nights}</td>
                     <td style={{ fontWeight: 600 }}>{fmt(amountDue)}</td>
                     <td style={{ fontWeight: 500, color: "var(--grn)" }}>{fmt(received)}</td>
                     <td

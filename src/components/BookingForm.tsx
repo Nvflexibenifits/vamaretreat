@@ -313,7 +313,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     setFormSegs((prev) =>
       prev.map((s) => {
         if (s.id !== segId) return s;
-        if (!newCheckin || !newCheckout || newCheckout <= newCheckin) {
+        if (!newCheckin || !newCheckout || newCheckout < newCheckin) {
           return { ...s, checkin: newCheckin, checkout: newCheckout };
         }
         const { weekday: wd, friday: fr, saturday: sa } = splitNightsByType(newCheckin, newCheckout);
@@ -576,9 +576,11 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
 
   const totalRoomCharges = computedRows.reduce((s, r) => s + r.totalAmt, 0);
 
-  // Per-segment meal computations (used in UI and in buildNewBooking)
+  // Per-segment meal computations (used in UI and in buildNewBooking).
+  // A dayout (check-in = check-out) has zero nights but meals for one day.
   const segMealCalcs = formSegs.map((seg) => {
-    const nights = nightsBetween(seg.checkin, seg.checkout);
+    const isDayout = !!seg.checkin && seg.checkin === seg.checkout;
+    const nights = isDayout ? 1 : nightsBetween(seg.checkin, seg.checkout);
     const adultsN = parseInt(seg.adults) || 0;
     const petsN = parseInt(seg.pets) || 0;
     const driversN = parseInt(seg.drivers) || 0;
@@ -695,9 +697,13 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       errs.mobile = true;
     }
     if (!checkin) errs.checkin = true;
-    if (!checkout || checkout <= checkin) errs.checkout = true;
+    // Same-day (dayout) is valid; only a checkout before check-in is not
+    if (!checkout || checkout < checkin) errs.checkout = true;
+    // Rooms are mandatory only when the booking has an overnight segment —
+    // a pure dayout (check-in = check-out) sells meals without a room.
+    const hasOvernight = formSegs.some((s) => s.checkin && s.checkout && s.checkout > s.checkin);
     const hasRoom = formSegs.some((s) => s.rows.some((r) => r.roomId));
-    if (!hasRoom) errs.rooms = true;
+    if (hasOvernight && !hasRoom) errs.rooms = true;
     setErrors(errs);
     if (errs.rooms) {
       showNotif("Please select room category in at least one segment", "error");
@@ -783,7 +789,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
           segmentTotal: cs.segmentTotal + (mc?.total ?? 0),
         };
       })
-      .filter((s) => s.rooms.length > 0);
+      .filter((s) => s.rooms.length > 0 || s.checkin === s.checkout);
     const maxAdults = Math.max(...validSegments.map((s) => s.adults), 0);
     const anyMeal = validSegments.some((s) => s.mealOn);
     const totalMealBase = segMealCalcs.reduce((s, c) => s + c.base, 0);
@@ -854,7 +860,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     allocatedRooms: string[],
     segAlloc: Record<string, string[]> = {}
   ): Partial<Booking> => {
-    const validSegments = computedSegments.filter((s) => s.rooms.length > 0);
+    const validSegments = computedSegments.filter((s) => s.rooms.length > 0 || s.checkin === s.checkout);
     const validNewPayments = newPaymentRows
       .filter((p) => p.date && (parseFloat(p.amount) || 0) > 0)
       .map((p) => ({
@@ -896,7 +902,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
           segmentTotal: cs.segmentTotal + (mc?.total ?? 0),
         };
       })
-      .filter((s) => s.rooms.length > 0);
+      .filter((s) => s.rooms.length > 0 || s.checkin === s.checkout);
     const anyMeal = segsFull.some((s) => s.mealOn);
     const totalMealBase = segMealCalcs.reduce((s, c) => s + c.base, 0);
     const totalMealGst = segMealCalcs.reduce((s, c) => s + c.gst, 0);
@@ -1247,18 +1253,22 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                         <input
                           type="date"
                           value={seg.checkout}
-                          min={seg.checkin ? addDays(seg.checkin, 1) : undefined}
+                          min={seg.checkin || undefined}
                           onChange={(e) => updateSegDates(seg.id, seg.checkin, e.target.value)}
                           style={{ fontSize: 12, padding: "4px 8px", border: "1px solid var(--bd)", borderRadius: "var(--r3)", background: "var(--surf)", outline: "none" }}
                         />
                         {coDay && <span style={{ fontSize: 11, color: "var(--acc)", fontWeight: 700 }}>{coDay}</span>}
                       </div>
-                      {segNights > 0 && (
+                      {segNights > 0 ? (
                         <span style={{ fontSize: 11, color: "var(--t2)" }}>
                           {segNights} night{segNights > 1 ? "s" : ""}
                           {nightParts ? ` (${nightParts})` : ""}
                         </span>
-                      )}
+                      ) : seg.checkin && seg.checkin === seg.checkout ? (
+                        <span style={{ fontSize: 11, color: "var(--acc)", fontWeight: 700 }}>
+                          Dayout (same-day) — room optional
+                        </span>
+                      ) : null}
                     </div>
                     {formSegs.length > 1 && (
                       <button

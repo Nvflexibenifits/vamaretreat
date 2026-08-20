@@ -376,10 +376,12 @@ export default function RoomChartPage() {
     };
   }, [drag]);
 
+  // Dayouts (check-in = check-out) sell no room, so they never await allocation
   const unalloc = bookings.filter(
     (b) =>
       (b.status === "Confirmed" || b.status === "Tentative") &&
-      b.allocatedRooms.length === 0
+      b.allocatedRooms.length === 0 &&
+      b.checkin !== b.checkout
   );
 
   // ─── Unified block modal handlers ───

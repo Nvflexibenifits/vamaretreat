@@ -112,7 +112,7 @@ export default function ConfirmationPage() {
   // Per-segment meal rows (new bookings store rates per segment); legacy
   // bookings without stored rates fall back to booking-level derived rows.
   const segMealRows = (b.segments ?? []).flatMap((seg) => {
-    const segNights = nightsBetween(seg.checkin, seg.checkout);
+    const segNights = seg.checkin === seg.checkout ? 1 : nightsBetween(seg.checkin, seg.checkout);
     const dates = `${fmtIN(seg.checkin)} → ${fmtIN(seg.checkout)}`;
     const rows: { key: string; label: string; dates: string; rate: number; nights: number; pax: number; chg: number }[] = [];
     if (segNights <= 0) return rows;

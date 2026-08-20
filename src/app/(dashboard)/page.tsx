@@ -218,12 +218,21 @@ export default function DashboardPage() {
     ].filter((row) => row.total > 0);
   }, [bookings, foDate]);
 
-  // ───── Front Office: Check-ins / Stayovers / Check-outs ─────
+  // ───── Front Office: Check-ins / Stayovers / Check-outs / Dayouts ─────
   const foCheckIns = useMemo(() => {
     if (!foDate) return [];
     return bookings.filter(
-      (b) => b.checkin === foDate &&
+      (b) => b.checkin === foDate && b.checkout > b.checkin &&
         (b.status === "Confirmed" || b.status === "Tentative")
+    );
+  }, [bookings, foDate]);
+
+  // Same-day bookings (no room) get their own table
+  const foDayouts = useMemo(() => {
+    if (!foDate) return [];
+    return bookings.filter(
+      (b) => b.checkin === foDate && b.checkout === foDate &&
+        (b.status === "Confirmed" || b.status === "Tentative" || b.status === "Completed")
     );
   }, [bookings, foDate]);
 
@@ -238,7 +247,7 @@ export default function DashboardPage() {
   const foCheckOuts = useMemo(() => {
     if (!foDate) return [];
     return bookings.filter(
-      (b) => b.checkout === foDate &&
+      (b) => b.checkout === foDate && b.checkout > b.checkin &&
         (b.status === "Confirmed" || b.status === "Tentative" || b.status === "Completed")
     );
   }, [bookings, foDate]);
@@ -409,7 +418,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Check-outs */}
-        <div className="tbl-wrap" style={{ marginBottom: 24 }}>
+        <div className="tbl-wrap" style={{ marginBottom: 16 }}>
           <div className="tbl-hd">
             <h3>Check-out&apos;s &mdash; {foCheckOuts.length}</h3>
           </div>
@@ -420,6 +429,26 @@ export default function DashboardPage() {
                 <tr><td colSpan={14}><div className="empty-state"><h3>No check-outs</h3><p>No departures on this date</p></div></td></tr>
               ) : (
                 foCheckOuts.map((b, i) => foRow(b, 0, i))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Dayouts — same-day bookings, meals without a room */}
+        <div className="tbl-wrap" style={{ marginBottom: 24 }}>
+          <div className="tbl-hd">
+            <h3>Dayout&apos;s &mdash; {foDayouts.length}</h3>
+          </div>
+          <table>
+            <thead>{foTblHead}</thead>
+            <tbody>
+              {foDayouts.length === 0 ? (
+                <tr><td colSpan={14}><div className="empty-state"><h3>No dayouts</h3><p>No same-day guests on this date</p></div></td></tr>
+              ) : (
+                <>
+                  {foDayouts.map((b, i) => foRow(b, 1, i))}
+                  {foTotalsRow(paxTotals(foDayouts), "Total Dayout Pax")}
+                </>
               )}
             </tbody>
           </table>
