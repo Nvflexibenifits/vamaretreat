@@ -3,7 +3,9 @@ import type {
   BookingSegment,
   BookingStatus,
   BulkRoomBlock,
+  ChargeHead,
   DiscountCaps,
+  Extra,
   GstSettings,
   PricingRow,
   Role,
@@ -238,10 +240,39 @@ export function getBookingPricingRows(b: Booking): PricingRow[] {
   );
 }
 
+// Add-on categories offered on the booking form, mapped to the revenue head
+// each one reports under.
+const ADD_ON_CATEGORY_HEADS: Record<string, ChargeHead> = {
+  "room charges": "room",
+  "meal charges": "meal",
+  "venue charges": "other",
+};
+
+// Which revenue head an add-on reports under. Rows saved with an explicit head
+// use it; legacy rows (saved before the head existed, or added from the
+// checkout modal as free text) fall back to their name — the form's category
+// labels and auto-generated room-upgrade lines resolve, everything else lands
+// in Other.
+export function extraHead(e: Extra): ChargeHead {
+  if (e.head) return e.head;
+  const name = (e.name ?? "").trim().toLowerCase();
+  const byCategory = ADD_ON_CATEGORY_HEADS[name];
+  if (byCategory) return byCategory;
+  if (name.startsWith("room upgrade")) return "room";
+  return "other";
+}
+
 export type BookingChargesBreakdown = {
   roomNet: number;
   mealNet: number;
+  // Every non-room/meal charge: the itemised add-ons plus the unnamed legacy
+  // remainder. Kept as the aggregate so callers that report a single Other
+  // figure (dashboard card, waive-off caps) stay correct.
   other: number;
+  // The itemised part of `other`, split by the add-on's own label so the
+  // Revenue Register can give each service its own column. Whatever `other`
+  // holds beyond the sum of these is the unnamed legacy remainder.
+  otherByItem: Record<string, number>;
   gst5: number;
   gst18: number;
   gstOther: number;
@@ -258,7 +289,7 @@ export function bookingChargesBreakdown(b: Booking): BookingChargesBreakdown {
   const isRefundCancel =
     b.status === "Cancelled" && b.cancellationDetails?.resolution === "refund";
   if (isRefundCancel) {
-    return { roomNet: 0, mealNet: 0, other: 0, gst5: 0, gst18: 0, gstOther: 0 };
+    return { roomNet: 0, mealNet: 0, other: 0, otherByItem: {}, gst5: 0, gst18: 0, gstOther: 0 };
   }
 
   const pricingRows = getBookingPricingRows(b);
@@ -272,13 +303,27 @@ export function bookingChargesBreakdown(b: Booking): BookingChargesBreakdown {
   });
   let mealNet = b.mealTotal + b.petTotal + (b.driverMealTotal ?? 0);
   gst18 += b.mealGst + b.petGst + (b.driverMealGst ?? 0);
-  // Itemized add-ons: net amount in Other, GST bucketed by its actual rate —
-  // 5% and 18% join their columns, anything else goes to GST Other.
+  // Itemized add-ons: the net amount reports under the head its category maps
+  // to (room / meal add-ons join their own columns, venue and anything
+  // uncategorised fall to Other). GST is bucketed by its actual rate
+  // regardless of head — 5% and 18% join their columns, the rest goes to GST
+  // Other.
   const extrasList = b.extras ?? [];
-  const extrasNet = extrasList.reduce((s, e) => s + e.amount, 0);
+  let extrasNet = 0;
   let extrasGst = 0;
   let gstOther = 0;
+  // Non-room/meal add-ons, bucketed by their own label.
+  const otherByItem: Record<string, number> = {};
   extrasList.forEach((e) => {
+    extrasNet += e.amount;
+    const head = extraHead(e);
+    if (head === "room") roomNet += e.amount;
+    else if (head === "meal") mealNet += e.amount;
+    else {
+      const label = (e.name ?? "").trim() || "Add-on Charge";
+      otherByItem[label] = (otherByItem[label] ?? 0) + e.amount;
+    }
+
     const gst = e.gst ?? 0;
     if (gst <= 0) return;
     const pct = e.amount > 0 ? Math.round((gst / e.amount) * 100) : 0;
@@ -288,17 +333,25 @@ export function bookingChargesBreakdown(b: Booking): BookingChargesBreakdown {
     extrasGst += gst;
   });
   // Legacy bookings rolled add-ons into grandTotal without itemizing;
-  // whatever the itemized extras don't explain stays as a gross remainder.
-  let other =
-    extrasNet +
-    Math.max(0, b.grandTotal - b.totalRoomCharges - b.totalMealCharges - extrasNet - extrasGst);
+  // whatever the itemized extras don't explain stays as a gross remainder and
+  // has no item of its own to sit under.
+  const itemisedOther = Object.values(otherByItem).reduce((s2, v) => s2 + v, 0);
+  const legacyRemainder = Math.max(
+    0,
+    b.grandTotal - b.totalRoomCharges - b.totalMealCharges - extrasNet - extrasGst
+  );
+  let other = itemisedOther + legacyRemainder;
 
   // Cancellation waive-off: the unpaid balance written off per head leaves
   // the booking's stored figures intact but comes out of reported revenue.
+  let otherWaived = 0;
   (b.waiveOff?.lines ?? []).forEach((l) => {
     if (l.head === "room") roomNet -= l.amount;
     else if (l.head === "meal") mealNet -= l.amount;
-    else other -= l.amount;
+    else {
+      other -= l.amount;
+      otherWaived += l.amount;
+    }
     if (l.gstAmt > 0) {
       const pct = Math.round(l.gstPct);
       if (pct === 5) gst5 -= l.gstAmt;
@@ -306,6 +359,19 @@ export function bookingChargesBreakdown(b: Booking): BookingChargesBreakdown {
       else gstOther -= l.gstAmt;
     }
   });
+  // A waive-off on the Other head lands on the unnamed remainder first, then
+  // comes off the itemised buckets pro rata — so the item columns and the
+  // Other column still add up to the reported total.
+  if (otherWaived > 0 && itemisedOther > 0) {
+    const fromItems = Math.max(0, otherWaived - legacyRemainder);
+    if (fromItems > 0) {
+      const factor = Math.max(0, 1 - fromItems / itemisedOther);
+      Object.keys(otherByItem).forEach((k) => {
+        otherByItem[k] = Math.max(0, otherByItem[k] * factor);
+      });
+    }
+  }
+
   roomNet = Math.max(0, roomNet);
   mealNet = Math.max(0, mealNet);
   other = Math.max(0, other);
@@ -313,7 +379,7 @@ export function bookingChargesBreakdown(b: Booking): BookingChargesBreakdown {
   gst18 = Math.max(0, gst18);
   gstOther = Math.max(0, gstOther);
 
-  return { roomNet, mealNet, other, gst5, gst18, gstOther };
+  return { roomNet, mealNet, other, otherByItem, gst5, gst18, gstOther };
 }
 
 // ─────── ROOM ALLOCATION ───────

@@ -36,7 +36,7 @@ const groupHdStyle: React.CSSProperties = {
 const sectionBorder: React.CSSProperties = { borderLeft: "2px solid var(--bd)" };
 
 export default function RevenuePage() {
-  const { bookings, currentRole } = useApp();
+  const { bookings, currentRole, addOnCategories } = useApp();
   const [search, setSearch] = useState("");
   const [today, setToday] = useState("");
   // "" = current month, "custom" = manual range, otherwise "YYYY-MM"
@@ -85,7 +85,7 @@ export default function RevenuePage() {
         // cancellation charge, if any, is kept). Credit-note cancellations
         // keep full revenue: no money leaves, the stay obligation remains.
         const isRefundCancel = isCancelled && b.cancellationDetails?.resolution === "refund";
-        const { roomNet, mealNet, other, gst5, gst18, gstOther } = bookingChargesBreakdown(b);
+        const { roomNet, mealNet, other, otherByItem, gst5, gst18, gstOther } = bookingChargesBreakdown(b);
         // Value a cancelled booking actually keeps: cancellation charge
         // retained plus any credit note issued (the CN worth stays with the
         // hotel; the uncollected balance never arrives).
@@ -137,7 +137,7 @@ export default function RevenuePage() {
         // waive-off hasn't been done yet; shown in red so it stands apart
         // from money actually expected from guests.
         const waivePending = isCancelled && !isRefundCancel && bal >= 1;
-        return { b, roomNet, mealNet, other, gst5, gst18, gstOther, total, dedCommission, dedTds, dedSpecial, bank, cash, crNote, bal, isCancelled, waivePending };
+        return { b, roomNet, mealNet, other, otherByItem, gst5, gst18, gstOther, total, dedCommission, dedTds, dedSpecial, bank, cash, crNote, bal, isCancelled, waivePending };
       });
   }, [bookings, search, rangeFrom, rangeTo]);
 
@@ -164,6 +164,36 @@ export default function RevenuePage() {
       ),
     [tableRows]
   );
+
+  // One column per add-on item that actually carries a charge in this view —
+  // a month with no venue bookings gets no Venue column. Master-list order
+  // first, then any label the data still uses (renamed or deleted items).
+  const addOnCols = useMemo(() => {
+    const totalsByItem = new Map<string, number>();
+    tableRows.forEach((r) => {
+      Object.entries(r.otherByItem).forEach(([label, amt]) => {
+        if (amt <= 0) return;
+        totalsByItem.set(label, (totalsByItem.get(label) ?? 0) + amt);
+      });
+    });
+    const ordered = addOnCategories
+      .filter((c) => c.head === "other")
+      .map((c) => c.name)
+      .filter((name) => totalsByItem.has(name));
+    const rest = [...totalsByItem.keys()]
+      .filter((label) => !ordered.includes(label))
+      .sort((a, b) => a.localeCompare(b));
+    return [...ordered, ...rest].map((label) => ({
+      label,
+      total: totalsByItem.get(label) ?? 0,
+    }));
+  }, [tableRows, addOnCategories]);
+
+  // What's left in Other once the itemised add-ons have their own columns:
+  // the unnamed legacy remainder.
+  const otherResidual = (r: (typeof tableRows)[number]) =>
+    Math.max(0, r.other - Object.values(r.otherByItem).reduce((s2, v) => s2 + v, 0));
+  const totalsOtherResidual = tableRows.reduce((s2, r) => s2 + otherResidual(r), 0);
 
   // Pending payments (global, unaffected by filters)
   const pendingBookings = useMemo(
@@ -227,20 +257,24 @@ export default function RevenuePage() {
   const exportExcel = () => {
     const headers = [
       "SL No.", "Check-in", "Check-out", "Guest Name", "Mobile", "Booking ID", "Status",
-      "Room Charges", "Meal Charges", "Other Charges", "GST 5%", "GST 18%", "Total Charges",
+      "Room Charges", "Meal Charges", ...addOnCols.map((c) => c.label), "Other Charges", "GST 5%", "GST 18%", "Total Charges",
       "Commission", "TDS", "Special Discount",
       "Received - Bank", "Received - Cash", "Credit Note", "Balance",
     ];
     const lines = tableRows.map((r, i) => [
       i + 1, fmtShort(r.b.checkin), fmtShort(r.b.checkout), r.b.guest, r.b.mobile, r.b.id, r.b.status,
-      Math.round(r.roomNet), Math.round(r.mealNet), Math.round(r.other),
+      Math.round(r.roomNet), Math.round(r.mealNet),
+      ...addOnCols.map((c) => Math.round(r.otherByItem[c.label] ?? 0)),
+      Math.round(otherResidual(r)),
       Math.round(r.gst5), Math.round(r.gst18), Math.round(r.total),
       Math.round(r.dedCommission), Math.round(r.dedTds), Math.round(r.dedSpecial),
       Math.round(r.bank), Math.round(r.cash), Math.round(r.crNote), Math.round(r.bal),
     ]);
     lines.push([
       "", "", "", "", "", "Total", "",
-      Math.round(totals.roomNet), Math.round(totals.mealNet), Math.round(totals.other),
+      Math.round(totals.roomNet), Math.round(totals.mealNet),
+      ...addOnCols.map((c) => Math.round(c.total)),
+      Math.round(totalsOtherResidual),
       Math.round(totals.gst5), Math.round(totals.gst18), Math.round(totals.total),
       Math.round(totals.dedCommission), Math.round(totals.dedTds), Math.round(totals.dedSpecial),
       Math.round(totals.bank), Math.round(totals.cash), Math.round(totals.crNote), Math.round(totals.bal),
@@ -258,7 +292,7 @@ export default function RevenuePage() {
   };
 
   const numTd: React.CSSProperties = { textAlign: "right", whiteSpace: "nowrap", fontSize: 12 };
-  const chargesCols = 6;
+  const chargesCols = 6 + addOnCols.length;
   // booking info + charges + deductions + payments + bal + actions
   const allCols = 5 + chargesCols + 3 + 3 + 2;
 
@@ -394,6 +428,9 @@ export default function RevenuePage() {
                 <th style={{ whiteSpace: "nowrap" }}>Bkg ID</th>
                 <th style={{ textAlign: "right", ...sectionBorder }}>Room</th>
                 <th style={{ textAlign: "right" }}>Meal</th>
+                {addOnCols.map((c) => (
+                  <th key={c.label} style={{ textAlign: "right", whiteSpace: "nowrap" }}>{c.label}</th>
+                ))}
                 <th style={{ textAlign: "right" }}>Other</th>
                 <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>GST 5%</th>
                 <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>GST 18%</th>
@@ -441,7 +478,10 @@ export default function RevenuePage() {
                       </td>
                       <td style={{ ...numTd, ...sectionBorder }}>{nfmt(r.roomNet)}</td>
                       <td style={numTd}>{nfmt(r.mealNet)}</td>
-                      <td style={numTd}>{nfmt(r.other)}</td>
+                      {addOnCols.map((c) => (
+                        <td key={c.label} style={numTd}>{nfmt(r.otherByItem[c.label] ?? 0)}</td>
+                      ))}
+                      <td style={numTd}>{nfmt(otherResidual(r))}</td>
                       <td style={{ ...numTd, color: "var(--t3)" }}>{nfmt(r.gst5)}</td>
                       <td style={{ ...numTd, color: "var(--t3)" }}>{nfmt(r.gst18)}</td>
                       <td style={{ ...numTd, fontWeight: 700 }}>{nfmt(r.total)}</td>
@@ -490,7 +530,10 @@ export default function RevenuePage() {
                     <td colSpan={5} style={{ textAlign: "right", fontSize: 12, color: "var(--t2)" }}>Total</td>
                     <td style={{ ...numTd, ...sectionBorder, fontWeight: 700 }}>{nfmt(totals.roomNet)}</td>
                     <td style={{ ...numTd, fontWeight: 700 }}>{nfmt(totals.mealNet)}</td>
-                    <td style={{ ...numTd, fontWeight: 700 }}>{nfmt(totals.other)}</td>
+                    {addOnCols.map((c) => (
+                      <td key={c.label} style={{ ...numTd, fontWeight: 700 }}>{nfmt(c.total)}</td>
+                    ))}
+                    <td style={{ ...numTd, fontWeight: 700 }}>{nfmt(totalsOtherResidual)}</td>
                     <td style={{ ...numTd, fontWeight: 700, color: "var(--t3)" }}>{nfmt(totals.gst5)}</td>
                     <td style={{ ...numTd, fontWeight: 700, color: "var(--t3)" }}>{nfmt(totals.gst18)}</td>
                     <td style={{ ...numTd, fontWeight: 800 }}>{nfmt(totals.total)}</td>

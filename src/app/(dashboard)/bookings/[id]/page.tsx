@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
 import { bookingChargesBreakdown, fmt, fmtIN, dayName, getBookingPricingRows, nightsBetween, todayStr, tryAssignRooms } from "@/lib/utils";
 import { StatusBadge } from "@/components/StatusBadge";
-import type { CancellationDetails, CancellationPolicy, SpecialDay, WaiveOffLine } from "@/types";
+import type { CancellationDetails, CancellationPolicy, ChargeHead, SpecialDay, WaiveOffLine } from "@/types";
 
 // ─── helpers ───────────────────────────────────────────────────────────────
 
@@ -106,7 +106,7 @@ function computeCancel(
 // ─── main page ─────────────────────────────────────────────────────────────
 
 // Waive-off modal rows: one fixed row per charge head.
-type WaiveRow = { head: "room" | "meal" | "other"; label: string; amount: string; gstPct: string };
+type WaiveRow = { head: ChargeHead; label: string; amount: string; gstPct: string };
 
 export default function BookingDetailPage() {
   const params = useParams<{ id: string }>();
@@ -248,7 +248,7 @@ export default function BookingDetailPage() {
     setWaiveRows([
       mk("room", "Room Charges", defaultRoomGstPct),
       mk("meal", "Meal Charges", "18"),
-      mk("other", "Add-on Charges", "18"),
+      mk("other", "Other Charges", "18"),
     ]);
     setShowWaiveModal(true);
   };
@@ -1226,7 +1226,7 @@ export default function BookingDetailPage() {
                 {b.waiveOff.lines.map((l) => (
                   <div key={l.head} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 16px", borderBottom: "1px solid var(--bd)" }}>
                     <span style={{ fontSize: 12, color: "var(--t2)", fontWeight: 600 }}>
-                      Waived Off — {l.head === "room" ? "Room Charges" : l.head === "meal" ? "Meal Charges" : "Add-on Charges"}
+                      Waived Off — {l.head === "room" ? "Room Charges" : l.head === "meal" ? "Meal Charges" : "Other Charges"}
                       <span style={{ color: "var(--t3)", fontWeight: 500 }}> ({fmt(l.amount)} + {l.gstPct}% GST)</span>
                     </span>
                     <span style={{ fontSize: 13, fontWeight: 700, color: "var(--red)" }}>−{fmt(l.amount + l.gstAmt)}</span>

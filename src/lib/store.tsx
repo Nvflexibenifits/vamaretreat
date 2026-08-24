@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import type {
+  AddOnCategory,
   Booking,
   BookingSegment,
   BookingStatus,
@@ -37,6 +38,7 @@ import type {
 } from "@/types";
 import {
   ROOMS as SEED_ROOMS,
+  SEED_ADD_ON_CATEGORIES,
   SEED_CANCELLATION_POLICY,
   SEED_CREDIT_NOTE_SETTINGS,
   SEED_DISCOUNT_CAPS,
@@ -126,6 +128,8 @@ type AppContextValue = {
   updateUserRoles: (roles: string[]) => void;
   mealCategories: MealCategory[];
   updateMealCategories: (cats: MealCategory[]) => void;
+  addOnCategories: AddOnCategory[];
+  updateAddOnCategories: (cats: AddOnCategory[]) => void;
   venueBlocks: VenueBlock[];
   updateRooms: (rooms: RoomMaster[]) => void;
   addRoomInventoryItem: (item: RoomInventoryItem) => void;
@@ -221,6 +225,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [venueTypes, setVenueTypesState] = useState<string[]>(SEED_VENUE_TYPES);
   const [userRoles, setUserRolesState] = useState<string[]>(["Admin", "Front Office", "Sales"]);
   const [mealCategories, setMealCategoriesState] = useState<MealCategory[]>(SEED_MEAL_CATEGORIES);
+  const [addOnCategories, setAddOnCategoriesState] = useState<AddOnCategory[]>(SEED_ADD_ON_CATEGORIES);
   const [venueBlocks, setVenueBlocks] = useState<VenueBlock[]>(SEED_VENUE_BLOCKS);
   const [bulkRoomBlocks, setBulkRoomBlocks] = useState<BulkRoomBlock[]>(SEED_BULK_ROOM_BLOCKS);
   const [hydrated, setHydrated] = useState(false);
@@ -259,6 +264,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (Array.isArray(data.venueTypes)) setVenueTypesState(data.venueTypes);
     if (Array.isArray(data.userRoles)) setUserRolesState(data.userRoles);
     if (Array.isArray(data.mealCategories)) setMealCategoriesState(data.mealCategories);
+    if (Array.isArray(data.addOnCategories)) setAddOnCategoriesState(data.addOnCategories);
     if (Array.isArray(data.venueBlocks)) setVenueBlocks(data.venueBlocks);
     if (Array.isArray(data.bulkRoomBlocks)) setBulkRoomBlocks(data.bulkRoomBlocks);
     if (Array.isArray(data.specialDays)) setSpecialDays(data.specialDays);
@@ -639,6 +645,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     sync("/api/app/settings", "PUT", { mealCategories: cats });
   }, []);
 
+  const updateAddOnCategories = useCallback((cats: AddOnCategory[]) => {
+    setAddOnCategoriesState(cats);
+    sync("/api/app/settings", "PUT", { addOnCategories: cats });
+  }, []);
+
   const addVenue = useCallback((v: Venue) => {
     setVenues((prev) => [...prev, v]);
     sync("/api/app/venues", "POST", v);
@@ -986,6 +997,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updateUserRoles,
       mealCategories,
       updateMealCategories,
+      addOnCategories,
+      updateAddOnCategories,
       venueBlocks,
       updateRooms,
       addRoomInventoryItem,
@@ -1054,6 +1067,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updateUserRoles,
       mealCategories,
       updateMealCategories,
+      addOnCategories,
+      updateAddOnCategories,
       venueBlocks,
       updateRooms,
       addRoomInventoryItem,

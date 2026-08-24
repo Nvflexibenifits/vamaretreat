@@ -60,6 +60,18 @@ export type Payment = {
   creditNoteCode?: string;
 };
 
+// Revenue head an amount reports under in the Revenue Register.
+export type ChargeHead = "room" | "meal" | "other";
+
+// Master-setup item: an add-on charge line offerable on a booking. Amount and
+// GST are entered per booking, so the master carries only the label and the
+// revenue head the charge reports under.
+export type AddOnCategory = {
+  id: string;
+  name: string;
+  head: ChargeHead;
+};
+
 export type Extra = {
   name: string;
   amount: number;
@@ -67,6 +79,10 @@ export type Extra = {
   totalPaid?: number;
   date: string;
   by: string;
+  // Which revenue column this add-on reports under. Set from the category
+  // picked on the booking form; absent on legacy rows, where the head is
+  // inferred from the name (see extraHead in lib/utils).
+  head?: ChargeHead;
 };
 
 // OTA settlement deductions: the OTA pays out net of these, so each row
@@ -284,7 +300,7 @@ export type Booking = {
 };
 
 export type WaiveOffLine = {
-  head: "room" | "meal" | "other";
+  head: ChargeHead;
   amount: number; // net (pre-GST) amount waived from this head
   gstPct: number;
   gstAmt: number;

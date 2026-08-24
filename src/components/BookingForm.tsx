@@ -7,6 +7,7 @@ import { useApp } from "@/lib/store";
 import {
   addDays,
   calcPricingRow,
+  extraHead,
   fiscalYearCode,
   fmt,
   fmtIN,
@@ -17,7 +18,7 @@ import {
   todayStr,
   tryAssignRooms,
 } from "@/lib/utils";
-import type { Booking, BookingSegment, BookingStatus, Deduction, DeductionType, Extra, PackageRates, PricingRow, PricingRowType, SegmentMealItem, SegmentRoom } from "@/types";
+import type { Booking, BookingSegment, BookingStatus, ChargeHead, Deduction, DeductionType, Extra, PackageRates, PricingRow, PricingRowType, SegmentMealItem, SegmentRoom } from "@/types";
 import { COUNTRY_CODES } from "@/lib/data";
 
 type FormRow = {
@@ -196,6 +197,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     creditNoteSettings,
     redeemCreditNote,
     mealCategories,
+    addOnCategories,
     rooms,
     roomInventory,
     discountCaps,
@@ -259,6 +261,14 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       by: e.by,
     }))
   );
+
+  // Options for a row's category picker: the master list, plus the row's own
+  // value when it isn't in it — a category renamed or removed in Master Setup
+  // must not silently reassign a charge already saved on this booking.
+  const addOnCategoryOptions = (current: string): string[] => {
+    const labels = addOnCategories.map((c) => c.name);
+    return current && !labels.includes(current) ? [current, ...labels] : labels;
+  };
 
   // OTA deductions: commission / TDS / special discount withheld by the OTA.
   // Mirrors the add-on rows but subtracts from the receivable. The pct field
@@ -638,12 +648,19 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   const builtExtras: Extra[] = addOnRows
     .map((r) => {
       const amt = parseFloat(r.amount) || 0;
+      const category = r.category.trim();
       return {
-        name: r.category.trim() || "Add-on Charge",
+        name: category || "Add-on Charge",
         amount: amt,
         gst: (amt * (parseFloat(r.gstPct) || 0)) / 100,
         date: r.date || todayDate,
         by: r.by || currentUser,
+        // Persist the revenue head so the register never has to guess from
+        // the label. Rows carried over from before the picker existed keep
+        // whatever head their name resolves to.
+        head:
+          addOnCategories.find((c) => c.name === category)?.head ??
+          extraHead({ name: category, amount: amt, date: "", by: "" }),
       };
     })
     .filter((e) => e.amount > 0);
@@ -1679,7 +1696,12 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
             onClick={() =>
               setAddOnRows(prev => [
                 ...prev,
-                { uid: newUid(), category: "Room Charges", amount: "0", gstPct: "0" },
+                {
+                  uid: newUid(),
+                  category: addOnCategories[0]?.name ?? "",
+                  amount: "0",
+                  gstPct: "0",
+                },
               ])
             }
           >
@@ -1726,9 +1748,9 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                               outline: "none",
                             }}
                           >
-                            <option>Room Charges</option>
-                            <option>Meal Charges</option>
-                            <option>Venue Charges</option>
+                            {addOnCategoryOptions(row.category).map((label) => (
+                              <option key={label} value={label}>{label}</option>
+                            ))}
                           </select>
                         </td>
                         <td style={{ verticalAlign: "middle" }}>

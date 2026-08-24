@@ -1,4 +1,5 @@
 import type {
+  AddOnCategory,
   Booking,
   BookingSegment,
   BulkRoomBlock,
@@ -631,6 +632,15 @@ export const SEED_CREDIT_NOTE_SETTINGS: CreditNoteSettings = {
 
 // ─────────── Venues (B2B Phase 2 — name-only catalog for now) ───────────
 export const SEED_VENUES: Venue[] = [];
+
+// Default add-on charge items offered on the booking form. The live list is
+// editable in Master Setup and persisted in app settings; `head` decides which
+// Revenue Register column the charge reports under.
+export const SEED_ADD_ON_CATEGORIES: AddOnCategory[] = [
+  { id: "aoc-room", name: "Room Charges", head: "room" },
+  { id: "aoc-meal", name: "Meal Charges", head: "meal" },
+  { id: "aoc-venue", name: "Venue Charges", head: "other" },
+];
 
 // Default venue categories; the live list is editable in Master Setup and
 // persisted in app settings.

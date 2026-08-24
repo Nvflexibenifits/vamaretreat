@@ -4,8 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
 import { compareRoomLabels } from "@/lib/utils";
 import type {
+  AddOnCategory,
   CancellationPolicy,
   CancellationPolicyCell,
+  ChargeHead,
   CreditNoteSettings,
   DiscountCaps,
   GstSettings,
@@ -24,6 +26,7 @@ type Tab =
   | "rooms-inventory"
   | "venues"
   | "meal"
+  | "addons"
   | "special"
   | "cancellation"
   | "users";
@@ -33,6 +36,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "rooms-inventory", label: "Room Inventory" },
   { id: "venues", label: "Venue & Services" },
   { id: "meal", label: "Meal Setup" },
+  { id: "addons", label: "Add-on Charges" },
   { id: "special", label: "Special Days" },
   { id: "cancellation", label: "Cancellation Setup" },
   { id: "users", label: "Users" },
@@ -97,6 +101,7 @@ export default function MasterSetupPage() {
           {tab === "rooms-inventory" && <RoomInventorySection />}
           {tab === "venues" && <VenueMasterTab />}
           {tab === "meal" && <MealSetupTab />}
+          {tab === "addons" && <AddOnChargesTab />}
           {tab === "special" && <SpecialDaysTab />}
           {tab === "cancellation" && <CancellationSetupTab />}
           {tab === "users" && <UsersTab />}
@@ -1308,6 +1313,240 @@ function RoomInventorySection() {
 
 // ─────────── Discount Rules ───────────
 // ─────────── Special Days ───────────
+// ─────────── Add-on Charges Master ───────────
+// Names only — amount and GST are entered per booking. `head` decides which
+// Revenue Register column the charge reports under.
+const CHARGE_HEADS: { head: ChargeHead; label: string }[] = [
+  { head: "room", label: "Room Charges" },
+  { head: "meal", label: "Meal Charges" },
+  { head: "other", label: "Other Charges" },
+];
+
+const headLabel = (h: ChargeHead) =>
+  CHARGE_HEADS.find((c) => c.head === h)?.label ?? "Other Charges";
+
+function AddOnChargesTab() {
+  const { addOnCategories, updateAddOnCategories, showNotif } = useApp();
+
+  const [addOpen, setAddOpen] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newHead, setNewHead] = useState<ChargeHead>("other");
+  const [editing, setEditing] = useState<AddOnCategory | null>(null);
+
+  const isDuplicate = (name: string, exceptId?: string) =>
+    addOnCategories.some(
+      (c) => c.id !== exceptId && c.name.trim().toLowerCase() === name.toLowerCase()
+    );
+
+  const resetAdd = () => {
+    setNewName("");
+    setNewHead("other");
+    setAddOpen(false);
+  };
+
+  const onAdd = () => {
+    const name = newName.trim();
+    if (!name) {
+      showNotif("Enter an add-on name", "error");
+      return;
+    }
+    if (isDuplicate(name)) {
+      showNotif(`${name} already exists`, "error");
+      return;
+    }
+    updateAddOnCategories([...addOnCategories, { id: uid(), name, head: newHead }]);
+    showNotif(`${name} added`, "success");
+    resetAdd();
+  };
+
+  const onSaveEdit = () => {
+    if (!editing) return;
+    const name = editing.name.trim();
+    if (!name) {
+      showNotif("Name is required", "error");
+      return;
+    }
+    if (isDuplicate(name, editing.id)) {
+      showNotif(`${name} already exists`, "error");
+      return;
+    }
+    updateAddOnCategories(
+      addOnCategories.map((c) =>
+        c.id === editing.id ? { ...c, name, head: editing.head } : c
+      )
+    );
+    showNotif("Add-on charge updated", "success");
+    setEditing(null);
+  };
+
+  const onRemove = (cat: AddOnCategory) => {
+    if (addOnCategories.length <= 1) {
+      showNotif("Keep at least one add-on charge item", "error");
+      return;
+    }
+    updateAddOnCategories(addOnCategories.filter((c) => c.id !== cat.id));
+    if (editing?.id === cat.id) setEditing(null);
+    showNotif(`Removed ${cat.name}`, "success");
+  };
+
+  return (
+    <div className="settings-panel">
+      <div className="sp-hd">
+        <h3>Add-on Charges</h3>
+        <button
+          className="btn btn-primary btn-sm"
+          onClick={() => {
+            setEditing(null);
+            setAddOpen((v) => !v);
+          }}
+        >
+          {addOpen ? "Close" : "Add Item"}
+        </button>
+      </div>
+      <div className="sp-body">
+        <p style={{ fontSize: 12, color: "var(--t3)", marginBottom: 14 }}>
+          Items offered in the Add-on Charges section of a booking. Amount and GST
+          are entered per booking. Reports Under decides which column the charge
+          appears in on the Revenue Register.
+        </p>
+
+        {addOpen && (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 200px auto auto",
+              gap: 10,
+              alignItems: "end",
+              padding: 12,
+              background: "var(--surf2)",
+              border: "1px solid var(--bd)",
+              borderRadius: "var(--r2)",
+              marginBottom: 14,
+            }}
+          >
+            <div className="field">
+              <label>Name</label>
+              <input
+                type="text"
+                placeholder="e.g. Spa Charges"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") onAdd();
+                  if (e.key === "Escape") resetAdd();
+                }}
+                autoFocus
+              />
+            </div>
+            <div className="field">
+              <label>Reports Under</label>
+              <select
+                value={newHead}
+                onChange={(e) => setNewHead(e.target.value as ChargeHead)}
+              >
+                {CHARGE_HEADS.map((c) => (
+                  <option key={c.head} value={c.head}>{c.label}</option>
+                ))}
+              </select>
+            </div>
+            <button className="btn btn-primary btn-sm" onClick={onAdd}>Add</button>
+            <button className="btn btn-ghost btn-sm" onClick={resetAdd}>Cancel</button>
+          </div>
+        )}
+
+        <table className="pricing-tbl">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th style={{ width: 220 }}>Reports Under</th>
+              <th style={{ width: 160, textAlign: "right" }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {addOnCategories.length === 0 ? (
+              <tr>
+                <td colSpan={3}>
+                  <div className="empty-state" style={{ padding: 24 }}>
+                    <p>No add-on charges yet</p>
+                  </div>
+                </td>
+              </tr>
+            ) : (
+              addOnCategories.map((cat) =>
+                editing?.id === cat.id ? (
+                  <tr key={cat.id}>
+                    <td>
+                      <input
+                        type="text"
+                        value={editing.name}
+                        onChange={(e) =>
+                          setEditing({ ...editing, name: e.target.value })
+                        }
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") onSaveEdit();
+                          if (e.key === "Escape") setEditing(null);
+                        }}
+                        autoFocus
+                      />
+                    </td>
+                    <td>
+                      <select
+                        value={editing.head}
+                        onChange={(e) =>
+                          setEditing({ ...editing, head: e.target.value as ChargeHead })
+                        }
+                      >
+                        {CHARGE_HEADS.map((c) => (
+                          <option key={c.head} value={c.head}>{c.label}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                      <button className="btn btn-primary btn-xs" onClick={onSaveEdit}>
+                        Save
+                      </button>
+                      <button
+                        className="btn btn-ghost btn-xs"
+                        style={{ marginLeft: 6 }}
+                        onClick={() => setEditing(null)}
+                      >
+                        Cancel
+                      </button>
+                    </td>
+                  </tr>
+                ) : (
+                  <tr key={cat.id}>
+                    <td style={{ fontWeight: 500 }}>{cat.name}</td>
+                    <td>{headLabel(cat.head)}</td>
+                    <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                      <button
+                        className="btn btn-ghost btn-xs"
+                        onClick={() => {
+                          setAddOpen(false);
+                          setEditing({ ...cat });
+                        }}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        className="btn btn-ghost btn-xs"
+                        style={{ marginLeft: 6 }}
+                        onClick={() => onRemove(cat)}
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                )
+              )
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function SpecialDaysTab() {
   const { specialDays, addSpecialDay, removeSpecialDay, showNotif } = useApp();
   const [addOpen, setAddOpen] = useState(false);
