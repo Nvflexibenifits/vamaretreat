@@ -240,6 +240,28 @@ export function getBookingPricingRows(b: Booking): PricingRow[] {
   );
 }
 
+// Whether a booking's charges belong in revenue reporting. A stay that has
+// checked out is the most realised revenue there is, so Completed counts just
+// as Confirmed does; Cancelled counts because a cancellation can still retain
+// a charge or a credit note. Tentative / Enquiry / Lost are not earned yet.
+// Credit-note value redeemed against a booking. Recorded as a payment with
+// mode "Credit Note"; the creditNoteApplied field is the older shape.
+export function creditNoteRedeemed(b: Booking): number {
+  const fromPayments = (b.payments ?? [])
+    .filter((p) => (p.mode || "").toLowerCase().includes("credit note"))
+    .reduce((s, p) => s + p.amount, 0);
+  if (fromPayments > 0) return fromPayments;
+  return b.creditNoteApplied?.amount ?? 0;
+}
+
+export function countsAsRevenue(b: Booking): boolean {
+  return (
+    b.status === "Confirmed" ||
+    b.status === "Completed" ||
+    b.status === "Cancelled"
+  );
+}
+
 // Add-on categories offered on the booking form, mapped to the revenue head
 // each one reports under.
 const ADD_ON_CATEGORY_HEADS: Record<string, ChargeHead> = {
@@ -265,6 +287,9 @@ export function extraHead(e: Extra): ChargeHead {
 export type BookingChargesBreakdown = {
   roomNet: number;
   mealNet: number;
+  // Credit-note value redeemed against this booking. Already netted out of
+  // every figure below — carried here only so the register can show it.
+  creditNoteUsed: number;
   // Every non-room/meal charge: the itemised add-ons plus the unnamed legacy
   // remainder. Kept as the aggregate so callers that report a single Other
   // figure (dashboard card, waive-off caps) stay correct.
@@ -289,7 +314,7 @@ export function bookingChargesBreakdown(b: Booking): BookingChargesBreakdown {
   const isRefundCancel =
     b.status === "Cancelled" && b.cancellationDetails?.resolution === "refund";
   if (isRefundCancel) {
-    return { roomNet: 0, mealNet: 0, other: 0, otherByItem: {}, gst5: 0, gst18: 0, gstOther: 0 };
+    return { roomNet: 0, mealNet: 0, creditNoteUsed: 0, other: 0, otherByItem: {}, gst5: 0, gst18: 0, gstOther: 0 };
   }
 
   const pricingRows = getBookingPricingRows(b);
@@ -379,7 +404,26 @@ export function bookingChargesBreakdown(b: Booking): BookingChargesBreakdown {
   gst18 = Math.max(0, gst18);
   gstOther = Math.max(0, gstOther);
 
-  return { roomNet, mealNet, other, otherByItem, gst5, gst18, gstOther };
+  // A redeemed credit note was already recognised as revenue on the booking
+  // that issued it, so this booking only earns what it charges beyond the
+  // note. Scale every head — and its GST — by the same factor, so the split
+  // across room / meal / each add-on item stays true to the booking's own mix.
+  const creditNoteUsed = creditNoteRedeemed(b);
+  if (creditNoteUsed > 0) {
+    const grossValue = b.grandTotal - (b.waiveOff?.totalGross ?? 0);
+    const factor = grossValue > 0 ? Math.max(0, 1 - creditNoteUsed / grossValue) : 0;
+    roomNet *= factor;
+    mealNet *= factor;
+    other *= factor;
+    gst5 *= factor;
+    gst18 *= factor;
+    gstOther *= factor;
+    Object.keys(otherByItem).forEach((k) => {
+      otherByItem[k] *= factor;
+    });
+  }
+
+  return { roomNet, mealNet, creditNoteUsed, other, otherByItem, gst5, gst18, gstOther };
 }
 
 // ─────── ROOM ALLOCATION ───────

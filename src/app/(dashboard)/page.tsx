@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { addDays, bookingChargesBreakdown, findAvailableRoomIds, fmt, fmtIN, formatLongDate, nightsBetween, sevenDaysFrom, todayStr, weekRange } from "@/lib/utils";
+import { addDays, bookingChargesBreakdown, countsAsRevenue, findAvailableRoomIds, fmt, fmtIN, formatLongDate, nightsBetween, sevenDaysFrom, todayStr, weekRange } from "@/lib/utils";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -24,7 +24,7 @@ export default function DashboardPage() {
   const [foFilter, setFoFilter] = useState<"today" | "tomorrow" | "custom">("today");
   const [foCustomDate, setFoCustomDate] = useState("");
   // Front Office dashboard tabs: guest movement tables vs daily summaries
-  const [foTab, setFoTab] = useState<"movement" | "summary">("movement");
+  const [foTab, setFoTab] = useState<"movement" | "summary" | "meals" | "mealguests">("movement");
   // Room Availability: This Week / Next Week / custom Date Range tabs
   const [weekTab, setWeekTab] = useState<"this" | "next" | "range">("this");
   const [rangeStart, setRangeStart] = useState("");
@@ -35,13 +35,13 @@ export default function DashboardPage() {
 
   // ───── Revenue ─────
   // Mirrors the Revenue Register's Total Charges for the current month:
-  // net charges excluding GST for Confirmed + Cancelled bookings checking in
-  // this month, so the two screens always show the same number.
+  // net charges excluding GST for revenue-bearing bookings checking in this
+  // month, so the two screens always show the same number.
   const revData = useMemo(() => {
     if (!today) return { total: 0 };
     const month = today.slice(0, 7);
     const total = bookings
-      .filter((b) => b.status === "Confirmed" || b.status === "Cancelled")
+      .filter(countsAsRevenue)
       .filter((b) => b.checkin.startsWith(month))
       .reduce((s, b) => {
         const c = bookingChargesBreakdown(b);
@@ -161,12 +161,12 @@ export default function DashboardPage() {
     const segFor = (b: Bkg) => b.segments?.find((s) => s.checkin <= d && d < s.checkout);
     const adultsOf = (b: Bkg) => segFor(b)?.adults ?? b.adults;
     const seniorsOf = (b: Bkg) => segFor(b)?.seniors ?? b.seniors;
-    const kidsOf = (b: Bkg) => {
-      const s = segFor(b);
-      return s
-        ? s.kidsAbove10 + s.kids6to10 + s.kids2to6 + s.infantsBelow2
-        : b.kidsAbove10 + b.kids6to10 + b.kids2to6 + b.infantsBelow2;
-    };
+    // Each kid bucket separately — they carry different meal rates, so the
+    // kitchen needs them split rather than lumped into one "Kids" figure.
+    const kidsAbove10Of = (b: Bkg) => segFor(b)?.kidsAbove10 ?? b.kidsAbove10;
+    const kids6to10Of = (b: Bkg) => segFor(b)?.kids6to10 ?? b.kids6to10;
+    const kids2to6Of = (b: Bkg) => segFor(b)?.kids2to6 ?? b.kids2to6;
+    const infantsOf = (b: Bkg) => segFor(b)?.infantsBelow2 ?? b.infantsBelow2;
     const petsOf = (b: Bkg) => segFor(b)?.pets ?? b.pets;
     const driversOf = (b: Bkg) => segFor(b)?.drivers ?? b.driverCount ?? 0;
     const mealOnOf = (b: Bkg) => segFor(b)?.mealOn ?? b.mealOn;
@@ -195,11 +195,32 @@ export default function DashboardPage() {
         total: sum(active, seniorsOf),
       },
       {
-        label: "Kids",
-        rollOver: sum(rollOverBkgs, kidsOf),
-        newGuests: sum(newBkgs, kidsOf),
-        meals: sum(mealBkgs, kidsOf),
-        total: sum(active, kidsOf),
+        label: "Kids > 10",
+        rollOver: sum(rollOverBkgs, kidsAbove10Of),
+        newGuests: sum(newBkgs, kidsAbove10Of),
+        meals: sum(mealBkgs, kidsAbove10Of),
+        total: sum(active, kidsAbove10Of),
+      },
+      {
+        label: "Kids 6\u201310",
+        rollOver: sum(rollOverBkgs, kids6to10Of),
+        newGuests: sum(newBkgs, kids6to10Of),
+        meals: sum(mealBkgs, kids6to10Of),
+        total: sum(active, kids6to10Of),
+      },
+      {
+        label: "Kids 2\u20136",
+        rollOver: sum(rollOverBkgs, kids2to6Of),
+        newGuests: sum(newBkgs, kids2to6Of),
+        meals: sum(mealBkgs, kids2to6Of),
+        total: sum(active, kids2to6Of),
+      },
+      {
+        label: "Infants (< 2)",
+        rollOver: sum(rollOverBkgs, infantsOf),
+        newGuests: sum(newBkgs, infantsOf),
+        meals: sum(mealBkgs, infantsOf),
+        total: sum(active, infantsOf),
       },
       {
         label: "Pets",
@@ -251,6 +272,45 @@ export default function DashboardPage() {
         (b.status === "Confirmed" || b.status === "Tentative" || b.status === "Completed")
     );
   }, [bookings, foDate]);
+
+  // ───── Front Office: Meal Guest List for the selected date ─────
+  // Everyone who eats on this date: in-house guests (the same population the
+  // PAX Count table counts) plus dayout groups, who have no room but do have
+  // meals. Counts come from the segment covering the date.
+  const mealGuestList = useMemo(() => {
+    const d = foDate;
+    if (!d) return [];
+    type Bkg = (typeof bookings)[0];
+    const segFor = (b: Bkg) => b.segments?.find((s) => s.checkin <= d && d < s.checkout);
+    const rowFor = (b: Bkg, day: number, isDayout: boolean) => {
+      // A dayout has no night to cover, so its counts sit on the booking
+      const seg = isDayout ? undefined : segFor(b);
+      return {
+        b,
+        day,
+        isDayout,
+        adults: seg?.adults ?? b.adults,
+        seniors: seg?.seniors ?? b.seniors,
+        kGt10: seg?.kidsAbove10 ?? b.kidsAbove10,
+        kLe10: seg
+          ? seg.kids6to10 + seg.kids2to6 + seg.infantsBelow2
+          : b.kids6to10 + b.kids2to6 + b.infantsBelow2,
+        pets: seg?.pets ?? b.pets,
+        mealOn: seg?.mealOn ?? b.mealOn,
+      };
+    };
+    const inHouse = bookings
+      .filter(
+        (b) =>
+          (b.status === "Confirmed" || b.status === "Completed") &&
+          b.checkin <= d && b.checkout > d
+      )
+      .map((b) => rowFor(b, nightsBetween(b.checkin, d) + 1, false));
+    const dayouts = foDayouts.map((b) => rowFor(b, 1, true));
+    // Arrivals first, then longer stays, dayouts last
+    inHouse.sort((a, b) => a.day - b.day || a.b.guest.localeCompare(b.b.guest));
+    return [...inHouse, ...dayouts];
+  }, [bookings, foDate, foDayouts]);
 
   // ───── Front Office View ─────
   if (isFrontOffice) {
@@ -331,6 +391,63 @@ export default function DashboardPage() {
     const foDayLabel =
       foFilter === "today" ? "Today" : foFilter === "tomorrow" ? "Tomorrow" : fmtIN(foDate);
 
+    // Dayouts table — same markup on Guest Movement and Meal Summary
+    const dayoutTable = (
+      <div className="tbl-wrap" style={{ marginBottom: 24 }}>
+        <div className="tbl-hd">
+          <h3>Dayout&apos;s &mdash; {foDayouts.length}</h3>
+        </div>
+        <table>
+          <thead>{foTblHead}</thead>
+          <tbody>
+            {foDayouts.length === 0 ? (
+              <tr><td colSpan={14}><div className="empty-state"><h3>No dayouts</h3><p>No same-day guests on this date</p></div></td></tr>
+            ) : (
+              <>
+                {foDayouts.map((b, i) => foRow(b, 1, i))}
+                {foTotalsRow(paxTotals(foDayouts), "Total Dayout Pax")}
+              </>
+            )}
+          </tbody>
+        </table>
+      </div>
+    );
+
+    // Both readings of "total yes / total no": how many groups, and how many
+    // heads those groups carry (pets excluded — they don't take meals).
+    const headsOf = (r: (typeof mealGuestList)[number]) =>
+      r.adults + r.seniors + r.kGt10 + r.kLe10;
+    const yesRows = mealGuestList.filter((r) => r.mealOn);
+    const noRows = mealGuestList.filter((r) => !r.mealOn);
+    const mealYes = yesRows.length;
+    const mealNo = noRows.length;
+    const mealYesPax = yesRows.reduce((s, r) => s + headsOf(r), 0);
+    const mealNoPax = noRows.reduce((s, r) => s + headsOf(r), 0);
+
+    const exportMealGuestList = () => {
+      const headers = [
+        "Sl.", "Guest Name", "Mobile", "C-in", "C-out", "Day", "Room No's",
+        "AD", "Sr.Ct", "K>10", "K<=10", "Pets", "Meals",
+      ];
+      const lines = mealGuestList.map((r, i) => [
+        i + 1, r.b.guest, r.b.mobile, fmtIN(r.b.checkin), fmtIN(r.b.checkout), r.day,
+        r.isDayout ? "Dayout" : r.b.allocatedRooms.join(" / ") || "—",
+        r.adults, r.seniors, r.kGt10, r.kLe10, r.pets, r.mealOn ? "Yes" : "No",
+      ]);
+      lines.push(["", "Meals — Yes", `${mealYes} bookings`, `${mealYesPax} pax`, "", "", "", "", "", "", "", "", ""]);
+      lines.push(["", "Meals — No", `${mealNo} bookings`, `${mealNoPax} pax`, "", "", "", "", "", "", "", "", ""]);
+      const csv = [headers, ...lines]
+        .map((cols) => cols.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
+        .join("\n");
+      const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `meal_guest_list_${foDate}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    };
+
     return (
       <div className="view">
         {/* Tabs */}
@@ -346,6 +463,18 @@ export default function DashboardPage() {
             onClick={() => setFoTab("summary")}
           >
             Room &amp; Pax Summary
+          </button>
+          <button
+            className={`btn btn-sm${foTab === "meals" ? " btn-primary" : " btn-ghost"}`}
+            onClick={() => setFoTab("meals")}
+          >
+            Meal Summary
+          </button>
+          <button
+            className={`btn btn-sm${foTab === "mealguests" ? " btn-primary" : " btn-ghost"}`}
+            onClick={() => setFoTab("mealguests")}
+          >
+            Meal Guest List
           </button>
         </div>
 
@@ -435,24 +564,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Dayouts — same-day bookings, meals without a room */}
-        <div className="tbl-wrap" style={{ marginBottom: 24 }}>
-          <div className="tbl-hd">
-            <h3>Dayout&apos;s &mdash; {foDayouts.length}</h3>
-          </div>
-          <table>
-            <thead>{foTblHead}</thead>
-            <tbody>
-              {foDayouts.length === 0 ? (
-                <tr><td colSpan={14}><div className="empty-state"><h3>No dayouts</h3><p>No same-day guests on this date</p></div></td></tr>
-              ) : (
-                <>
-                  {foDayouts.map((b, i) => foRow(b, 1, i))}
-                  {foTotalsRow(paxTotals(foDayouts), "Total Dayout Pax")}
-                </>
-              )}
-            </tbody>
-          </table>
-        </div>
+        {dayoutTable}
         </>
         )}
 
@@ -616,6 +728,202 @@ export default function DashboardPage() {
           </table>
         </div>
         </>
+        )}
+
+        {foTab === "meals" && (
+        <>
+        {/* PAX Count with the No Meals split */}
+        <div className="tbl-wrap" style={{ marginBottom: 16 }}>
+          <div className="tbl-hd">
+            <h3>Meal Summary &mdash; {foDayLabel}</h3>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Guest Category</th>
+                <th style={{ textAlign: "center" }}>Roll Over Guests</th>
+                <th style={{ textAlign: "center" }}>New Guests</th>
+                <th style={{ textAlign: "center" }}>Total</th>
+                <th style={{ textAlign: "center" }}>Meals</th>
+                <th style={{ textAlign: "center" }}>No Meals</th>
+              </tr>
+            </thead>
+            <tbody>
+              {guestPaxToday.length === 0 ? (
+                <tr>
+                  <td colSpan={6}>
+                    <div className="empty-state">
+                      <h3>No guests</h3>
+                      <p>No confirmed or completed bookings are active on this date</p>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                <>
+                  {guestPaxToday.map((row) => {
+                    const isPets = row.label === "Pets";
+                    const noMeals = Math.max(0, row.total - row.meals);
+                    return (
+                      <tr key={row.label}>
+                        <td style={{ fontWeight: 500, color: "var(--t1)" }}>{row.label}</td>
+                        <td style={{ textAlign: "center" }}>
+                          {row.rollOver > 0 ? (
+                            <span style={{ fontWeight: 600, color: "var(--t1)" }}>{row.rollOver}</span>
+                          ) : (
+                            <span style={{ color: "var(--t4)" }}>—</span>
+                          )}
+                        </td>
+                        <td style={{ textAlign: "center" }}>
+                          {row.newGuests > 0 ? (
+                            <span style={{ fontWeight: 600, color: "var(--grn)" }}>{row.newGuests}</span>
+                          ) : (
+                            <span style={{ color: "var(--t4)" }}>—</span>
+                          )}
+                        </td>
+                        <td style={{ textAlign: "center" }}>
+                          <span style={{ fontWeight: 700, color: "var(--t1)" }}>{row.total}</span>
+                        </td>
+                        <td style={{ textAlign: "center" }}>
+                          {isPets ? (
+                            <span style={{ color: "var(--t4)" }}>—</span>
+                          ) : row.meals > 0 ? (
+                            <span style={{ fontWeight: 600, color: "var(--amb)" }}>{row.meals}</span>
+                          ) : (
+                            <span style={{ color: "var(--t4)" }}>0</span>
+                          )}
+                        </td>
+                        <td style={{ textAlign: "center" }}>
+                          {isPets ? (
+                            <span style={{ color: "var(--t4)" }}>—</span>
+                          ) : noMeals > 0 ? (
+                            <span style={{ fontWeight: 600, color: "var(--red)" }}>{noMeals}</span>
+                          ) : (
+                            <span style={{ color: "var(--t4)" }}>0</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  <tr style={{ background: "var(--surf2)", fontWeight: 700 }}>
+                    <td style={{ color: "var(--t1)" }}>Total</td>
+                    <td style={{ textAlign: "center", color: "var(--t1)" }}>
+                      {guestPaxToday.reduce((s, r) => s + r.rollOver, 0)}
+                    </td>
+                    <td style={{ textAlign: "center", color: "var(--grn)" }}>
+                      {guestPaxToday.reduce((s, r) => s + r.newGuests, 0)}
+                    </td>
+                    <td style={{ textAlign: "center", color: "var(--t1)" }}>
+                      {guestPaxToday.reduce((s, r) => s + r.total, 0)}
+                    </td>
+                    <td style={{ textAlign: "center", color: "var(--amb)" }}>
+                      {guestPaxToday.reduce((s, r) => s + r.meals, 0)}
+                    </td>
+                    <td style={{ textAlign: "center", color: "var(--red)" }}>
+                      {guestPaxToday
+                        .filter((r) => r.label !== "Pets")
+                        .reduce((s, r) => s + Math.max(0, r.total - r.meals), 0)}
+                    </td>
+                  </tr>
+                </>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Dayouts — same-day guests eat without occupying a room */}
+        {dayoutTable}
+        </>
+        )}
+
+        {foTab === "mealguests" && (
+        <div className="tbl-wrap" style={{ marginBottom: 24 }}>
+          <div className="tbl-hd" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            <h3>Meal Guest List &mdash; {mealGuestList.length}</h3>
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={exportMealGuestList}
+              disabled={mealGuestList.length === 0}
+            >
+              Download CSV
+            </button>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th style={{ width: 36, textAlign: "center" }}>Sl.</th>
+                <th>Guest Name</th>
+                <th style={{ whiteSpace: "nowrap", width: 92 }}>C-in</th>
+                <th style={{ whiteSpace: "nowrap", width: 92 }}>C-out</th>
+                <th style={{ textAlign: "center", width: 48 }}>Day</th>
+                <th>Room No&apos;s</th>
+                <th style={{ textAlign: "center", width: 44 }}>AD</th>
+                <th style={{ textAlign: "center", width: 52 }}>Sr.Ct</th>
+                <th style={{ textAlign: "center", width: 52 }}>K&gt;10</th>
+                <th style={{ textAlign: "center", width: 56 }}>K&le;10</th>
+                <th style={{ textAlign: "center", width: 48 }}>Pets</th>
+                <th style={{ textAlign: "center", width: 60 }}>Meals</th>
+              </tr>
+            </thead>
+            <tbody>
+              {mealGuestList.length === 0 ? (
+                <tr>
+                  <td colSpan={12}>
+                    <div className="empty-state">
+                      <h3>No guests</h3>
+                      <p>Nobody is in-house or on a dayout for this date</p>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                <>
+                  {mealGuestList.map((r, i) => (
+                    <tr key={r.b.id}>
+                      <td style={{ textAlign: "center", color: "var(--t3)", fontSize: 11 }}>{i + 1}</td>
+                      <td>
+                        <div style={{ fontWeight: 500, color: "var(--t1)" }}>{r.b.guest}</div>
+                        <div style={{ fontSize: 11, color: "var(--t3)" }}>{r.b.mobile}</div>
+                      </td>
+                      <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{fmtIN(r.b.checkin)}</td>
+                      <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{fmtIN(r.b.checkout)}</td>
+                      <td style={{ textAlign: "center", fontWeight: 600 }}>{r.day}</td>
+                      <td style={{ fontSize: 12, color: "var(--t2)" }}>
+                        {r.isDayout ? "Dayout" : r.b.allocatedRooms.join(", ") || "—"}
+                      </td>
+                      <td style={{ textAlign: "center" }}>{r.adults || "—"}</td>
+                      <td style={{ textAlign: "center" }}>{r.seniors || "—"}</td>
+                      <td style={{ textAlign: "center" }}>{r.kGt10 || "—"}</td>
+                      <td style={{ textAlign: "center" }}>{r.kLe10 || "—"}</td>
+                      <td style={{ textAlign: "center" }}>{r.pets || "—"}</td>
+                      <td style={{ textAlign: "center" }}>
+                        <span style={{ fontWeight: 600, color: r.mealOn ? "var(--grn)" : "var(--t3)" }}>
+                          {r.mealOn ? "Yes" : "No"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                  <tr style={{ background: "var(--surf2)", fontWeight: 700 }}>
+                    <td colSpan={11} style={{ textAlign: "right", color: "var(--t1)" }}>
+                      Meals &mdash; Yes
+                      <span style={{ fontWeight: 500, color: "var(--t3)", marginLeft: 8 }}>
+                        ({mealYesPax} pax)
+                      </span>
+                    </td>
+                    <td style={{ textAlign: "center", color: "var(--grn)" }}>{mealYes}</td>
+                  </tr>
+                  <tr style={{ background: "var(--surf2)", fontWeight: 700 }}>
+                    <td colSpan={11} style={{ textAlign: "right", color: "var(--t1)" }}>
+                      Meals &mdash; No
+                      <span style={{ fontWeight: 500, color: "var(--t3)", marginLeft: 8 }}>
+                        ({mealNoPax} pax)
+                      </span>
+                    </td>
+                    <td style={{ textAlign: "center", color: "var(--t3)" }}>{mealNo}</td>
+                  </tr>
+                </>
+              )}
+            </tbody>
+          </table>
+        </div>
         )}
       </div>
     );

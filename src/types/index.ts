@@ -413,6 +413,20 @@ export type BulkRoomBlockRow = {
   roomIds: string[];
 };
 
+// Guest counts on a room-chart block, using the same buckets as a booking so
+// the two screens ask for the same thing. `pax` on the block stays as the
+// derived head count for legacy blocks and compact displays.
+export type BlockGuestCounts = {
+  adults: number;
+  seniors: number;
+  kidsAbove10: number;
+  kids6to10: number;
+  kids2to6: number;
+  infantsBelow2: number;
+  pets: number;
+  drivers: number;
+};
+
 export type BulkRoomBlock = {
   id: string;
   label: string;
@@ -420,6 +434,8 @@ export type BulkRoomBlock = {
   checkin: string;
   checkout: string;
   pax: number;
+  // Absent on blocks saved before the breakdown existed — `pax` is all there is
+  guests?: BlockGuestCounts;
   amount: number;
   status: "Tentative" | "Confirmed" | "Maintenance";
   // Maintenance blocks only — why the rooms are out of service
@@ -436,6 +452,7 @@ export type VenueBlock = {
   checkout: string;
   name: string;
   pax: number;
+  guests?: BlockGuestCounts;
   amount: number;
   status?: "Tentative" | "Confirmed" | "Maintenance";
   // Maintenance blocks only — why the venue is out of service

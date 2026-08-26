@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "@/lib/store";
 import { blockOccupancyEnd, compareRoomLabels, findAvailableRoomIds, fmt, fmtIN, roomsHeldOnDate, sortRoomInventory, todayStr } from "@/lib/utils";
 import type {
+  BlockGuestCounts,
   Booking,
   BulkRoomBlock,
   BulkRoomBlockRow,
@@ -43,6 +44,68 @@ function addDays(dateStr: string, n: number): string {
   const d = new Date(dateStr);
   d.setDate(d.getDate() + n);
   return d.toISOString().split("T")[0];
+}
+
+// PAX Count buckets, identical to the booking form's — a block should ask for
+// guests the same way a booking does.
+const GUEST_FIELDS = [
+  { label: "Adults", field: "adults" as const, min: 0 },
+  { label: "Sr. Citizens", field: "seniors" as const, min: 0 },
+  { label: "Kids > 10", field: "kidsAbove10" as const, min: 0 },
+  { label: "Kids 6\u201310", field: "kids6to10" as const, min: 0 },
+  { label: "Kids 2\u20136", field: "kids2to6" as const, min: 0 },
+  { label: "Infants (< 2)", field: "infantsBelow2" as const, min: 0 },
+  { label: "Pets", field: "pets" as const, min: 0 },
+  { label: "Drivers", field: "drivers" as const, min: 0 },
+];
+
+type GuestField = (typeof GUEST_FIELDS)[number]["field"];
+
+const EMPTY_GUESTS: Record<GuestField, string> = {
+  adults: "", seniors: "", kidsAbove10: "", kids6to10: "",
+  kids2to6: "", infantsBelow2: "", pets: "", drivers: "",
+};
+
+// Numbers off the form, plus the head count they add up to. Pets and drivers
+// are tracked but don't count as pax, same rule as the booking form.
+function guestsFromForm(g: Record<GuestField, string>): { guests: BlockGuestCounts; pax: number } {
+  const n = (v: string) => parseInt(v) || 0;
+  const guests: BlockGuestCounts = {
+    adults: n(g.adults),
+    seniors: n(g.seniors),
+    kidsAbove10: n(g.kidsAbove10),
+    kids6to10: n(g.kids6to10),
+    kids2to6: n(g.kids2to6),
+    infantsBelow2: n(g.infantsBelow2),
+    pets: n(g.pets),
+    drivers: n(g.drivers),
+  };
+  const pax =
+    guests.adults + guests.seniors + guests.kidsAbove10 +
+    guests.kids6to10 + guests.kids2to6 + guests.infantsBelow2;
+  return { guests, pax };
+}
+
+// Load a saved block back into the form. Blocks saved before the breakdown
+// existed only have a head count — keep it visible by seeding Adults with it.
+function guestsToForm(guests: BlockGuestCounts | undefined, pax: number): Record<GuestField, string> {
+  if (!guests) {
+    return pax > 0 ? { ...EMPTY_GUESTS, adults: String(pax) } : { ...EMPTY_GUESTS };
+  }
+  const out = { ...EMPTY_GUESTS };
+  (Object.keys(EMPTY_GUESTS) as GuestField[]).forEach((k) => {
+    out[k] = guests[k] ? String(guests[k]) : "";
+  });
+  return out;
+}
+
+// "8 Adults, 2 Kids 6-10, 1 Pet" — only the buckets that carry a count.
+function guestSummary(guests: BlockGuestCounts | undefined, pax: number): string {
+  if (!guests) return pax > 0 ? `${pax} pax` : "";
+  const parts = GUEST_FIELDS
+    .filter(({ field }) => guests[field] > 0)
+    .map(({ label, field }) => `${guests[field]} ${label}`);
+  return parts.join(", ");
 }
 
 function nightsBetween(checkin: string, checkout: string): number {
@@ -116,7 +179,8 @@ export default function RoomChartPage() {
   const [uName, setUName] = useState("");
   const [uCheckin, setUCheckin] = useState("");
   const [uCheckout, setUCheckout] = useState("");
-  const [uPax, setUPax] = useState("");
+  // Guest counts on the block, mirroring the booking form's PAX Count buckets
+  const [uGuests, setUGuests] = useState<Record<GuestField, string>>(EMPTY_GUESTS);
   const [uAmount, setUAmount] = useState("");
   const [uBulkOpen, setUBulkOpen] = useState(false);
   const [uCatRows, setUCatRows] = useState<BulkCatRow[]>([{ catId: "", count: 1 }]);
@@ -391,7 +455,7 @@ export default function RoomChartPage() {
     setUName("");
     setUCheckin(t);
     setUCheckout(addDays(t, 1));
-    setUPax("");
+    setUGuests({ ...EMPTY_GUESTS });
     setUAmount("");
     setUBulkOpen(false);
     setUCatRows([{ catId: "", count: 1 }]);
@@ -425,7 +489,7 @@ export default function RoomChartPage() {
     setUName(block.name);
     setUCheckin(block.checkin);
     setUCheckout(block.checkout);
-    setUPax(String(block.pax || ""));
+    setUGuests(guestsToForm(block.guests, block.pax || 0));
     setUAmount(String(block.amount || ""));
     setUVenueOpen(true);
     setUVenueIds([block.venueId]);
@@ -452,7 +516,7 @@ export default function RoomChartPage() {
     setUName(blk.guestName);
     setUCheckin(blk.checkin);
     setUCheckout(blk.checkout);
-    setUPax(String(blk.pax || ""));
+    setUGuests(guestsToForm(blk.guests, blk.pax || 0));
     setUAmount(String(blk.amount || ""));
     setUBulkOpen(true);
     setUCatRows(blk.rows.map((r) => ({ catId: r.catId, count: r.roomIds.length })));
@@ -626,7 +690,7 @@ export default function RoomChartPage() {
     if (!uCheckin || !uCheckout || uCheckout < uCheckin) { showNotif("Pick valid check-in and check-out dates", "error"); return; }
     if (!uBulkOpen && !uVenueOpen) { showNotif("Expand at least one section — Bulk Rooms or Venue", "error"); return; }
 
-    const pax = parseInt(uPax) || 0;
+    const { guests, pax } = guestsFromForm(uGuests);
     const amount = parseFloat(uAmount) || 0;
     const editingBulkId = unifiedModal.open ? unifiedModal.editingBulkId : undefined;
     const editingVenueId = unifiedModal.open ? unifiedModal.editingVenueId : undefined;
@@ -646,12 +710,12 @@ export default function RoomChartPage() {
       // venue block so hover cards don't repeat it per venue.
       const mkVenueBlock = (venueId: string, amt: number): VenueBlock => ({
         id: uid(), venueId, checkin: uCheckin, checkout: uCheckout,
-        name: uName.trim(), pax, amount: amt, status,
+        name: uName.trim(), pax, guests, amount: amt, status,
         createdBy: currentUser, createdAt: todayStr(),
       });
       if (editingVenueId) {
         const [first, ...rest] = venueIds;
-        updateVenueBlock(editingVenueId, { venueId: first, checkin: uCheckin, checkout: uCheckout, name: uName.trim(), pax, amount, status });
+        updateVenueBlock(editingVenueId, { venueId: first, checkin: uCheckin, checkout: uCheckout, name: uName.trim(), pax, guests, amount, status });
         rest.forEach((vid) => addVenueBlock(mkVenueBlock(vid, 0)));
       } else {
         venueIds.forEach((vid, i) => addVenueBlock(mkVenueBlock(vid, i === 0 ? amount : 0)));
@@ -685,6 +749,7 @@ export default function RoomChartPage() {
         checkin: uCheckin,
         checkout: uCheckout,
         pax,
+        guests,
         amount,
         status,
         rows,
@@ -1677,12 +1742,32 @@ export default function RoomChartPage() {
                 <div className="field-hint">Same as check-in for a dayout (blocks that date)</div>
               </div>
               <div className="field">
-                <label>Pax</label>
-                <input type="number" value={uPax} min={0} onChange={(e) => setUPax(e.target.value)} placeholder="0" />
-              </div>
-              <div className="field">
                 <label>Amount (₹)</label>
                 <input type="number" value={uAmount} min={0} onChange={(e) => setUAmount(e.target.value)} placeholder="0" />
+              </div>
+            </div>
+
+            {/* Guest counts — same buckets as a booking */}
+            <div style={{ marginTop: 12, padding: "10px 12px", background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r2)" }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", marginBottom: 7, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                PAX Count
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                {GUEST_FIELDS.map(({ label, field, min }) => (
+                  <div key={field} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+                    <span style={{ fontSize: 10, color: "var(--t3)", fontWeight: 500, whiteSpace: "nowrap" }}>{label}</span>
+                    <input
+                      type="number"
+                      value={uGuests[field]}
+                      min={min}
+                      placeholder="0"
+                      onChange={(e) =>
+                        setUGuests((prev) => ({ ...prev, [field]: e.target.value }))
+                      }
+                      style={{ width: 52, padding: "4px 6px", border: "1px solid var(--bd)", borderRadius: "var(--r3)", fontSize: 13, textAlign: "center", background: "var(--surf)", outline: "none" }}
+                    />
+                  </div>
+                ))}
               </div>
             </div>
 
@@ -1914,7 +1999,9 @@ export default function RoomChartPage() {
                   ? `${fmtIN(bulkDetail.checkin)} · Dayout (same-day)`
                   : `${fmtIN(bulkDetail.checkin)} → ${fmtIN(bulkDetail.checkout)}`}
               </div>
-              {bulkDetail.pax > 0 && <div style={{ marginTop: 4 }}>{bulkDetail.pax} pax</div>}
+              {guestSummary(bulkDetail.guests, bulkDetail.pax) && (
+                <div style={{ marginTop: 4 }}>{guestSummary(bulkDetail.guests, bulkDetail.pax)}</div>
+              )}
               {bulkDetail.amount > 0 && <div style={{ marginTop: 4 }}>{fmt(bulkDetail.amount)}</div>}
             </div>
             <div style={{ marginTop: 10 }}>
@@ -2084,7 +2171,6 @@ function BookingHoverCard({
       (booking.kids6to10 || 0) +
       (booking.kids2to6 || 0) +
       (booking.infantsBelow2 || 0);
-  const pax = adults + kids + seniors;
 
   const cardW = 260;
   const { top, left, placeAbove } = positionForCard(rect, cardW);
@@ -2141,15 +2227,13 @@ function BookingHoverCard({
         </span>
       </div>
       <div style={{ fontSize: 11, color: "var(--t3)", marginBottom: 8 }}>
-        {booking.id} · {fmtIN(booking.checkin)} to {fmtIN(booking.checkout)} ·{" "}
-        {booking.nights} {booking.nights === 1 ? "night" : "nights"}
+        {booking.id} · {fmtIN(booking.checkin)} to {fmtIN(booking.checkout)}
       </div>
 
       <div style={{ fontSize: 10, color: "var(--t3)", marginBottom: 4, fontWeight: 600 }}>
         Guests on {fmtIN(date)}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-        <HoverRow label="Pax" value={String(pax)} />
         <HoverRow label="Adults" value={String(adults)} />
         <HoverRow label="Kids" value={String(kids)} />
         <HoverRow label="Sr. Citizens" value={String(seniors)} />
@@ -2274,11 +2358,15 @@ function VenueHoverCard({
         ) : null
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-          <HoverRow label="Pax" value={String(block.pax || 0)} />
           <HoverRow
             label="Amount"
             value={block.amount > 0 ? fmt(block.amount) : "—"}
           />
+        </div>
+      )}
+      {!isMaint && guestSummary(block.guests, block.pax) && (
+        <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 6 }}>
+          {guestSummary(block.guests, block.pax)}
         </div>
       )}
 
@@ -2344,6 +2432,11 @@ function BulkHoverCard({ block, rect, rooms }: { block: BulkRoomBlock; rect: DOM
       <div style={{ fontSize: 11, color: "var(--t3)", marginBottom: 6 }}>
         {totalRooms} room{totalRooms !== 1 ? "s" : ""} · {block.rows.map((r) => `${r.roomIds.length} ${rooms.find((rm) => rm.id === r.catId)?.name ?? r.catName}`).join(", ")}
       </div>
+      {!isMaint && guestSummary(block.guests, block.pax) && (
+        <div style={{ fontSize: 11, color: "var(--t3)", marginBottom: 6 }}>
+          {guestSummary(block.guests, block.pax)}
+        </div>
+      )}
       <div style={{ marginTop: 8, fontSize: 10, color: "var(--t3)", textAlign: "right" }}>Click to view / edit / delete</div>
     </div>
   );

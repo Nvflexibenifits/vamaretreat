@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { bookingChargesBreakdown, fmt, todayStr } from "@/lib/utils";
+import { bookingChargesBreakdown, countsAsRevenue, fmt, todayStr } from "@/lib/utils";
 
 // dd/mm/yy
 function fmtShort(d: string): string {
@@ -65,10 +65,10 @@ export default function RevenuePage() {
     });
   }, [today]);
 
-  // Only Confirmed + Cancelled count as revenue
+  // Confirmed, Completed and Cancelled count as revenue — see countsAsRevenue
   const tableRows = useMemo(() => {
     return bookings
-      .filter((b) => b.status === "Confirmed" || b.status === "Cancelled")
+      .filter(countsAsRevenue)
       .filter((b) => {
         if (search.trim()) {
           const q = search.toLowerCase();
@@ -85,7 +85,7 @@ export default function RevenuePage() {
         // cancellation charge, if any, is kept). Credit-note cancellations
         // keep full revenue: no money leaves, the stay obligation remains.
         const isRefundCancel = isCancelled && b.cancellationDetails?.resolution === "refund";
-        const { roomNet, mealNet, other, otherByItem, gst5, gst18, gstOther } = bookingChargesBreakdown(b);
+        const { roomNet, mealNet, creditNoteUsed, other, otherByItem, gst5, gst18, gstOther } = bookingChargesBreakdown(b);
         // Value a cancelled booking actually keeps: cancellation charge
         // retained plus any credit note issued (the CN worth stays with the
         // hotel; the uncollected balance never arrives).
@@ -93,7 +93,11 @@ export default function RevenuePage() {
           ? (b.cancellationDetails?.cancellationCharge ?? 0) + (b.cancellationDetails?.creditNoteAmount ?? 0)
           : 0;
         // A waive-off writes the unpaid balance out of the booking's value
-        const total = isRefundCancel ? retained : b.grandTotal - (b.waiveOff?.totalGross ?? 0);
+        // Net of the redeemed credit note — that value was already earned on
+        // the booking that issued the note.
+        const total = isRefundCancel
+          ? retained
+          : b.grandTotal - (b.waiveOff?.totalGross ?? 0) - creditNoteUsed;
 
         // OTA deductions by type (amount + its GST — both withheld)
         let dedCommission = 0, dedTds = 0, dedSpecial = 0;
@@ -114,7 +118,9 @@ export default function RevenuePage() {
         });
         // Legacy bookings may carry an advance without itemized payments
         if (bank + cash + crNote === 0 && b.advance > 0) bank = b.advance;
-        const received = bank + cash + crNote;
+        // A credit note brings no new money in — it has already been netted
+        // off the charges above, so it must not count as a receipt too.
+        const received = bank + cash;
 
         // Recorded refund payouts settle the refund-due balance
         const refundsPaid = isCancelled
@@ -137,7 +143,7 @@ export default function RevenuePage() {
         // waive-off hasn't been done yet; shown in red so it stands apart
         // from money actually expected from guests.
         const waivePending = isCancelled && !isRefundCancel && bal >= 1;
-        return { b, roomNet, mealNet, other, otherByItem, gst5, gst18, gstOther, total, dedCommission, dedTds, dedSpecial, bank, cash, crNote, bal, isCancelled, waivePending };
+        return { b, roomNet, mealNet, creditNoteUsed, other, otherByItem, gst5, gst18, gstOther, total, dedCommission, dedTds, dedSpecial, bank, cash, crNote, bal, isCancelled, waivePending };
       });
   }, [bookings, search, rangeFrom, rangeTo]);
 
@@ -148,6 +154,7 @@ export default function RevenuePage() {
           roomNet: t.roomNet + r.roomNet,
           mealNet: t.mealNet + r.mealNet,
           other: t.other + r.other,
+          creditNoteUsed: t.creditNoteUsed + r.creditNoteUsed,
           gst5: t.gst5 + r.gst5,
           gst18: t.gst18 + r.gst18,
           gstOther: t.gstOther + r.gstOther,
@@ -160,7 +167,7 @@ export default function RevenuePage() {
           crNote: t.crNote + r.crNote,
           bal: t.bal + r.bal,
         }),
-        { roomNet: 0, mealNet: 0, other: 0, gst5: 0, gst18: 0, gstOther: 0, total: 0, dedCommission: 0, dedTds: 0, dedSpecial: 0, bank: 0, cash: 0, crNote: 0, bal: 0 }
+        { roomNet: 0, mealNet: 0, creditNoteUsed: 0, other: 0, gst5: 0, gst18: 0, gstOther: 0, total: 0, dedCommission: 0, dedTds: 0, dedSpecial: 0, bank: 0, cash: 0, crNote: 0, bal: 0 }
       ),
     [tableRows]
   );
@@ -257,27 +264,27 @@ export default function RevenuePage() {
   const exportExcel = () => {
     const headers = [
       "SL No.", "Check-in", "Check-out", "Guest Name", "Mobile", "Booking ID", "Status",
-      "Room Charges", "Meal Charges", ...addOnCols.map((c) => c.label), "Other Charges", "GST 5%", "GST 18%", "Total Charges",
+      "Room Charges", "Meal Charges", ...addOnCols.map((c) => c.label), "Other Charges", "GST 5%", "GST 18%", "Total Charges", "Credit Note Used",
       "Commission", "TDS", "Special Discount",
-      "Received - Bank", "Received - Cash", "Credit Note", "Balance",
+      "Received - Bank", "Received - Cash", "Balance",
     ];
     const lines = tableRows.map((r, i) => [
       i + 1, fmtShort(r.b.checkin), fmtShort(r.b.checkout), r.b.guest, r.b.mobile, r.b.id, r.b.status,
       Math.round(r.roomNet), Math.round(r.mealNet),
       ...addOnCols.map((c) => Math.round(r.otherByItem[c.label] ?? 0)),
       Math.round(otherResidual(r)),
-      Math.round(r.gst5), Math.round(r.gst18), Math.round(r.total),
+      Math.round(r.gst5), Math.round(r.gst18), Math.round(r.total), Math.round(r.creditNoteUsed),
       Math.round(r.dedCommission), Math.round(r.dedTds), Math.round(r.dedSpecial),
-      Math.round(r.bank), Math.round(r.cash), Math.round(r.crNote), Math.round(r.bal),
+      Math.round(r.bank), Math.round(r.cash), Math.round(r.bal),
     ]);
     lines.push([
       "", "", "", "", "", "Total", "",
       Math.round(totals.roomNet), Math.round(totals.mealNet),
       ...addOnCols.map((c) => Math.round(c.total)),
       Math.round(totalsOtherResidual),
-      Math.round(totals.gst5), Math.round(totals.gst18), Math.round(totals.total),
+      Math.round(totals.gst5), Math.round(totals.gst18), Math.round(totals.total), Math.round(totals.creditNoteUsed),
       Math.round(totals.dedCommission), Math.round(totals.dedTds), Math.round(totals.dedSpecial),
-      Math.round(totals.bank), Math.round(totals.cash), Math.round(totals.crNote), Math.round(totals.bal),
+      Math.round(totals.bank), Math.round(totals.cash), Math.round(totals.bal),
     ]);
     const csv = [headers, ...lines]
       .map((cols) => cols.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
@@ -292,9 +299,10 @@ export default function RevenuePage() {
   };
 
   const numTd: React.CSSProperties = { textAlign: "right", whiteSpace: "nowrap", fontSize: 12 };
-  const chargesCols = 6 + addOnCols.length;
+  // Room, Meal, per-item add-ons, Other, GST 5%, GST 18%, Total, Cr Note used
+  const chargesCols = 7 + addOnCols.length;
   // booking info + charges + deductions + payments + bal + actions
-  const allCols = 5 + chargesCols + 3 + 3 + 2;
+  const allCols = 5 + chargesCols + 3 + 2 + 2;
 
   return (
     <div className="view">
@@ -362,7 +370,7 @@ export default function RevenuePage() {
             Received ({rangeLabel})
           </div>
           <div style={{ fontSize: 22, fontWeight: 800, color: "var(--grn)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>
-            {fmt(totals.bank + totals.cash + totals.crNote)}
+            {fmt(totals.bank + totals.cash)}
           </div>
         </div>
         <div style={{ background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r4)", padding: "14px 18px" }}>
@@ -416,7 +424,7 @@ export default function RevenuePage() {
                 <th colSpan={5} style={groupHdStyle}>Booking Info</th>
                 <th colSpan={chargesCols} style={{ ...groupHdStyle, ...sectionBorder }}>Charges</th>
                 <th colSpan={3} style={{ ...groupHdStyle, ...sectionBorder }}>Deductions</th>
-                <th colSpan={3} style={{ ...groupHdStyle, ...sectionBorder }}>Payments Received</th>
+                <th colSpan={2} style={{ ...groupHdStyle, ...sectionBorder }}>Payments Received</th>
                 <th style={{ ...groupHdStyle, ...sectionBorder, textAlign: "right" }}>Bal</th>
                 <th style={{ ...groupHdStyle, ...sectionBorder }}></th>
               </tr>
@@ -435,12 +443,14 @@ export default function RevenuePage() {
                 <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>GST 5%</th>
                 <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>GST 18%</th>
                 <th style={{ textAlign: "right" }}>Total</th>
+                <th style={{ textAlign: "right", whiteSpace: "nowrap" }} title="Credit note redeemed against this booking — already netted off the charges">
+                  Cr Note
+                </th>
                 <th style={{ textAlign: "right", whiteSpace: "nowrap", ...sectionBorder }}>Commission</th>
                 <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>TDS</th>
                 <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>Spl Disc</th>
                 <th style={{ textAlign: "right", ...sectionBorder }}>Bank</th>
                 <th style={{ textAlign: "right" }}>Cash</th>
-                <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>Cr Note</th>
                 <th style={{ textAlign: "right", ...sectionBorder }}>₹</th>
                 <th style={{ textAlign: "center", width: 60, ...sectionBorder }}></th>
               </tr>
@@ -485,6 +495,9 @@ export default function RevenuePage() {
                       <td style={{ ...numTd, color: "var(--t3)" }}>{nfmt(r.gst5)}</td>
                       <td style={{ ...numTd, color: "var(--t3)" }}>{nfmt(r.gst18)}</td>
                       <td style={{ ...numTd, fontWeight: 700 }}>{nfmt(r.total)}</td>
+                      <td style={{ ...numTd, color: r.creditNoteUsed > 0 ? "var(--pur)" : "var(--t3)" }}>
+                        {r.creditNoteUsed > 0 ? `−${nfmt(r.creditNoteUsed)}` : "0"}
+                      </td>
                       <td style={{ ...numTd, ...sectionBorder, color: r.dedCommission > 0 ? "var(--red)" : "var(--t3)" }}>
                         {r.dedCommission > 0 ? `−${nfmt(r.dedCommission)}` : "0"}
                       </td>
@@ -496,7 +509,6 @@ export default function RevenuePage() {
                       </td>
                       <td style={{ ...numTd, ...sectionBorder }}>{nfmt(r.bank)}</td>
                       <td style={numTd}>{nfmt(r.cash)}</td>
-                      <td style={numTd}>{nfmt(r.crNote)}</td>
                       <td
                         style={{
                           ...numTd,
@@ -537,6 +549,9 @@ export default function RevenuePage() {
                     <td style={{ ...numTd, fontWeight: 700, color: "var(--t3)" }}>{nfmt(totals.gst5)}</td>
                     <td style={{ ...numTd, fontWeight: 700, color: "var(--t3)" }}>{nfmt(totals.gst18)}</td>
                     <td style={{ ...numTd, fontWeight: 800 }}>{nfmt(totals.total)}</td>
+                    <td style={{ ...numTd, fontWeight: 700, color: totals.creditNoteUsed > 0 ? "var(--pur)" : "var(--t3)" }}>
+                      {totals.creditNoteUsed > 0 ? `−${nfmt(totals.creditNoteUsed)}` : "0"}
+                    </td>
                     <td style={{ ...numTd, ...sectionBorder, fontWeight: 700, color: totals.dedCommission > 0 ? "var(--red)" : "var(--t3)" }}>
                       {totals.dedCommission > 0 ? `−${nfmt(totals.dedCommission)}` : "0"}
                     </td>
@@ -548,7 +563,6 @@ export default function RevenuePage() {
                     </td>
                     <td style={{ ...numTd, ...sectionBorder, fontWeight: 700 }}>{nfmt(totals.bank)}</td>
                     <td style={{ ...numTd, fontWeight: 700 }}>{nfmt(totals.cash)}</td>
-                    <td style={{ ...numTd, fontWeight: 700 }}>{nfmt(totals.crNote)}</td>
                     <td style={{ ...numTd, ...sectionBorder, fontWeight: 800, color: totals.bal > 0 ? "var(--amb)" : totals.bal < 0 ? "var(--pur)" : "var(--grn)" }}>
                       {totals.bal === 0 ? "0" : totals.bal > 0 ? nfmt(totals.bal) : `−${nfmt(-totals.bal)}`}
                     </td>
