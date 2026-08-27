@@ -255,6 +255,21 @@ export function creditNoteRedeemed(b: Booking): number {
   return b.creditNoteApplied?.amount ?? 0;
 }
 
+// Meal-side charges as the booking actually bills them.
+//
+// `mealTotal` / `mealGst` are stored as the whole meal base for the stay, and
+// that base already includes the pet package: the booking form computes
+// `base = meal + pet`. `petTotal` / `petGst` are a breakdown of a line that
+// already sits inside those figures, kept so the pet can be shown as its own
+// row. Adding them on top of `mealTotal` double-counts the pet — `grandTotal`
+// counts it once, so anything that adds both disagrees with what the guest owes.
+export function bookingMealCharges(b: Booking): { net: number; gst: number } {
+  return {
+    net: b.mealTotal + (b.driverMealTotal ?? 0),
+    gst: b.mealGst + (b.driverMealGst ?? 0),
+  };
+}
+
 export function countsAsRevenue(b: Booking): boolean {
   return (
     b.status === "Confirmed" ||
@@ -327,8 +342,9 @@ export function bookingChargesBreakdown(b: Booking): BookingChargesBreakdown {
     if (r.gstRate === 5) gst5 += r.gstAmt;
     else gst18 += r.gstAmt;
   });
-  let mealNet = b.mealTotal + b.petTotal + (b.driverMealTotal ?? 0);
-  gst18 += b.mealGst + b.petGst + (b.driverMealGst ?? 0);
+  const mealCharges = bookingMealCharges(b);
+  let mealNet = mealCharges.net;
+  gst18 += mealCharges.gst;
   // Itemized add-ons: the net amount reports under the head its category maps
   // to (room / meal add-ons join their own columns, venue and anything
   // uncategorised fall to Other). GST is bucketed by its actual rate

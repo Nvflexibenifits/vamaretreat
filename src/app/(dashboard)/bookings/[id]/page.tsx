@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { bookingChargesBreakdown, fmt, fmtIN, dayName, getBookingPricingRows, nightsBetween, todayStr, tryAssignRooms } from "@/lib/utils";
+import { bookingChargesBreakdown, bookingMealCharges, fmt, fmtIN, dayName, getBookingPricingRows, nightsBetween, todayStr, tryAssignRooms } from "@/lib/utils";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { CancellationDetails, CancellationPolicy, ChargeHead, SpecialDay, WaiveOffLine } from "@/types";
 
@@ -320,7 +320,7 @@ export default function BookingDetailPage() {
   const totalDiscount = pricingRows.reduce((s, r) => s + r.discountAmt, 0);
   const totalNet = pricingRows.reduce((s, r) => s + r.netCharges, 0);
   const totalRoomGst = pricingRows.reduce((s, r) => s + r.gstAmt, 0);
-  const totalGstAll = totalRoomGst + b.mealGst + b.petGst + (b.driverMealGst ?? 0);
+  const totalGstAll = totalRoomGst + bookingMealCharges(b).gst;
 
   const roomCategoryMap = (() => {
     const m = new Map<string, number>();
@@ -1101,11 +1101,11 @@ export default function BookingDetailPage() {
                     })()}
                     <tr style={{ background: "var(--surf2)", fontWeight: 700, borderTop: "2px solid var(--bd)" }}>
                       <td colSpan={4} style={{ padding:"9px 10px",fontSize:12,color:"var(--t1)" }}>Total Meal Charges</td>
-                      <td style={{ padding:"9px 10px",fontSize:12,textAlign:"right" }}>{fmt((b.mealOn?b.mealTotal:0)+(b.petTotal||0)+(b.driverMealTotal??0))}</td>
+                      <td style={{ padding:"9px 10px",fontSize:12,textAlign:"right" }}>{fmt(bookingMealCharges(b).net)}</td>
                       <td></td><td></td><td></td><td></td>
                       <td></td>
-                      <td style={{ padding:"9px 10px",fontSize:12,textAlign:"right" }}>{fmt((b.mealOn?b.mealGst:0)+(b.petGst||0)+(b.driverMealGst??0))}</td>
-                      <td style={{ padding:"9px 10px",fontSize:12,textAlign:"right",color:"var(--t1)" }}>{fmt((b.mealOn?b.mealTotal+b.mealGst:0)+((b.petTotal||0)+(b.petGst||0))+((b.driverMealTotal??0)+(b.driverMealGst??0)))}</td>
+                      <td style={{ padding:"9px 10px",fontSize:12,textAlign:"right" }}>{fmt(bookingMealCharges(b).gst)}</td>
+                      <td style={{ padding:"9px 10px",fontSize:12,textAlign:"right",color:"var(--t1)" }}>{fmt(bookingMealCharges(b).net + bookingMealCharges(b).gst)}</td>
                     </tr>
                   </tbody>
                 </table>

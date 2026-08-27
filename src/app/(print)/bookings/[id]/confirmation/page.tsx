@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useParams } from "next/navigation";
 import { useApp } from "@/lib/store";
-import { dayName, fmt, fmtIN, getBookingPricingRows, nightsBetween } from "@/lib/utils";
+import { bookingMealCharges, dayName, fmt, fmtIN, getBookingPricingRows, nightsBetween } from "@/lib/utils";
 
 // dd/mm/yy — compact date format matching the booking view page
 function fmtShort(d: string): string {
@@ -95,9 +95,17 @@ export default function ConfirmationPage() {
   const driverMealCharges = b.driverMealTotal ?? 0;
   const driverMealGstAmt = b.driverMealGst ?? 0;
   const totalDriverMealAmt = driverMealCharges + driverMealGstAmt;
-  const totalMealPetCharges = mealCharges + petCharges + driverMealCharges;
-  const totalMealPetGst = mealGst + petGstAmt + driverMealGstAmt;
-  const totalMealPet = totalMealAmt + totalPetAmt + totalDriverMealAmt;
+  // mealTotal / mealGst already include the pet package — petCharges is a
+  // breakdown of a line inside them, shown as its own row. Adding it again
+  // would inflate the guest's total against what the booking actually bills.
+  const meal = bookingMealCharges(b);
+  const totalMealPetCharges = meal.net;
+  const totalMealPetGst = meal.gst;
+  const totalMealPet = meal.net + meal.gst;
+  // Legacy bookings with no itemised meal rows fall back to a single meal row
+  // plus a pet row, so that row must exclude the pet to avoid showing it twice.
+  const mealOnlyCharges = Math.max(0, mealCharges - petCharges);
+  const mealOnlyGst = Math.max(0, mealGst - petGstAmt);
 
   const extras = b.extras ?? [];
   const extrasBasic = extras.reduce((s, e) => s + e.amount, 0);
@@ -461,14 +469,14 @@ export default function ConfirmationPage() {
               {segMealRows.length === 0 && b.mealOn && (
                 <tr>
                   <td style={TD}>Meal &amp; Activity Package</td>
-                  <td style={TD_NUM}>{b.adults && b.nights ? fmt(Math.round(mealCharges / b.nights / b.adults)) : "—"}</td>
+                  <td style={TD_NUM}>{b.adults && b.nights ? fmt(Math.round(mealOnlyCharges / b.nights / b.adults)) : "—"}</td>
                   <td style={TD_NUM}>{b.nights}</td>
                   <td style={TD_NUM}>{b.adults}</td>
-                  <td style={TD_NUM}>{fmt(mealCharges)}</td>
+                  <td style={TD_NUM}>{fmt(mealOnlyCharges)}</td>
                   <td style={TD}></td><td style={TD}></td><td style={TD}></td><td style={TD}></td>
                   <td style={TD_NUM}>18%</td>
-                  <td style={TD_NUM}>{fmt(mealGst)}</td>
-                  <td style={TD_NUM}>{fmt(totalMealAmt)}</td>
+                  <td style={TD_NUM}>{fmt(mealOnlyGst)}</td>
+                  <td style={TD_NUM}>{fmt(mealOnlyCharges + mealOnlyGst)}</td>
                 </tr>
               )}
               {segMealRows.length === 0 && (b.pets || 0) > 0 && (
