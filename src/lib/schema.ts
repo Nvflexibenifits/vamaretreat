@@ -19,6 +19,11 @@ export const bookings = pgTable("bookings", {
   data: jsonb("data").notNull(),
 });
 
+export const b2bBookings = pgTable("b2b_bookings", {
+  id: text("id").primaryKey(),
+  data: jsonb("data").notNull(),
+});
+
 export const rooms = pgTable("rooms", {
   id: text("id").primaryKey(),
   data: jsonb("data").notNull(),

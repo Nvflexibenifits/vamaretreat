@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { bookingChargesBreakdown, countsAsRevenue, fmt, todayStr } from "@/lib/utils";
+import { b2bChargesBreakdown, bookingChargesBreakdown, countsAsRevenue, fmt, todayStr } from "@/lib/utils";
 
 // dd/mm/yy
 function fmtShort(d: string): string {
@@ -36,7 +36,7 @@ const groupHdStyle: React.CSSProperties = {
 const sectionBorder: React.CSSProperties = { borderLeft: "2px solid var(--bd)" };
 
 export default function RevenuePage() {
-  const { bookings, currentRole, addOnCategories } = useApp();
+  const { bookings, b2bBookings, currentRole, addOnCategories } = useApp();
   const [search, setSearch] = useState("");
   const [today, setToday] = useState("");
   // "" = current month, "custom" = manual range, otherwise "YYYY-MM"
@@ -143,13 +143,61 @@ export default function RevenuePage() {
         // waive-off hasn't been done yet; shown in red so it stands apart
         // from money actually expected from guests.
         const waivePending = isCancelled && !isRefundCancel && bal >= 1;
-        return { b, roomNet, mealNet, creditNoteUsed, other, otherByItem, gst5, gst18, gstOther, total, dedCommission, dedTds, dedSpecial, bank, cash, crNote, bal, isCancelled, waivePending };
+        return {
+          id: b.id, guest: b.guest, mobile: b.mobile, checkin: b.checkin,
+          checkout: b.checkout, statusLabel: b.status, href: `/bookings/${b.id}`,
+          roomNet, mealNet, creditNoteUsed, other, otherByItem, gst5, gst18, gstOther,
+          total, dedCommission, dedTds, dedSpecial, bank, cash, crNote, bal,
+          isCancelled, waivePending,
+        };
       });
   }, [bookings, search, rangeFrom, rangeTo]);
 
+  // Confirmed B2B bookings bill entirely through add-on lines, which report
+  // under the same heads as a B2C booking's add-ons. Enquiry and Tentative are
+  // not earned yet, so they stay out — matching countsAsRevenue for B2C.
+  const b2bRows = useMemo(() => {
+    return b2bBookings
+      .filter((b) => b.status === "Confirmed")
+      .filter((b) => {
+        if (search.trim()) {
+          const q = search.toLowerCase();
+          if (!b.id.toLowerCase().includes(q) && !b.orgName.toLowerCase().includes(q)) return false;
+        }
+        if (rangeFrom && b.checkin < rangeFrom) return false;
+        if (rangeTo && b.checkin > rangeTo) return false;
+        return true;
+      })
+      .map((b) => {
+        const { roomNet, mealNet, other, otherByItem, gst5, gst18, gstOther } =
+          b2bChargesBreakdown(b);
+        let bank = 0, cash = 0;
+        (b.payments ?? []).forEach((p) => {
+          const m = (p.mode || "").toLowerCase();
+          if (m.includes("cash")) cash += p.amount;
+          else bank += p.amount;
+        });
+        const received = bank + cash;
+        const total = b.grandTotal;
+        return {
+          id: b.id, guest: b.orgName, mobile: b.contactNumber, checkin: b.checkin,
+          checkout: b.checkout, statusLabel: b.status, href: `/b2b/${b.id}`,
+          roomNet, mealNet, creditNoteUsed: 0, other, otherByItem, gst5, gst18, gstOther,
+          total, dedCommission: 0, dedTds: 0, dedSpecial: 0, bank, cash, crNote: 0,
+          bal: Math.round(total - received), isCancelled: false, waivePending: false,
+        };
+      });
+  }, [b2bBookings, search, rangeFrom, rangeTo]);
+
+  // One register: B2C and B2B side by side, ordered by check-in
+  const allRows = useMemo(
+    () => [...tableRows, ...b2bRows].sort((a, b) => a.checkin.localeCompare(b.checkin)),
+    [tableRows, b2bRows]
+  );
+
   const totals = useMemo(
     () =>
-      tableRows.reduce(
+      allRows.reduce(
         (t, r) => ({
           roomNet: t.roomNet + r.roomNet,
           mealNet: t.mealNet + r.mealNet,
@@ -169,7 +217,7 @@ export default function RevenuePage() {
         }),
         { roomNet: 0, mealNet: 0, creditNoteUsed: 0, other: 0, gst5: 0, gst18: 0, gstOther: 0, total: 0, dedCommission: 0, dedTds: 0, dedSpecial: 0, bank: 0, cash: 0, crNote: 0, bal: 0 }
       ),
-    [tableRows]
+    [allRows]
   );
 
   // One column per add-on item that actually carries a charge in this view —
@@ -177,7 +225,7 @@ export default function RevenuePage() {
   // first, then any label the data still uses (renamed or deleted items).
   const addOnCols = useMemo(() => {
     const totalsByItem = new Map<string, number>();
-    tableRows.forEach((r) => {
+    allRows.forEach((r) => {
       Object.entries(r.otherByItem).forEach(([label, amt]) => {
         if (amt <= 0) return;
         totalsByItem.set(label, (totalsByItem.get(label) ?? 0) + amt);
@@ -194,13 +242,13 @@ export default function RevenuePage() {
       label,
       total: totalsByItem.get(label) ?? 0,
     }));
-  }, [tableRows, addOnCategories]);
+  }, [allRows, addOnCategories]);
 
   // What's left in Other once the itemised add-ons have their own columns:
   // the unnamed legacy remainder.
-  const otherResidual = (r: (typeof tableRows)[number]) =>
+  const otherResidual = (r: (typeof allRows)[number]) =>
     Math.max(0, r.other - Object.values(r.otherByItem).reduce((s2, v) => s2 + v, 0));
-  const totalsOtherResidual = tableRows.reduce((s2, r) => s2 + otherResidual(r), 0);
+  const totalsOtherResidual = allRows.reduce((s2, r) => s2 + otherResidual(r), 0);
 
   // Pending payments (global, unaffected by filters)
   const pendingBookings = useMemo(
@@ -268,8 +316,8 @@ export default function RevenuePage() {
       "Commission", "TDS", "Special Discount",
       "Received - Bank", "Received - Cash", "Balance",
     ];
-    const lines = tableRows.map((r, i) => [
-      i + 1, fmtShort(r.b.checkin), fmtShort(r.b.checkout), r.b.guest, r.b.mobile, r.b.id, r.b.status,
+    const lines = allRows.map((r, i) => [
+      i + 1, fmtShort(r.checkin), fmtShort(r.checkout), r.guest, r.mobile, r.id, r.statusLabel,
       Math.round(r.roomNet), Math.round(r.mealNet),
       ...addOnCols.map((c) => Math.round(r.otherByItem[c.label] ?? 0)),
       Math.round(otherResidual(r)),
@@ -348,7 +396,7 @@ export default function RevenuePage() {
             onChange={(e) => setSearch(e.target.value)}
             style={{ width: 160, height: 32, padding: "0 10px", border: "1px solid var(--bd)", borderRadius: "var(--r2)", fontSize: 13, background: "var(--surf)", outline: "none" }}
           />
-          <button className="btn btn-primary btn-sm" onClick={exportExcel} disabled={tableRows.length === 0}>
+          <button className="btn btn-primary btn-sm" onClick={exportExcel} disabled={allRows.length === 0}>
             Export to Excel
           </button>
         </div>
@@ -409,7 +457,7 @@ export default function RevenuePage() {
         <div className="tbl-hd">
           <h3>Revenue Table</h3>
           <span style={{ fontSize: 12, color: "var(--t3)", marginLeft: 12 }}>
-            {tableRows.length} booking{tableRows.length !== 1 ? "s" : ""}
+            {allRows.length} booking{allRows.length !== 1 ? "s" : ""}
           </span>
           <div style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 14, marginLeft: "auto" }}>
             <strong style={{ color: "var(--amb)" }}>Amount pending from guest</strong>
@@ -456,7 +504,7 @@ export default function RevenuePage() {
               </tr>
             </thead>
             <tbody>
-              {tableRows.length === 0 ? (
+              {allRows.length === 0 ? (
                 <tr>
                   <td colSpan={allCols}>
                     <div className="empty-state" style={{ padding: 32 }}>
@@ -466,21 +514,21 @@ export default function RevenuePage() {
                 </tr>
               ) : (
                 <>
-                  {tableRows.map((r, i) => (
-                    <tr key={r.b.id}>
+                  {allRows.map((r, i) => (
+                    <tr key={r.id}>
                       <td style={{ color: "var(--t3)", fontSize: 12 }}>{i + 1}</td>
-                      <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{fmtShort(r.b.checkin)}</td>
-                      <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{fmtShort(r.b.checkout)}</td>
+                      <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{fmtShort(r.checkin)}</td>
+                      <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{fmtShort(r.checkout)}</td>
                       <td style={{ whiteSpace: "nowrap" }}>
-                        <div style={{ fontWeight: 500, color: "var(--t1)", fontSize: 12 }}>{r.b.guest}</div>
-                        <div style={{ fontSize: 11, color: "var(--t3)" }}>{r.b.mobile || "—"}</div>
+                        <div style={{ fontWeight: 500, color: "var(--t1)", fontSize: 12 }}>{r.guest}</div>
+                        <div style={{ fontSize: 11, color: "var(--t3)" }}>{r.mobile || "—"}</div>
                       </td>
                       <td style={{ whiteSpace: "nowrap" }}>
                         <Link
-                          href={`/bookings/${r.b.id}`}
+                          href={r.href}
                           style={{ fontSize: 11, fontFamily: "var(--font-outfit), Outfit, sans-serif", color: "var(--acc)", fontWeight: 700, textDecoration: "none" }}
                         >
-                          {r.b.id}
+                          {r.id}
                         </Link>
                         {r.isCancelled && (
                           <span className="badge bd-lost" style={{ marginLeft: 5, fontSize: 8 }}>Cancelled</span>
@@ -534,7 +582,7 @@ export default function RevenuePage() {
                         {r.bal === 0 ? "0" : r.bal > 0 ? nfmt(r.bal) : `−${nfmt(-r.bal)}`}
                       </td>
                       <td style={{ textAlign: "center", ...sectionBorder }}>
-                        <Link href={`/bookings/${r.b.id}`} className="btn btn-ghost btn-xs">View</Link>
+                        <Link href={r.href} className="btn btn-ghost btn-xs">View</Link>
                       </td>
                     </tr>
                   ))}

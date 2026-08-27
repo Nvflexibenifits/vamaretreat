@@ -1,4 +1,5 @@
 import type {
+  B2BBooking,
   Booking,
   BookingSegment,
   BookingStatus,
@@ -424,6 +425,37 @@ export function bookingChargesBreakdown(b: Booking): BookingChargesBreakdown {
   }
 
   return { roomNet, mealNet, creditNoteUsed, other, otherByItem, gst5, gst18, gstOther };
+}
+
+// Charge-side view of a B2B booking. Phase 1 B2B has no room or meal stay
+// charges of its own — everything it bills sits in add-on lines, which report
+// under the head their master item maps to, exactly as on a B2C booking.
+export function b2bChargesBreakdown(b: B2BBooking): BookingChargesBreakdown {
+  let roomNet = 0;
+  let mealNet = 0;
+  let gst5 = 0;
+  let gst18 = 0;
+  let gstOther = 0;
+  const otherByItem: Record<string, number> = {};
+
+  (b.extras ?? []).forEach((e) => {
+    const head = extraHead(e);
+    if (head === "room") roomNet += e.amount;
+    else if (head === "meal") mealNet += e.amount;
+    else {
+      const label = (e.name ?? "").trim() || "Add-on Charge";
+      otherByItem[label] = (otherByItem[label] ?? 0) + e.amount;
+    }
+    const gst = e.gst ?? 0;
+    if (gst <= 0) return;
+    const pct = e.amount > 0 ? Math.round((gst / e.amount) * 100) : 0;
+    if (pct === 5) gst5 += gst;
+    else if (pct === 18) gst18 += gst;
+    else gstOther += gst;
+  });
+
+  const other = Object.values(otherByItem).reduce((s, v) => s + v, 0);
+  return { roomNet, mealNet, creditNoteUsed: 0, other, otherByItem, gst5, gst18, gstOther };
 }
 
 // ─────── ROOM ALLOCATION ───────

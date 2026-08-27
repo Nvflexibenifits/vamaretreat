@@ -19,12 +19,13 @@ export function Sidebar() {
   const router = useRouter();
   const { logout, currentRole, currentUser } = useApp();
 
-  const [bookingsOpen, setBookingsOpen] = useState<boolean>(
-    pathname.startsWith("/bookings")
-  );
+  const inBookingsGroup = (p: string) =>
+    p.startsWith("/bookings") || p.startsWith("/b2b");
+
+  const [bookingsOpen, setBookingsOpen] = useState<boolean>(inBookingsGroup(pathname));
 
   useEffect(() => {
-    if (pathname.startsWith("/bookings")) setBookingsOpen(true);
+    if (inBookingsGroup(pathname)) setBookingsOpen(true);
   }, [pathname]);
 
   const onLogout = async () => {
@@ -75,20 +76,14 @@ export function Sidebar() {
                 >
                   B2C Bookings
                 </Link>
+                <Link
+                  href="/b2b"
+                  className={`nav-it child${isSimpleActive(pathname, "/b2b") ? " active" : ""}`}
+                >
+                  B2B Bookings
+                </Link>
                 <span className="nav-it child soon">
                   Group Bookings
-                  <span className="nav-soon">Coming Soon</span>
-                </span>
-                <span className="nav-it child soon">
-                  Corporate Bookings
-                  <span className="nav-soon">Coming Soon</span>
-                </span>
-                <span className="nav-it child soon">
-                  School Bookings
-                  <span className="nav-soon">Coming Soon</span>
-                </span>
-                <span className="nav-it child soon">
-                  Institute Bookings
                   <span className="nav-soon">Coming Soon</span>
                 </span>
               </div>

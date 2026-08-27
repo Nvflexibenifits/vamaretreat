@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import {
+  b2bBookings,
   bookings,
   rooms,
   roomInventory,
@@ -23,6 +24,7 @@ export async function GET(req: NextRequest) {
 
     const [
       bookingRows,
+      b2bBookingRows,
       roomRows,
       roomInventoryRows,
       venueRows,
@@ -33,6 +35,7 @@ export async function GET(req: NextRequest) {
       settingsRows,
     ] = await Promise.all([
       db.select().from(bookings),
+      db.select().from(b2bBookings),
       db.select().from(rooms),
       db.select().from(roomInventory),
       db.select().from(venues),
@@ -48,6 +51,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       bookings: bookingRows.map((row) => row.data),
+      b2bBookings: b2bBookingRows.map((row) => row.data),
       rooms: roomRows.map((row) => row.data),
       roomInventory: roomInventoryRows.map((row) => row.data),
       venues: venueRows.map((row) => row.data),

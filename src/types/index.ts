@@ -413,6 +413,48 @@ export type BulkRoomBlockRow = {
   roomIds: string[];
 };
 
+// ─────── B2B bookings (corporate / school / institute) ───────
+// Phase 1: no room-chart or room-allocation link. The booking carries its own
+// contact block, a single date or date range, a head count, and add-on charge
+// lines priced exactly as they are on a B2C booking.
+export type B2BType = "Corporate" | "School" | "Institute";
+
+export type B2BBookingType = "Dayout" | "Overnight";
+
+export type B2BStatus = "Enquiry" | "Tentative" | "Confirmed";
+
+export type B2BBooking = {
+  id: string;
+  type: B2BType;
+  // Company / School / Institute name, depending on `type`
+  orgName: string;
+  contactPerson: string;
+  contactNumber: string;
+  email: string;
+  tagName: string;
+  tagContactName: string;
+  tagContactNumber: string;
+  tagEmail: string;
+
+  bookingType: B2BBookingType;
+  checkin: string;
+  // Same as checkin for a dayout
+  checkout: string;
+  pax: number;
+
+  // Add-on charge lines — same shape and revenue heads as a B2C booking
+  extras: Extra[];
+  grandTotal: number;
+
+  payments: Payment[];
+  advance: number;
+  balance: number;
+
+  status: B2BStatus;
+  createdBy: string;
+  createdAt: string;
+};
+
 // Guest counts on a room-chart block, using the same buckets as a booking so
 // the two screens ask for the same thing. `pax` on the block stays as the
 // derived head count for legacy blocks and compact displays.

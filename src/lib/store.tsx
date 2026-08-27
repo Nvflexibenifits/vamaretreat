@@ -12,6 +12,7 @@ import {
 } from "react";
 import type {
   AddOnCategory,
+  B2BBooking,
   Booking,
   BookingSegment,
   BookingStatus,
@@ -79,6 +80,11 @@ type AppContextValue = {
   createBooking: (b: Booking) => void;
   updateBooking: (bookingId: string, patch: Partial<Booking>) => void;
   addExtras: (bookingId: string, extras: Extra[]) => void;
+  // B2B (corporate / school / institute) bookings
+  b2bBookings: B2BBooking[];
+  createB2BBooking: (b: B2BBooking) => void;
+  updateB2BBooking: (id: string, patch: Partial<B2BBooking>) => void;
+  removeB2BBooking: (id: string) => void;
   markLost: (bookingId: string, reason: string, notes: string) => void;
   recordPayment: (
     bookingId: string,
@@ -217,6 +223,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [creditNoteSettings, setCreditNoteSettings] =
     useState<CreditNoteSettings>(SEED_CREDIT_NOTE_SETTINGS);
   const [creditNotes, setCreditNotes] = useState<CreditNote[]>([]);
+  const [b2bBookings, setB2BBookings] = useState<B2BBooking[]>([]);
   const [gstSettings, setGstSettings] =
     useState<GstSettings>(SEED_GST_SETTINGS);
   const [cancellationPolicy, setCancellationPolicy] =
@@ -269,6 +276,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (Array.isArray(data.bulkRoomBlocks)) setBulkRoomBlocks(data.bulkRoomBlocks);
     if (Array.isArray(data.specialDays)) setSpecialDays(data.specialDays);
     if (Array.isArray(data.creditNotes)) setCreditNotes(data.creditNotes);
+    if (Array.isArray(data.b2bBookings)) setB2BBookings(data.b2bBookings);
     if (data.guestNotes && typeof data.guestNotes === "object") setGuestNotes(data.guestNotes);
     if (data.gstSettings) setGstSettings(data.gstSettings);
     if (data.cancellationPolicy && "standardThreshold" in data.cancellationPolicy) setCancellationPolicy(data.cancellationPolicy);
@@ -552,6 +560,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return { ...b, extras: updatedExtras, grandTotal, advance, balance };
       })
     );
+  }, []);
+
+  // ─── B2B bookings ───
+  const createB2BBooking = useCallback((b: B2BBooking) => {
+    setB2BBookings((prev) => [...prev, b]);
+    sync("/api/app/b2b-bookings", "POST", b);
+  }, []);
+
+  const updateB2BBooking = useCallback((id: string, patch: Partial<B2BBooking>) => {
+    setB2BBookings((prev) => prev.map((b) => (b.id === id ? { ...b, ...patch } : b)));
+    sync(`/api/app/b2b-bookings/${id}`, "PATCH", patch);
+  }, []);
+
+  const removeB2BBooking = useCallback((id: string) => {
+    setB2BBookings((prev) => prev.filter((b) => b.id !== id));
+    sync(`/api/app/b2b-bookings/${id}`, "DELETE", {});
   }, []);
 
   // ─── Master setup setters ───
@@ -975,6 +999,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       redeemCreditNote,
       recordRefund,
       addExtras,
+      b2bBookings,
+      createB2BBooking,
+      updateB2BBooking,
+      removeB2BBooking,
       markLost,
       recordPayment,
       completeBooking,
@@ -1042,6 +1070,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       createBooking,
       updateBooking,
       addExtras,
+      b2bBookings,
+      createB2BBooking,
+      updateB2BBooking,
+      removeB2BBooking,
       markLost,
       recordPayment,
       completeBooking,
