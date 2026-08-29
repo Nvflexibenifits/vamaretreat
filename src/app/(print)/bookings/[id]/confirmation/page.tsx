@@ -115,6 +115,8 @@ export default function ConfirmationPage() {
   const grandTotal = totalRoomAmt + totalMealPet + extrasTotal;
   const grandRaw = totalRoomBaseCharges + totalMealPetCharges + extrasBasic;
 
+  // Same-day booking: no night is sold, so there are no accommodation charges
+  const isDayout = !!b.checkin && b.checkin === b.checkout;
   const showMealTable = b.mealOn || (b.pets || 0) > 0 || (b.driverMealOn ?? false);
 
   // Per-segment meal rows (new bookings store rates per segment); legacy
@@ -195,6 +197,7 @@ export default function ConfirmationPage() {
       </div>
 
       <div
+        className="confirmation-sheet"
         style={{
           maxWidth: 1100,
           margin: "0 auto",
@@ -348,87 +351,93 @@ export default function ConfirmationPage() {
           </tbody>
         </table>
 
-        {/* Accommodation Charges */}
-        <div
-          style={{
-            background: "#0f2318",
-            color: "#fff",
-            padding: "8px 12px",
-            display: "flex",
-            alignItems: "center",
-            fontFamily: "Outfit, sans-serif",
-            fontWeight: 700,
-            fontSize: 12,
-            letterSpacing: ".5px",
-            textTransform: "uppercase",
-          }}
-        >
-          <span>Accomodation Charges</span>
-        </div>
+        {/* Accommodation Charges — a dayout books no room, so the whole
+            block is dropped rather than printing an empty table */}
+        {!isDayout && (
+          <>
+          {/* Accommodation Charges */}
+          <div
+            style={{
+              background: "#0f2318",
+              color: "#fff",
+              padding: "8px 12px",
+              display: "flex",
+              alignItems: "center",
+              fontFamily: "Outfit, sans-serif",
+              fontWeight: 700,
+              fontSize: 12,
+              letterSpacing: ".5px",
+              textTransform: "uppercase",
+            }}
+          >
+            <span>Accomodation Charges</span>
+          </div>
 
-        <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 4 }}>
-          <thead>
-            <tr>
-              <th style={TH}>Category</th>
-              <th style={{ ...TH, textAlign: "right" }}>C-in</th>
-              <th style={{ ...TH, textAlign: "right" }}>C-out</th>
-              <th style={{ ...TH, textAlign: "right" }}>Nights</th>
-              <th style={{ ...TH, textAlign: "right" }}>Rate</th>
-              <th style={{ ...TH, textAlign: "right" }}>Disc %</th>
-              <th style={{ ...TH, textAlign: "right" }}>Net Rate</th>
-              <th style={{ ...TH, textAlign: "right" }}>Rooms</th>
-              <th style={{ ...TH, textAlign: "right" }}>Charges</th>
-              <th style={{ ...TH, textAlign: "right" }}>GST %</th>
-              <th style={{ ...TH, textAlign: "right" }}>GST Amt</th>
-              <th style={{ ...TH, textAlign: "right" }}>Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {pricingRows.length === 0 ? (
+          <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 4 }}>
+            <thead>
               <tr>
-                <td style={{ ...TD, textAlign: "center" }} colSpan={12}>
-                  No pricing rows
-                </td>
+                <th style={TH}>Category</th>
+                <th style={{ ...TH, textAlign: "right" }}>C-in</th>
+                <th style={{ ...TH, textAlign: "right" }}>C-out</th>
+                <th style={{ ...TH, textAlign: "right" }}>Nights</th>
+                <th style={{ ...TH, textAlign: "right" }}>Rate</th>
+                <th style={{ ...TH, textAlign: "right" }}>Disc %</th>
+                <th style={{ ...TH, textAlign: "right" }}>Net Rate</th>
+                <th style={{ ...TH, textAlign: "right" }}>Rooms</th>
+                <th style={{ ...TH, textAlign: "right" }}>Charges</th>
+                <th style={{ ...TH, textAlign: "right" }}>GST %</th>
+                <th style={{ ...TH, textAlign: "right" }}>GST Amt</th>
+                <th style={{ ...TH, textAlign: "right" }}>Total</th>
               </tr>
-            ) : (
-              pricingRows.map((r: PricingRow, i: number) => {
-                const netRatePerNight = r.nights > 0 && r.numRooms > 0
-                  ? Math.round(r.netCharges / r.nights / r.numRooms)
-                  : r.tariff;
-                return (
-                  <tr key={i}>
-                    <td style={TD}>{r.roomName}</td>
-                    <td style={{ ...TD_NUM, whiteSpace: "nowrap" }}>
-                      <div>{fmtShort(r.checkin || b.checkin)}</div>
-                      <div style={{ fontSize: 10, color: "#52524a" }}>{dayName(r.checkin || b.checkin)}</div>
-                    </td>
-                    <td style={{ ...TD_NUM, whiteSpace: "nowrap" }}>
-                      <div>{fmtShort(r.checkout || b.checkout)}</div>
-                      <div style={{ fontSize: 10, color: "#52524a" }}>{dayName(r.checkout || b.checkout)}</div>
-                    </td>
-                    <td style={TD_NUM}>{r.nights}</td>
-                    <td style={TD_NUM}>{fmt(r.tariff)}</td>
-                    <td style={TD_NUM}>{r.discountPct > 0 ? `${r.discountPct}%` : "—"}</td>
-                    <td style={TD_NUM}>{fmt(netRatePerNight)}</td>
-                    <td style={TD_NUM}>{r.numRooms}</td>
-                    <td style={TD_NUM}>{fmt(r.netCharges)}</td>
-                    <td style={TD_NUM}>{r.gstRate}%</td>
-                    <td style={TD_NUM}>{fmt(r.gstAmt)}</td>
-                    <td style={TD_NUM}>{fmt(r.totalAmt)}</td>
-                  </tr>
-                );
-              })
-            )}
-            <tr>
-              <td style={TD_HEAD}>Total Room Charges</td>
-              <td style={TD_HEAD} colSpan={7}></td>
-              <td style={TD_HEAD_NUM}>{fmt(totalNet)}</td>
-              <td style={TD_HEAD}></td>
-              <td style={TD_HEAD_NUM}>{fmt(totalRoomGst)}</td>
-              <td style={TD_HEAD_NUM}>{fmt(totalRoomAmt)}</td>
-            </tr>
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {pricingRows.length === 0 ? (
+                <tr>
+                  <td style={{ ...TD, textAlign: "center" }} colSpan={12}>
+                    No pricing rows
+                  </td>
+                </tr>
+              ) : (
+                pricingRows.map((r: PricingRow, i: number) => {
+                  const netRatePerNight = r.nights > 0 && r.numRooms > 0
+                    ? Math.round(r.netCharges / r.nights / r.numRooms)
+                    : r.tariff;
+                  return (
+                    <tr key={i}>
+                      <td style={TD}>{r.roomName}</td>
+                      <td style={{ ...TD_NUM, whiteSpace: "nowrap" }}>
+                        <div>{fmtShort(r.checkin || b.checkin)}</div>
+                        <div style={{ fontSize: 10, color: "#52524a" }}>{dayName(r.checkin || b.checkin)}</div>
+                      </td>
+                      <td style={{ ...TD_NUM, whiteSpace: "nowrap" }}>
+                        <div>{fmtShort(r.checkout || b.checkout)}</div>
+                        <div style={{ fontSize: 10, color: "#52524a" }}>{dayName(r.checkout || b.checkout)}</div>
+                      </td>
+                      <td style={TD_NUM}>{r.nights}</td>
+                      <td style={TD_NUM}>{fmt(r.tariff)}</td>
+                      <td style={TD_NUM}>{r.discountPct > 0 ? `${r.discountPct}%` : "—"}</td>
+                      <td style={TD_NUM}>{fmt(netRatePerNight)}</td>
+                      <td style={TD_NUM}>{r.numRooms}</td>
+                      <td style={TD_NUM}>{fmt(r.netCharges)}</td>
+                      <td style={TD_NUM}>{r.gstRate}%</td>
+                      <td style={TD_NUM}>{fmt(r.gstAmt)}</td>
+                      <td style={TD_NUM}>{fmt(r.totalAmt)}</td>
+                    </tr>
+                  );
+                })
+              )}
+              <tr>
+                <td style={TD_HEAD}>Total Room Charges</td>
+                <td style={TD_HEAD} colSpan={7}></td>
+                <td style={TD_HEAD_NUM}>{fmt(totalNet)}</td>
+                <td style={TD_HEAD}></td>
+                <td style={TD_HEAD_NUM}>{fmt(totalRoomGst)}</td>
+                <td style={TD_HEAD_NUM}>{fmt(totalRoomAmt)}</td>
+              </tr>
+            </tbody>
+          </table>
+          </>
+        )}
 
         {/* Meal/Pet Charges */}
         {showMealTable && (
@@ -659,8 +668,17 @@ export default function ConfirmationPage() {
             background: #fff !important;
             overflow: visible !important;
           }
+          /* A zero page margin leaves the browser no room to draw its own
+             header and footer, so the print date, tab title, page number and
+             source URL stay off the guest's copy. The margin the sheet needs
+             is applied as padding instead. */
           @page {
-            margin: 12mm;
+            size: A4;
+            margin: 0;
+          }
+          .confirmation-sheet {
+            padding: 12mm 12mm !important;
+            max-width: none !important;
           }
         }
       `}</style>

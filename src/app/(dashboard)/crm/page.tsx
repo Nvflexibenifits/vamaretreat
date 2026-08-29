@@ -16,7 +16,7 @@ export default function CrmPage() {
   const { bookings, guestNotes, openModal, currentRole } = useApp();
   const [search, setSearch] = useState("");
 
-  if (currentRole === "Front Office") {
+  if (currentRole === "Front Office" || currentRole === "Finance") {
     return (
       <div className="view">
         <div className="pg-hd"><div><h2>Access Denied</h2><p>CRM is not available for your role.</p></div></div>

@@ -36,6 +36,37 @@ export function Sidebar() {
 
   const isFrontOffice = currentRole === "Front Office";
   const isAdmin = currentRole === "Admin";
+  // Finance is a read-only reporting role: the Revenue Register and nothing else
+  const isFinance = currentRole === "Finance";
+
+  if (isFinance) {
+    return (
+      <div id="sidebar">
+        <div className="sb-hd">
+          <div className="sb-logo">
+            <div className="sb-mark">VR</div>
+            <div>
+              <div className="sb-brand">Vama Retreats</div>
+              <div className="sb-brand-sub">Back Office</div>
+            </div>
+          </div>
+        </div>
+        <nav className="sb-nav">
+          <Link
+            href="/revenue"
+            className={`nav-it${isSimpleActive(pathname, "/revenue") ? " active" : ""}`}
+          >
+            Revenue
+          </Link>
+        </nav>
+        <div className="sb-ft">
+          <div style={{ fontSize: 11, color: "var(--t3)", paddingLeft: 12 }}>
+            {currentUser} · {currentRole}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div id="sidebar">

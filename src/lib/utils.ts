@@ -320,7 +320,9 @@ export type BookingChargesBreakdown = {
 };
 
 // Charge-side view of a booking as the Revenue Register reports it: net
-// room/meal/other excluding GST, with GST split by rate. Refund cancellations
+// room/meal/other excluding GST, with GST split by rate. A redeemed credit
+// note is deducted head by head — room, then meal, then other services.
+// Refund cancellations
 // contribute nothing here — their revenue leaves with the refund and only the
 // cancellation charge (handled by the caller) is kept. Credit-note
 // cancellations keep full revenue: no money leaves, the stay obligation
@@ -333,112 +335,174 @@ export function bookingChargesBreakdown(b: Booking): BookingChargesBreakdown {
     return { roomNet: 0, mealNet: 0, creditNoteUsed: 0, other: 0, otherByItem: {}, gst5: 0, gst18: 0, gstOther: 0 };
   }
 
+  // GST is tracked per head as well as per rate: a credit note is consumed
+  // head by head, so each head has to carry its own GST with it.
+  type GstByRate = { g5: number; g18: number; gOther: number };
+  const zeroGst = (): GstByRate => ({ g5: 0, g18: 0, gOther: 0 });
+  const addGst = (t: GstByRate, amt: number, pct: number) => {
+    if (amt === 0) return;
+    if (pct === 5) t.g5 += amt;
+    else if (pct === 18) t.g18 += amt;
+    else t.gOther += amt;
+  };
+  const sumGst = (t: GstByRate) => t.g5 + t.g18 + t.gOther;
+  const scaleGst = (t: GstByRate, f: number) => {
+    t.g5 *= f;
+    t.g18 *= f;
+    t.gOther *= f;
+  };
+
   const pricingRows = getBookingPricingRows(b);
-  let roomNet = pricingRows.reduce((s, r) => s + r.netCharges, 0);
-  let gst5 = 0;
-  let gst18 = 0;
+  let roomNet = pricingRows.reduce((s2, r) => s2 + r.netCharges, 0);
+  const roomGst = zeroGst();
   pricingRows.forEach((r) => {
     if (r.gstAmt <= 0) return;
-    if (r.gstRate === 5) gst5 += r.gstAmt;
-    else gst18 += r.gstAmt;
+    addGst(roomGst, r.gstAmt, r.gstRate === 5 ? 5 : 18);
   });
+
   const mealCharges = bookingMealCharges(b);
   let mealNet = mealCharges.net;
-  gst18 += mealCharges.gst;
+  const mealGst = zeroGst();
+  addGst(mealGst, mealCharges.gst, 18);
+
   // Itemized add-ons: the net amount reports under the head its category maps
   // to (room / meal add-ons join their own columns, venue and anything
-  // uncategorised fall to Other). GST is bucketed by its actual rate
-  // regardless of head — 5% and 18% join their columns, the rest goes to GST
-  // Other.
+  // uncategorised fall to Other). GST is bucketed by its actual rate.
   const extrasList = b.extras ?? [];
   let extrasNet = 0;
   let extrasGst = 0;
-  let gstOther = 0;
-  // Non-room/meal add-ons, bucketed by their own label.
-  const otherByItem: Record<string, number> = {};
+  const otherItems: Record<string, { net: number; gst: GstByRate }> = {};
   extrasList.forEach((e) => {
     extrasNet += e.amount;
-    const head = extraHead(e);
-    if (head === "room") roomNet += e.amount;
-    else if (head === "meal") mealNet += e.amount;
-    else {
-      const label = (e.name ?? "").trim() || "Add-on Charge";
-      otherByItem[label] = (otherByItem[label] ?? 0) + e.amount;
-    }
-
     const gst = e.gst ?? 0;
-    if (gst <= 0) return;
-    const pct = e.amount > 0 ? Math.round((gst / e.amount) * 100) : 0;
-    if (pct === 5) gst5 += gst;
-    else if (pct === 18) gst18 += gst;
-    else gstOther += gst;
+    const pct = e.amount > 0 && gst > 0 ? Math.round((gst / e.amount) * 100) : 0;
     extrasGst += gst;
+    const head = extraHead(e);
+    if (head === "room") {
+      roomNet += e.amount;
+      addGst(roomGst, gst, pct);
+    } else if (head === "meal") {
+      mealNet += e.amount;
+      addGst(mealGst, gst, pct);
+    } else {
+      const label = (e.name ?? "").trim() || "Add-on Charge";
+      const bucket = (otherItems[label] ??= { net: 0, gst: zeroGst() });
+      bucket.net += e.amount;
+      addGst(bucket.gst, gst, pct);
+    }
   });
+
   // Legacy bookings rolled add-ons into grandTotal without itemizing;
   // whatever the itemized extras don't explain stays as a gross remainder and
   // has no item of its own to sit under.
-  const itemisedOther = Object.values(otherByItem).reduce((s2, v) => s2 + v, 0);
-  const legacyRemainder = Math.max(
+  let otherRemainder = Math.max(
     0,
     b.grandTotal - b.totalRoomCharges - b.totalMealCharges - extrasNet - extrasGst
   );
-  let other = itemisedOther + legacyRemainder;
+  const itemisedOther = Object.values(otherItems).reduce((s2, v) => s2 + v.net, 0);
 
   // Cancellation waive-off: the unpaid balance written off per head leaves
   // the booking's stored figures intact but comes out of reported revenue.
-  let otherWaived = 0;
   (b.waiveOff?.lines ?? []).forEach((l) => {
-    if (l.head === "room") roomNet -= l.amount;
-    else if (l.head === "meal") mealNet -= l.amount;
-    else {
-      other -= l.amount;
-      otherWaived += l.amount;
+    const pct = Math.round(l.gstPct);
+    if (l.head === "room") {
+      roomNet -= l.amount;
+      addGst(roomGst, -l.gstAmt, pct);
+      return;
     }
-    if (l.gstAmt > 0) {
-      const pct = Math.round(l.gstPct);
-      if (pct === 5) gst5 -= l.gstAmt;
-      else if (pct === 18) gst18 -= l.gstAmt;
-      else gstOther -= l.gstAmt;
+    if (l.head === "meal") {
+      mealNet -= l.amount;
+      addGst(mealGst, -l.gstAmt, pct);
+      return;
     }
-  });
-  // A waive-off on the Other head lands on the unnamed remainder first, then
-  // comes off the itemised buckets pro rata — so the item columns and the
-  // Other column still add up to the reported total.
-  if (otherWaived > 0 && itemisedOther > 0) {
-    const fromItems = Math.max(0, otherWaived - legacyRemainder);
-    if (fromItems > 0) {
+    // Other head: the unnamed remainder absorbs it first, then the itemised
+    // buckets pro rata, so item columns and Other still add up.
+    const fromRemainder = Math.min(otherRemainder, l.amount);
+    otherRemainder -= fromRemainder;
+    const fromItems = l.amount - fromRemainder;
+    if (fromItems > 0 && itemisedOther > 0) {
       const factor = Math.max(0, 1 - fromItems / itemisedOther);
-      Object.keys(otherByItem).forEach((k) => {
-        otherByItem[k] = Math.max(0, otherByItem[k] * factor);
+      Object.values(otherItems).forEach((v) => {
+        v.net = Math.max(0, v.net * factor);
+        scaleGst(v.gst, factor);
       });
     }
-  }
+    if (l.gstAmt > 0 && itemisedOther > 0) {
+      const gstTotal = Object.values(otherItems).reduce((s2, v) => s2 + sumGst(v.gst), 0);
+      if (gstTotal > 0) {
+        const factor = Math.max(0, 1 - l.gstAmt / gstTotal);
+        Object.values(otherItems).forEach((v) => scaleGst(v.gst, factor));
+      }
+    }
+  });
 
   roomNet = Math.max(0, roomNet);
   mealNet = Math.max(0, mealNet);
-  other = Math.max(0, other);
-  gst5 = Math.max(0, gst5);
-  gst18 = Math.max(0, gst18);
-  gstOther = Math.max(0, gstOther);
+  otherRemainder = Math.max(0, otherRemainder);
+  (["g5", "g18", "gOther"] as const).forEach((k) => {
+    roomGst[k] = Math.max(0, roomGst[k]);
+    mealGst[k] = Math.max(0, mealGst[k]);
+  });
 
   // A redeemed credit note was already recognised as revenue on the booking
   // that issued it, so this booking only earns what it charges beyond the
-  // note. Scale every head — and its GST — by the same factor, so the split
-  // across room / meal / each add-on item stays true to the booking's own mix.
+  // note. The note is consumed head by head in order — room charges first,
+  // then meal, then other services — rather than spread across all of them.
+  // Each head is drawn down on its gross (net + its own GST), so the net and
+  // GST it contributes fall together.
   const creditNoteUsed = creditNoteRedeemed(b);
   if (creditNoteUsed > 0) {
-    const grossValue = b.grandTotal - (b.waiveOff?.totalGross ?? 0);
-    const factor = grossValue > 0 ? Math.max(0, 1 - creditNoteUsed / grossValue) : 0;
-    roomNet *= factor;
-    mealNet *= factor;
-    other *= factor;
-    gst5 *= factor;
-    gst18 *= factor;
-    gstOther *= factor;
-    Object.keys(otherByItem).forEach((k) => {
-      otherByItem[k] *= factor;
+    let remaining = creditNoteUsed;
+
+    // Draw `remaining` down against one head's gross value, returning the
+    // factor that head's figures must be scaled by.
+    const drawDown = (gross: number): number => {
+      if (remaining <= 0 || gross <= 0) return 1;
+      const take = Math.min(remaining, gross);
+      remaining -= take;
+      return Math.max(0, 1 - take / gross);
+    };
+
+    const roomFactor = drawDown(roomNet + sumGst(roomGst));
+    roomNet *= roomFactor;
+    scaleGst(roomGst, roomFactor);
+
+    const mealFactor = drawDown(mealNet + sumGst(mealGst));
+    mealNet *= mealFactor;
+    scaleGst(mealGst, mealFactor);
+
+    // Within Other there is no further ordering, so whatever is left comes
+    // off the remainder and every service line pro rata.
+    const otherGross =
+      otherRemainder +
+      Object.values(otherItems).reduce((s2, v) => s2 + v.net + sumGst(v.gst), 0);
+    const otherFactor = drawDown(otherGross);
+    otherRemainder *= otherFactor;
+    Object.values(otherItems).forEach((v) => {
+      v.net *= otherFactor;
+      scaleGst(v.gst, otherFactor);
     });
   }
+
+  const otherByItem: Record<string, number> = {};
+  Object.entries(otherItems).forEach(([label, v]) => {
+    otherByItem[label] = v.net;
+  });
+  const other =
+    otherRemainder + Object.values(otherItems).reduce((s2, v) => s2 + v.net, 0);
+
+  const itemGst = Object.values(otherItems).reduce(
+    (t, v) => {
+      t.g5 += v.gst.g5;
+      t.g18 += v.gst.g18;
+      t.gOther += v.gst.gOther;
+      return t;
+    },
+    zeroGst()
+  );
+  const gst5 = Math.max(0, roomGst.g5 + mealGst.g5 + itemGst.g5);
+  const gst18 = Math.max(0, roomGst.g18 + mealGst.g18 + itemGst.g18);
+  const gstOther = Math.max(0, roomGst.gOther + mealGst.gOther + itemGst.gOther);
 
   return { roomNet, mealNet, creditNoteUsed, other, otherByItem, gst5, gst18, gstOther };
 }

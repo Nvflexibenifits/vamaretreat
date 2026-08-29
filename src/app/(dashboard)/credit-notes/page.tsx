@@ -41,7 +41,7 @@ export default function CreditNotesPage() {
     [notes]
   );
 
-  if (currentRole === "Front Office") {
+  if (currentRole === "Front Office" || currentRole === "Finance") {
     return (
       <div className="view">
         <div className="pg-hd">

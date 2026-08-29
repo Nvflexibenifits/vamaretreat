@@ -230,7 +230,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     useState<CancellationPolicy>(SEED_CANCELLATION_POLICY);
   const [venues, setVenues] = useState<Venue[]>(SEED_VENUES);
   const [venueTypes, setVenueTypesState] = useState<string[]>(SEED_VENUE_TYPES);
-  const [userRoles, setUserRolesState] = useState<string[]>(["Admin", "Front Office", "Sales"]);
+  const [userRoles, setUserRolesState] = useState<string[]>(["Admin", "Front Office", "Sales", "Finance"]);
   const [mealCategories, setMealCategoriesState] = useState<MealCategory[]>(SEED_MEAL_CATEGORIES);
   const [addOnCategories, setAddOnCategoriesState] = useState<AddOnCategory[]>(SEED_ADD_ON_CATEGORIES);
   const [venueBlocks, setVenueBlocks] = useState<VenueBlock[]>(SEED_VENUE_BLOCKS);

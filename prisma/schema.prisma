@@ -15,6 +15,7 @@ enum Role {
   Sales       @map("Sales")
   FrontOffice @map("Front Office")
   Admin       @map("Admin")
+  Finance     @map("Finance")
 }
 
 enum BookingStatus {

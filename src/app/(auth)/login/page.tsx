@@ -13,7 +13,7 @@ type ApiUser = {
   active: boolean;
 };
 
-const ROLE_ORDER = ["Admin", "Front Office", "Sales"];
+const ROLE_ORDER = ["Admin", "Front Office", "Sales", "Finance"];
 
 export default function LoginPage() {
   const router = useRouter();

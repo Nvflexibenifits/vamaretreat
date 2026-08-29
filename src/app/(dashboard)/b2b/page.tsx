@@ -39,13 +39,13 @@ export default function B2BBookingsPage() {
     { grandTotal: 0, advance: 0, balance: 0 }
   );
 
-  if (currentRole === "Front Office") {
+  if (currentRole === "Front Office" || currentRole === "Finance") {
     return (
       <div className="view">
         <div className="pg-hd">
           <div>
             <h2>Access Denied</h2>
-            <p>B2B Bookings are not available to Front Office.</p>
+            <p>B2B Bookings are not available for your role.</p>
           </div>
         </div>
       </div>

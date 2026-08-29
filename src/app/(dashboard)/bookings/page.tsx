@@ -19,7 +19,7 @@ export default function BookingsPage() {
   const { bookings, currentRole } = useApp();
   const router = useRouter();
 
-  if (currentRole === "Front Office") {
+  if (currentRole === "Front Office" || currentRole === "Finance") {
     return (
       <div className="view">
         <div className="pg-hd"><div><h2>Access Denied</h2><p>Booking list is not available for your role.</p></div></div>

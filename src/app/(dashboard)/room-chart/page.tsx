@@ -165,6 +165,7 @@ export default function RoomChartPage() {
     applyNightOverride,
     clearNightOverride,
     currentUser,
+    currentRole,
     showNotif,
   } = useApp();
 
@@ -1009,6 +1010,20 @@ export default function RoomChartPage() {
     setPendingUpgrade(null);
     setUpAmount("");
   };
+
+  // Finance is a read-only reporting role — the chart is an operational tool
+  if (currentRole === "Finance") {
+    return (
+      <div className="view">
+        <div className="pg-hd">
+          <div>
+            <h2>Access Denied</h2>
+            <p>Room Chart is not available for your role.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="view">

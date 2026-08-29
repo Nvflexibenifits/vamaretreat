@@ -5,10 +5,22 @@ import { useEffect } from "react";
 import { useApp } from "@/lib/store";
 import { BookingForm } from "@/components/BookingForm";
 
+const AccessDenied = ({ what }: { what: string }) => (
+  <div className="view">
+    <div className="pg-hd">
+      <div>
+        <h2>Access Denied</h2>
+        <p>{what} is not available for your role.</p>
+      </div>
+    </div>
+  </div>
+);
+
 export default function EditBookingPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
-  const { bookings, hydrated, showNotif } = useApp();
+  const { bookings, hydrated, showNotif, currentRole } = useApp();
+  const canWrite = currentRole !== "Front Office" && currentRole !== "Finance";
   const id = params?.id;
   const b = bookings.find((x) => x.id === id);
 
@@ -23,6 +35,8 @@ export default function EditBookingPage() {
       router.replace(`/bookings/${b.id}`);
     }
   }, [hydrated, b, router, showNotif]);
+
+  if (!canWrite) return <AccessDenied what="Editing bookings" />;
 
   if (!hydrated) {
     return (

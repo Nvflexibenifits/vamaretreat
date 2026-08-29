@@ -1,4 +1,5 @@
-export type Role = "Sales" | "Front Office" | "Admin";
+// Finance is read-only: the Revenue Register and booking views, nothing else.
+export type Role = "Sales" | "Front Office" | "Admin" | "Finance";
 
 export type BookingStatus =
   | "Enquiry"

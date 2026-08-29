@@ -130,7 +130,10 @@ export default function BookingDetailPage() {
     showNotif,
   } = useApp();
 
-  const isFrontOffice = currentRole === "Front Office";
+  // Roles that may open a booking but never change it. Finance reaches this
+  // page from the Revenue Register's View link and gets the same read-only
+  // treatment Front Office has.
+  const isReadOnly = currentRole === "Front Office" || currentRole === "Finance";
   const b = bookings.find((x) => x.id === id);
   const [showCancelModal, setShowCancelModal] = useState(false);
   // Editable per-booking overrides, seeded from the policy when the modal opens
@@ -154,7 +157,7 @@ export default function BookingDetailPage() {
     if (id && !b) router.replace("/bookings");
   }, [b, id, router, hydrated]);
 
-  const showCancel = !isFrontOffice && b?.status === "Confirmed";
+  const showCancel = !isReadOnly && b?.status === "Confirmed";
 
   // Pre-compute cancellation breakdown for the modal — must be before early return
   const cancelCalc = useMemo(() => {
@@ -197,9 +200,9 @@ export default function BookingDetailPage() {
 
   if (!b) return null;
 
-  const canEdit = !isFrontOffice && (b.status === "Enquiry" || b.status === "Tentative" || b.status === "Confirmed" || b.status === "Completed");
-  const showBookTentative = !isFrontOffice && b.status === "Enquiry";
-  const showConfirm = !isFrontOffice && (b.status === "Tentative");
+  const canEdit = !isReadOnly && (b.status === "Enquiry" || b.status === "Tentative" || b.status === "Confirmed" || b.status === "Completed");
+  const showBookTentative = !isReadOnly && b.status === "Enquiry";
+  const showConfirm = !isReadOnly && (b.status === "Tentative");
 
   const allocateAndSetStatus = (status: "Tentative" | "Confirmed") => {
     const result = tryAssignRooms(b.segments, b.checkin, b.checkout, bookings, roomInventory, b.id, bulkRoomBlocks, rooms);
@@ -221,7 +224,7 @@ export default function BookingDetailPage() {
   // cancellations already drop their revenue, so nothing to waive there.
   const waiveTarget = Math.max(0, Math.round(b.grandTotal - b.advance));
   const canWaiveOff =
-    !isFrontOffice &&
+    !isReadOnly &&
     b.status === "Cancelled" &&
     b.cancellationDetails?.resolution !== "refund" &&
     (waiveTarget > 0 || !!b.waiveOff);
@@ -673,7 +676,10 @@ export default function BookingDetailPage() {
           <h2>{b.guest}</h2>
           <p>{b.id}</p>
         </div>
-        <Link href="/bookings" className="btn btn-sm" style={{ background: "var(--sb)", color: "#fff", border: "none" }}>Booking List</Link>
+        {/* Read-only roles can't open the booking list, so don't offer it */}
+        {!isReadOnly && (
+          <Link href="/bookings" className="btn btn-sm" style={{ background: "var(--sb)", color: "#fff", border: "none" }}>Booking List</Link>
+        )}
       </div>
 
       <div>
@@ -729,7 +735,7 @@ export default function BookingDetailPage() {
                 Cancel
               </button>
             )}
-            {!isFrontOffice && (b.status === "Enquiry" || b.status === "Tentative") && (
+            {!isReadOnly && (b.status === "Enquiry" || b.status === "Tentative") && (
               <button
                 className="btn btn-danger btn-sm"
                 onClick={() => openModal({ kind: "lost", bookingId: b.id })}
@@ -814,7 +820,7 @@ export default function BookingDetailPage() {
                             <span style={{ color: "var(--amb)", fontWeight: 700 }}>
                               Pending · {fmt(remaining)} due
                             </span>
-                            {!isFrontOffice && (
+                            {!isReadOnly && (
                               <button
                                 className="btn btn-primary btn-xs"
                                 onClick={() => {
