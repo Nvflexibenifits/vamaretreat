@@ -449,10 +449,6 @@ export default function ConfirmationPage() {
                 <th style={{ ...TH, textAlign: "right" }}>Nights</th>
                 <th style={{ ...TH, textAlign: "right" }}>Pax</th>
                 <th style={{ ...TH, textAlign: "right" }}>Charges</th>
-                <th style={TH}></th>
-                <th style={TH}></th>
-                <th style={TH}></th>
-                <th style={TH}></th>
                 <th style={{ ...TH, textAlign: "right" }}>GST %</th>
                 <th style={{ ...TH, textAlign: "right" }}>GST Amt</th>
                 <th style={{ ...TH, textAlign: "right" }}>Total</th>
@@ -469,7 +465,6 @@ export default function ConfirmationPage() {
                   <td style={TD_NUM}>{row.nights}</td>
                   <td style={TD_NUM}>{row.pax}</td>
                   <td style={TD_NUM}>{fmt(row.chg)}</td>
-                  <td style={TD}></td><td style={TD}></td><td style={TD}></td><td style={TD}></td>
                   <td style={TD_NUM}>18%</td>
                   <td style={TD_NUM}>{fmt(row.chg * 0.18)}</td>
                   <td style={TD_NUM}>{fmt(row.chg * 1.18)}</td>
@@ -482,7 +477,6 @@ export default function ConfirmationPage() {
                   <td style={TD_NUM}>{b.nights}</td>
                   <td style={TD_NUM}>{b.adults}</td>
                   <td style={TD_NUM}>{fmt(mealOnlyCharges)}</td>
-                  <td style={TD}></td><td style={TD}></td><td style={TD}></td><td style={TD}></td>
                   <td style={TD_NUM}>18%</td>
                   <td style={TD_NUM}>{fmt(mealOnlyGst)}</td>
                   <td style={TD_NUM}>{fmt(mealOnlyCharges + mealOnlyGst)}</td>
@@ -495,7 +489,6 @@ export default function ConfirmationPage() {
                   <td style={TD_NUM}>{b.nights}</td>
                   <td style={TD_NUM}>{b.pets}</td>
                   <td style={TD_NUM}>{fmt(petCharges)}</td>
-                  <td style={TD}></td><td style={TD}></td><td style={TD}></td><td style={TD}></td>
                   <td style={TD_NUM}>18%</td>
                   <td style={TD_NUM}>{fmt(petGstAmt)}</td>
                   <td style={TD_NUM}>{fmt(totalPetAmt)}</td>
@@ -508,7 +501,6 @@ export default function ConfirmationPage() {
                   <td style={TD_NUM}>{b.nights}</td>
                   <td style={TD_NUM}>{b.driverCount}</td>
                   <td style={TD_NUM}>{fmt(driverMealCharges)}</td>
-                  <td style={TD}></td><td style={TD}></td><td style={TD}></td><td style={TD}></td>
                   <td style={TD_NUM}>18%</td>
                   <td style={TD_NUM}>{fmt(driverMealGstAmt)}</td>
                   <td style={TD_NUM}>{fmt(totalDriverMealAmt)}</td>
@@ -517,7 +509,6 @@ export default function ConfirmationPage() {
               <tr>
                 <td style={TD_HEAD} colSpan={4}>Total Meal Charges</td>
                 <td style={TD_HEAD_NUM}>{fmt(totalMealPetCharges)}</td>
-                <td style={TD_HEAD}></td><td style={TD_HEAD}></td><td style={TD_HEAD}></td><td style={TD_HEAD}></td>
                 <td style={TD_HEAD}></td>
                 <td style={TD_HEAD_NUM}>{fmt(totalMealPetGst)}</td>
                 <td style={TD_HEAD_NUM}>{fmt(totalMealPet)}</td>
@@ -532,14 +523,7 @@ export default function ConfirmationPage() {
             <thead>
               <tr>
                 <th style={TH}>Add-on Charge</th>
-                <th style={TH}></th>
-                <th style={TH}></th>
-                <th style={TH}></th>
                 <th style={{ ...TH, textAlign: "right" }}>Charges</th>
-                <th style={TH}></th>
-                <th style={TH}></th>
-                <th style={TH}></th>
-                <th style={TH}></th>
                 <th style={{ ...TH, textAlign: "right" }}>GST %</th>
                 <th style={{ ...TH, textAlign: "right" }}>GST Amt</th>
                 <th style={{ ...TH, textAlign: "right" }}>Total</th>
@@ -552,9 +536,7 @@ export default function ConfirmationPage() {
                 return (
                   <tr key={i}>
                     <td style={TD}>{e.name}</td>
-                    <td style={TD}></td><td style={TD}></td><td style={TD}></td>
                     <td style={TD_NUM}>{fmt(e.amount)}</td>
-                    <td style={TD}></td><td style={TD}></td><td style={TD}></td><td style={TD}></td>
                     <td style={TD_NUM}>{pct}%</td>
                     <td style={TD_NUM}>{fmt(gst)}</td>
                     <td style={TD_NUM}>{fmt(e.amount + gst)}</td>
@@ -562,9 +544,8 @@ export default function ConfirmationPage() {
                 );
               })}
               <tr>
-                <td style={TD_HEAD} colSpan={4}>Total Add-on Charges</td>
+                <td style={TD_HEAD}>Total Add-on Charges</td>
                 <td style={TD_HEAD_NUM}>{fmt(extrasBasic)}</td>
-                <td style={TD_HEAD}></td><td style={TD_HEAD}></td><td style={TD_HEAD}></td><td style={TD_HEAD}></td>
                 <td style={TD_HEAD}></td>
                 <td style={TD_HEAD_NUM}>{fmt(extrasGst)}</td>
                 <td style={TD_HEAD_NUM}>{fmt(extrasTotal)}</td>
