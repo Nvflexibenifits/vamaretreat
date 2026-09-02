@@ -19,7 +19,7 @@ import type {
 const DAYS_WINDOW = 30;
 
 type HoverState =
-  | { kind: "booking"; booking: Booking; date: string; rect: DOMRect }
+  | { kind: "booking"; booking: Booking; date: string; rect: DOMRect; conflictWith?: CellClaim[] }
   | { kind: "venue"; block: VenueBlock; venue: Venue; rect: DOMRect }
   | { kind: "bulk"; block: BulkRoomBlock; rect: DOMRect };
 
@@ -30,6 +30,11 @@ type UnifiedModalState =
 type CellValue =
   | { kind: "booking"; booking: Booking; fromRoomId: string; isOverridden: boolean }
   | { kind: "bulk"; block: BulkRoomBlock };
+
+// Everyone claiming one room on one night. More than one claimant is a
+// double-booking that the chart must surface instead of painting over.
+type CellClaim = { kind: "booking" | "bulk"; id: string; label: string };
+type CellConflict = { roomId: string; date: string; claims: CellClaim[] };
 
 type BulkCatRow = { catId: string; count: number };
 
@@ -271,8 +276,12 @@ export default function RoomChartPage() {
 
   // Per-night cell map: tracks the booking, original slot, and any active
   // override for each (effective room, date) cell.
-  const cellMap = useMemo(() => {
+  const { cellMap, cellConflicts } = useMemo(() => {
     const map: Record<string, CellValue> = {};
+    const claims: Record<string, CellClaim[]> = {};
+    const claim = (key: string, c: CellClaim) => {
+      (claims[key] ??= []).push(c);
+    };
     bookings
       .filter(
         (b) =>
@@ -304,6 +313,7 @@ export default function RoomChartPage() {
                 fromRoomId: origRoomId,
                 isOverridden: !!override,
               };
+              claim(`${effectiveRoomId}|${ds}`, { kind: "booking", id: b.id, label: b.guest });
             });
             cur.setDate(cur.getDate() + 1);
           }
@@ -317,13 +327,41 @@ export default function RoomChartPage() {
         blk.rows.forEach((row) =>
           row.roomIds.forEach((roomId) => {
             map[`${roomId}|${ds}`] = { kind: "bulk", block: blk };
+            claim(`${roomId}|${ds}`, {
+              kind: "bulk",
+              id: blk.id,
+              label: blk.status === "Maintenance" ? "Maintenance" : blk.label || blk.guestName,
+            });
           })
         );
         cur.setDate(cur.getDate() + 1);
       }
     });
-    return map;
+    const conflicts: Record<string, CellConflict> = {};
+    Object.entries(claims).forEach(([key, cs]) => {
+      if (cs.length < 2) return;
+      const [roomId, date] = key.split("|");
+      conflicts[key] = { roomId, date, claims: cs };
+    });
+    return { cellMap: map, cellConflicts: conflicts };
   }, [bookings, bulkRoomBlocks]);
+
+  // Conflicts grouped for the banner: one row per room, nights and claimants
+  // merged so a multi-night clash reads as a single item.
+  const conflictRows = useMemo(() => {
+    const byRoom = new Map<string, { roomId: string; dates: string[]; claims: CellClaim[] }>();
+    Object.values(cellConflicts).forEach((c) => {
+      const row = byRoom.get(c.roomId) ?? { roomId: c.roomId, dates: [], claims: [] };
+      row.dates.push(c.date);
+      c.claims.forEach((cl) => {
+        if (!row.claims.some((x) => x.kind === cl.kind && x.id === cl.id)) row.claims.push(cl);
+      });
+      byRoom.set(c.roomId, row);
+    });
+    return [...byRoom.values()]
+      .map((r) => ({ ...r, dates: [...new Set(r.dates)].sort() }))
+      .sort((a, b) => a.dates[0].localeCompare(b.dates[0]) || compareRoomLabels(a.roomId, b.roomId));
+  }, [cellConflicts]);
 
   const venueBlockMap = useMemo(() => {
     const map: Record<string, VenueBlock> = {};
@@ -1064,6 +1102,54 @@ export default function RoomChartPage() {
         </div>
       </div>
 
+      {conflictRows.length > 0 && (
+        <div className="conflict-banner">
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--red)" }}>
+              {conflictRows.length} room{conflictRows.length > 1 ? "s" : ""} double-booked
+            </div>
+            <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 2 }}>
+              Two or more bookings hold the same room on the same night. Open one and change its rooms, or drag it to a free room on the chart.
+            </div>
+            <div className="unalloc-banner-cards">
+              {conflictRows.map((r) => {
+                const label = roomInventory.find((x) => x.id === r.roomId)?.label ?? r.roomId;
+                const nights =
+                  r.dates.length === 1
+                    ? fmtIN(r.dates[0])
+                    : `${fmtIN(r.dates[0])} to ${fmtIN(r.dates[r.dates.length - 1])}`;
+                return (
+                  <div key={r.roomId} className="conflict-card">
+                    <div className="unalloc-card-name">
+                      {label} · {nights}
+                    </div>
+                    <div className="conflict-card-claims">
+                      {r.claims.map((c) => (
+                        <button
+                          key={c.kind + c.id}
+                          type="button"
+                          className="conflict-claim"
+                          onClick={() => {
+                            if (c.kind === "booking") router.push(`/bookings/${c.id}`);
+                            else {
+                              const blk = bulkRoomBlocks.find((b) => b.id === c.id);
+                              if (blk) setBulkDetail(blk);
+                            }
+                          }}
+                        >
+                          {c.label}
+                          <span className="conflict-claim-id">{c.kind === "booking" ? c.id : "block"}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
       {unalloc.length > 0 && (
         <div className="unalloc-banner">
           <div style={{ flex: 1 }}>
@@ -1113,6 +1199,10 @@ export default function RoomChartPage() {
                 }}
               ></div>
               Blocked
+            </div>
+            <div className="rc-legend-item">
+              <div className="rc-legend-dot" style={{ background: "var(--red-bg)", border: "2px solid var(--red)" }}></div>
+              Double-booked
             </div>
             <div style={{ width: 1, height: 16, background: "var(--bd2)", margin: "0 6px" }}></div>
             <div className="rc-legend-item">
@@ -1286,6 +1376,10 @@ export default function RoomChartPage() {
                   {dates.map((d) => {
                     const isToday = d === today;
                     const cell = cellMap[room.id + "|" + d];
+                    const conflict = cellConflicts[room.id + "|" + d];
+                    const conflictTitle = conflict
+                      ? `Double-booked: ${conflict.claims.map((c) => c.label).join(", ")}`
+                      : undefined;
                     const booking = cell?.kind === "booking" ? cell.booking : undefined;
                     const bulkCell = cell?.kind === "bulk" ? cell : undefined;
                     const isDropHover =
@@ -1323,7 +1417,10 @@ export default function RoomChartPage() {
                     }
                     if (bulkCell) {
                       const blk = bulkCell.block;
-                      const cls = "rc-cell-booked" + (blk.status === "Tentative" ? " status-tentative" : "");
+                      const cls =
+                        "rc-cell-booked" +
+                        (blk.status === "Tentative" ? " status-tentative" : "") +
+                        (conflict ? " has-conflict" : "");
                       const isDragSource = drag?.kind === "bulk" && drag.blockId === blk.id && drag.fromRoomId === room.id;
                       return (
                         <td key={d} className={isToday ? "rc-today" : ""} style={{ padding: 4 }}>
@@ -1346,7 +1443,7 @@ export default function RoomChartPage() {
                               cursor: "grab",
                               opacity: isDragSource ? 0.5 : 1,
                             }}
-                            title="Drag to change room (whole stay) · Click to view"
+                            title={conflictTitle ?? "Drag to change room (whole stay) · Click to view"}
                             onClick={() => { if (drag) return; setBulkDetail(blk); setHover(null); }}
                             onMouseEnter={(e) => showHover({ kind: "bulk", block: blk, rect: e.currentTarget.getBoundingClientRect() })}
                             onMouseLeave={hideHover}
@@ -1361,6 +1458,7 @@ export default function RoomChartPage() {
                       if (booking.pets > 0) cls += " status-pet";
                       else if (booking.status === "Completed") cls += " status-completed";
                       else if (booking.status === "Tentative") cls += " status-tentative";
+                      if (conflict) cls += " has-conflict";
                       const draggable = isBookingDraggable(booking);
                       // For per-night drag: drop is allowed only on the same date column.
                       const isDragSourceDate =
@@ -1427,6 +1525,7 @@ export default function RoomChartPage() {
                                 booking,
                                 date: d,
                                 rect: e.currentTarget.getBoundingClientRect(),
+                                conflictWith: conflict?.claims.filter((c) => !(c.kind === "booking" && c.id === booking.id)),
                               })
                             }
                             onMouseLeave={hideHover}
@@ -1439,11 +1538,12 @@ export default function RoomChartPage() {
                                 : undefined,
                             }}
                             title={
-                              draggable
+                              conflictTitle ??
+                              (draggable
                                 ? cell.kind === "booking" && cell.isOverridden
                                   ? "Drag to move · Click to open · Night reassigned"
                                   : "Drag to move · Click to open"
-                                : undefined
+                                : undefined)
                             }
                           >
                             {booking.guest.split(" ")[0]}
@@ -1492,7 +1592,7 @@ export default function RoomChartPage() {
       </div>
 
       {hover?.kind === "booking" && (
-        <BookingHoverCard booking={hover.booking} date={hover.date} rect={hover.rect} />
+        <BookingHoverCard booking={hover.booking} date={hover.date} rect={hover.rect} conflictWith={hover.conflictWith} />
       )}
       {hover?.kind === "venue" && (
         <VenueHoverCard block={hover.block} venue={hover.venue} rect={hover.rect} />
@@ -2168,10 +2268,12 @@ function BookingHoverCard({
   booking,
   date,
   rect,
+  conflictWith,
 }: {
   booking: Booking;
   date: string;
   rect: DOMRect;
+  conflictWith?: CellClaim[];
 }) {
   // Counts for the hovered night's segment; booking-level fallback for
   // legacy bookings without per-segment data.
@@ -2244,6 +2346,12 @@ function BookingHoverCard({
       <div style={{ fontSize: 11, color: "var(--t3)", marginBottom: 8 }}>
         {booking.id} · {fmtIN(booking.checkin)} to {fmtIN(booking.checkout)}
       </div>
+      {conflictWith && conflictWith.length > 0 && (
+        <div className="hover-conflict">
+          Double-booked on {fmtIN(date)} with{" "}
+          {conflictWith.map((c) => (c.kind === "booking" ? `${c.label} (${c.id})` : c.label)).join(", ")}
+        </div>
+      )}
 
       <div style={{ fontSize: 10, color: "var(--t3)", marginBottom: 4, fontWeight: 600 }}>
         Guests on {fmtIN(date)}

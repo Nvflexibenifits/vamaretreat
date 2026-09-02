@@ -593,6 +593,21 @@ export function blockOccupancyEnd(checkin: string, checkout: string): string {
   return d.toISOString().split("T")[0];
 }
 
+// Physical rooms a booking actually sleeps in on a given date: the rooms it
+// holds, with any per-night reassignment (drag on the room chart) applied.
+export function effectiveRoomsOnDate(b: Booking, date: string): string[] {
+  return roomsHeldOnDate(b, date).map((roomId) => {
+    const override = b.nightOverrides?.find((o) => o.date === date && o.fromRoomId === roomId);
+    return override ? override.toRoomId : roomId;
+  });
+}
+
+function nextDay(date: string): string {
+  const d = new Date(date);
+  d.setDate(d.getDate() + 1);
+  return d.toISOString().split("T")[0];
+}
+
 export function findAvailableRoomIds(
   category: string,
   checkin: string,
@@ -604,18 +619,18 @@ export function findAvailableRoomIds(
   ignoreBlockId?: string
 ): string[] {
   const occupied = new Set<string>();
+  // Resolve occupancy night by night so a booking that was dragged to another
+  // room for some nights blocks the room it actually sleeps in, not the one it
+  // was originally allocated.
   bookings
     .filter((b) => b.id !== ignoreBookingId)
     .filter((b) => b.status === "Tentative" || b.status === "Confirmed" || b.status === "Completed")
     .filter((b) => rangesOverlap(b.checkin, b.checkout, checkin, checkout))
     .forEach((b) => {
-      const segsWithAlloc = (b.segments ?? []).filter((s) => Array.isArray(s.allocatedRooms));
-      if (segsWithAlloc.length === 0) {
-        b.allocatedRooms.forEach((r) => occupied.add(r));
-      } else {
-        segsWithAlloc
-          .filter((s) => rangesOverlap(s.checkin, s.checkout, checkin, checkout))
-          .forEach((s) => (s.allocatedRooms ?? []).forEach((r) => occupied.add(r)));
+      const from = b.checkin > checkin ? b.checkin : checkin;
+      const to = b.checkout < checkout ? b.checkout : checkout;
+      for (let date = from; date < to; date = nextDay(date)) {
+        effectiveRoomsOnDate(b, date).forEach((r) => occupied.add(r));
       }
     });
   bulkBlocks
