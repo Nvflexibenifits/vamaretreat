@@ -8,6 +8,7 @@ import type {
   DiscountCaps,
   Extra,
   GstSettings,
+  Payment,
   PricingRow,
   Role,
   RoomInventoryItem,
@@ -536,6 +537,43 @@ export function b2bChargesBreakdown(b: B2BBooking): BookingChargesBreakdown {
 
   const other = Object.values(otherByItem).reduce((s, v) => s + v, 0);
   return { roomNet, mealNet, creditNoteUsed: 0, other, otherByItem, gst5, gst18, gstOther };
+}
+
+// ─────── PAYMENTS ───────
+export function isCreditNotePayment(p: Payment): boolean {
+  return (p.mode || "").toLowerCase().includes("credit note");
+}
+
+// Money received on a booking split by how it arrived. Credit note payments
+// bring no new money in, so callers that want cash actually received must use
+// bank + cash only. Legacy bookings may carry an advance without itemized
+// payments; that advance is treated as bank money.
+export function paymentSplit(b: Booking): { bank: number; cash: number; crNote: number } {
+  let bank = 0, cash = 0, crNote = 0;
+  (b.payments ?? []).forEach((p) => {
+    const m = (p.mode || "").toLowerCase();
+    if (m.includes("cash")) cash += p.amount;
+    else if (m.includes("credit note")) crNote += p.amount;
+    else bank += p.amount;
+  });
+  if (bank + cash + crNote === 0 && b.advance > 0) bank = b.advance;
+  return { bank, cash, crNote };
+}
+
+// Cash and bank money actually received on a booking.
+export function cashReceived(b: Booking): number {
+  const { bank, cash } = paymentSplit(b);
+  return bank + cash;
+}
+
+// Credit note redemptions on a booking, grouped by note code.
+export function creditNoteRedemptions(b: Booking): { code: string; amount: number }[] {
+  const byCode = new Map<string, number>();
+  (b.payments ?? []).forEach((p) => {
+    if (!isCreditNotePayment(p) || !p.creditNoteCode || p.amount <= 0) return;
+    byCode.set(p.creditNoteCode, (byCode.get(p.creditNoteCode) ?? 0) + p.amount);
+  });
+  return [...byCode.entries()].map(([code, amount]) => ({ code, amount }));
 }
 
 // ─────── ROOM ALLOCATION ───────

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { b2bChargesBreakdown, bookingChargesBreakdown, countsAsRevenue, fmt, todayStr } from "@/lib/utils";
+import { b2bChargesBreakdown, bookingChargesBreakdown, cashReceived, countsAsRevenue, fmt, paymentSplit, todayStr } from "@/lib/utils";
 
 // dd/mm/yy
 function fmtShort(d: string): string {
@@ -109,15 +109,7 @@ export default function RevenuePage() {
         });
         const dedTotal = dedCommission + dedTds + dedSpecial;
 
-        let bank = 0, cash = 0, crNote = 0;
-        (b.payments ?? []).forEach((p) => {
-          const m = (p.mode || "").toLowerCase();
-          if (m.includes("cash")) cash += p.amount;
-          else if (m.includes("credit note")) crNote += p.amount;
-          else bank += p.amount;
-        });
-        // Legacy bookings may carry an advance without itemized payments
-        if (bank + cash + crNote === 0 && b.advance > 0) bank = b.advance;
+        const { bank, cash, crNote } = paymentSplit(b);
         // A credit note brings no new money in — it has already been netted
         // off the charges above, so it must not count as a receipt too.
         const received = bank + cash;
@@ -289,6 +281,8 @@ export default function RevenuePage() {
 
   // Refunds due (global, unaffected by filters) — unpaid refund balance on
   // refund-cancelled bookings, same formula as the table's balance column.
+  // Only cash and bank money can be owed back; credit note payments went
+  // back to their note on cancellation and never count as received here.
   const refundsDue = useMemo(() => {
     let sum = 0;
     bookings.forEach((b) => {
@@ -296,8 +290,7 @@ export default function RevenuePage() {
       const retained =
         (b.cancellationDetails?.cancellationCharge ?? 0) +
         (b.cancellationDetails?.creditNoteAmount ?? 0);
-      let received = (b.payments ?? []).reduce((s, p) => s + p.amount, 0);
-      if (received === 0 && b.advance > 0) received = b.advance;
+      const received = cashReceived(b);
       const refundsPaid = (b.cancellationDetails?.refundPayouts ?? []).reduce((s, p) => s + p.amount, 0);
       sum += Math.max(0, Math.round(received - retained - refundsPaid));
     });

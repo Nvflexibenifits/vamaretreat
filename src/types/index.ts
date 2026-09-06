@@ -192,6 +192,9 @@ export type CancellationDetails = {
   processedBy: string;
   // Actual payouts made against refundAmount, recorded from the booking page
   refundPayouts?: RefundPayout[];
+  // Credit note value that had been redeemed on this booking and went back to
+  // its note when the booking was cancelled. Never refundable in cash.
+  creditNotesRestored?: { code: string; amount: number }[];
 };
 
 export type CreditNoteTransaction = {

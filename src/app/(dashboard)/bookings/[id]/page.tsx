@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { bookingChargesBreakdown, bookingMealCharges, fmt, fmtIN, dayName, getBookingPricingRows, nightsBetween, todayStr, tryAssignRooms } from "@/lib/utils";
+import { bookingChargesBreakdown, bookingMealCharges, cashReceived, creditNoteRedemptions, fmt, fmtIN, dayName, getBookingPricingRows, nightsBetween, todayStr, tryAssignRooms } from "@/lib/utils";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { CancellationDetails, CancellationPolicy, ChargeHead, SpecialDay, WaiveOffLine } from "@/types";
 
@@ -172,7 +172,12 @@ export default function BookingDetailPage() {
       ? daysBeforeCheckin >= threshold ? cancellationPolicy.specialAbove : cancellationPolicy.specialBelow
       : daysBeforeCheckin >= threshold ? cancellationPolicy.standardAbove : cancellationPolicy.standardBelow;
 
-    const paid = b.advance;
+    // Policy percentages apply to cash and bank money only. Value that came
+    // in as a credit note goes straight back to that note on cancellation and
+    // is never refundable in cash.
+    const paid = cashReceived(b);
+    const creditNotesRestored = creditNoteRedemptions(b);
+    const creditNotePaid = creditNotesRestored.reduce((s, r) => s + r.amount, 0);
     const cancellationCharge = Math.round(paid * cell.cancellationChargePct / 100);
     const refundAmount = Math.round(paid * (cell.refundPct ?? 0) / 100);
     const creditNoteAmount = Math.round(paid * (cell.creditNotePct ?? 0) / 100);
@@ -187,6 +192,8 @@ export default function BookingDetailPage() {
       threshold,
       policyLabel: `${isSpecial ? "Special Day" : "Standard"} — ${daysBeforeCheckin >= threshold ? "Above" : "Below"} threshold (${threshold} days)`,
       paid,
+      creditNotePaid,
+      creditNotesRestored,
       cancellationCharge,
       refundAmount,
       creditNoteAmount,
@@ -363,10 +370,16 @@ export default function BookingDetailPage() {
       resolution: cancelRefundAmt > 0 ? "refund" : cancelCnAmt > 0 ? "credit-note" : "refund",
       creditNoteCode: cancelCnCode,
       processedBy: currentUser,
+      creditNotesRestored: cancelCalc.creditNotesRestored.length > 0 ? cancelCalc.creditNotesRestored : undefined,
     };
     cancelBooking(b.id, details);
     setShowCancelModal(false);
-    showNotif("Booking cancelled", "success");
+    showNotif(
+      cancelCalc.creditNotePaid > 0
+        ? `Booking cancelled. ${fmt(cancelCalc.creditNotePaid)} restored to ${cancelCalc.creditNotesRestored.map((r) => r.code).join(", ")}`
+        : "Booking cancelled",
+      "success"
+    );
   };
 
   const onConfirmRefund = () => {
@@ -606,9 +619,22 @@ export default function BookingDetailPage() {
                 </div>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "var(--surf2)" }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: "var(--t2)" }}>Advance Amount Paid</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "var(--t2)" }}>Paid by Bank / Cash</span>
                 <span style={{ fontSize: 14, fontWeight: 700 }}>{fmt(cancelCalc.paid)}</span>
               </div>
+              {cancelCalc.creditNotePaid > 0 && (
+                <div style={{ padding: "10px 14px", background: "var(--acc-lt)", borderTop: "1px solid var(--bd)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: "var(--t2)" }}>
+                      Paid by Credit Note ({cancelCalc.creditNotesRestored.map((r) => r.code).join(", ")})
+                    </span>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: "var(--acc)" }}>{fmt(cancelCalc.creditNotePaid)}</span>
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 4 }}>
+                    Goes back to the credit note on cancellation. Not refundable in cash, so the percentages below apply only to the bank and cash amount.
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Refund / Credit Note — % editable for this booking */}
@@ -766,7 +792,7 @@ export default function BookingDetailPage() {
                     const cd = b.cancellationDetails;
                     // Percentages actually applied; older cancellations
                     // without stored pcts derive them from the amounts.
-                    const paid = b.advance || 0;
+                    const paid = cashReceived(b);
                     const rp = cd.refundPct ?? (paid > 0 ? Math.round((cd.refundAmount / paid) * 100) : 0);
                     const cp = cd.creditNotePct ?? (paid > 0 ? Math.round((cd.creditNoteAmount / paid) * 100) : 0);
                     const parts = [];
@@ -780,6 +806,18 @@ export default function BookingDetailPage() {
                 <span className="detail-key">Amount Received</span>
                 <span className="detail-val">{fmt(b.advance)}</span>
               </div>
+              {(b.cancellationDetails.creditNotesRestored ?? []).map((r) => (
+                <div className="detail-row" key={r.code}>
+                  <span className="detail-key">Credit Note Restored</span>
+                  <span className="detail-val" style={{ color: "var(--acc)", fontWeight: 700 }}>
+                    {fmt(r.amount)}
+                    <span style={{ fontSize: 11, marginLeft: 8, color: "var(--t3)", fontWeight: 500 }}>
+                      back to{" "}
+                      <Link href="/credit-notes" style={{ color: "var(--acc)", textDecoration: "none" }}>{r.code}</Link>
+                    </span>
+                  </span>
+                </div>
+              ))}
               {b.cancellationDetails.cancellationCharge > 0 && (
                 <div className="detail-row">
                   <span className="detail-key">Cancellation Charge</span>

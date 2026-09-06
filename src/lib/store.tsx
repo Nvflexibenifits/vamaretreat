@@ -474,6 +474,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
         );
       });
       sync(`/api/app/bookings/${bookingId}`, "PATCH", { status: "Cancelled", cancellationDetails: details });
+      // Credit note value redeemed on this booking goes back to its note. The
+      // guest never paid that part in cash, so it is restored, not refunded.
+      const restored = details.creditNotesRestored ?? [];
+      if (restored.length > 0) {
+        setCreditNotes((prev) =>
+          prev.map((cn) => {
+            const r = restored.find((x) => x.code === cn.code);
+            if (!r || r.amount <= 0) return cn;
+            const usedAmount = Math.max(0, cn.usedAmount - r.amount);
+            const remainingAmount = Math.min(cn.totalAmount, cn.remainingAmount + r.amount);
+            const updated: CreditNote = {
+              ...cn,
+              usedAmount,
+              remainingAmount,
+              status: usedAmount <= 0 ? "Available" : remainingAmount <= 0 ? "Fully Used" : "Partially Used",
+              transactions: [
+                ...(cn.transactions ?? []),
+                { date: details.cancellationDate, bookingId, amountUsed: -r.amount, remainingAfter: remainingAmount },
+              ],
+            };
+            sync(`/api/app/credit-notes/${encodeURIComponent(cn.code)}`, "PATCH", updated);
+            return updated;
+          })
+        );
+      }
       if (details.creditNoteAmount > 0 && details.creditNoteCode) {
         const cn: CreditNote = {
           code: details.creditNoteCode,

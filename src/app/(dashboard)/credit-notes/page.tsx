@@ -133,8 +133,8 @@ export default function CreditNotesPage() {
                       {(n.transactions ?? []).length > 0 && (
                         <div style={{ fontSize: 10, color: "var(--t3)", marginTop: 2 }}>
                           {(n.transactions ?? []).map((t, i) => (
-                            <div key={i} style={{ whiteSpace: "nowrap" }}>
-                              {fmt(t.amountUsed)} on{" "}
+                            <div key={i} style={{ whiteSpace: "nowrap", color: t.amountUsed < 0 ? "var(--grn)" : undefined }}>
+                              {t.amountUsed < 0 ? `${fmt(-t.amountUsed)} restored from` : `${fmt(t.amountUsed)} on`}{" "}
                               <Link href={`/bookings/${t.bookingId}`} style={{ color: "var(--acc)", textDecoration: "none" }}>
                                 {t.bookingId}
                               </Link>{" "}
