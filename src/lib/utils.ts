@@ -10,6 +10,7 @@ import type {
   GstSettings,
   Payment,
   PricingRow,
+  PricingRowType,
   Role,
   RoomInventoryItem,
   RoomMaster,
@@ -240,6 +241,116 @@ export function getBookingPricingRows(b: Booking): PricingRow[] {
       r.pricingRows.map((pr) => ({ ...pr, checkin: seg.checkin, checkout: seg.checkout }))
     )
   );
+}
+
+// One line of the guest-facing pricing sheet: a run of consecutive nights for
+// one category at one rate, with the exact check-in and check-out of that run.
+export type PricingSheetLine = {
+  roomName: string;
+  checkin: string;
+  checkout: string;
+  nights: number;
+  tariff: number;
+  discountPct: number;
+  numRooms: number;
+  roomCharges: number;
+  discountAmt: number;
+  netCharges: number;
+  gstRate: number;
+  gstAmt: number;
+  totalAmt: number;
+};
+
+function nightRateType(date: string): "fri" | "sat" | "sun-thu" {
+  const day = new Date(date + "T00:00:00").getDay();
+  return day === 5 ? "fri" : day === 6 ? "sat" : "sun-thu";
+}
+
+function rowCoversNight(rowType: PricingRowType, date: string): boolean {
+  const t = nightRateType(date);
+  if (rowType === "fri-sat") return t === "fri" || t === "sat";
+  return rowType === t;
+}
+
+// Pricing rows are stored per rate type (weekday, Friday, Saturday) and only
+// carry the whole segment's dates, so a Sat + Sun stay prints as two rows that
+// both read "12th to 14th". This spreads every row over the nights it actually
+// prices, then joins consecutive nights that share a category, tariff,
+// discount and room count into a single line. Custom rows have no weekday
+// meaning and stay as stored.
+export function pricingSheetLines(b: Booking): PricingSheetLine[] {
+  const out: PricingSheetLine[] = [];
+  (b.segments ?? []).forEach((seg) => {
+    const segNights: string[] = [];
+    for (let d = seg.checkin; d < seg.checkout; d = nextDay(d)) segNights.push(d);
+    seg.rooms.forEach((room) => {
+      const nightly: PricingSheetLine[] = [];
+      const asStored: PricingSheetLine[] = [];
+      room.pricingRows.forEach((pr) => {
+        const base = {
+          roomName: pr.roomName || room.roomName,
+          tariff: pr.tariff,
+          discountPct: pr.discountPct,
+          numRooms: pr.numRooms,
+          gstRate: pr.gstRate,
+        };
+        const covered = pr.rowType === "custom" ? [] : segNights.filter((d) => rowCoversNight(pr.rowType, d));
+        if (covered.length === 0 || covered.length !== pr.nights) {
+          asStored.push({
+            ...base,
+            checkin: seg.checkin,
+            checkout: seg.checkout,
+            nights: pr.nights,
+            roomCharges: pr.roomCharges,
+            discountAmt: pr.discountAmt,
+            netCharges: pr.netCharges,
+            gstAmt: pr.gstAmt,
+            totalAmt: pr.totalAmt,
+          });
+          return;
+        }
+        const n = covered.length;
+        covered.forEach((d) =>
+          nightly.push({
+            ...base,
+            checkin: d,
+            checkout: nextDay(d),
+            nights: 1,
+            roomCharges: pr.roomCharges / n,
+            discountAmt: pr.discountAmt / n,
+            netCharges: pr.netCharges / n,
+            gstAmt: pr.gstAmt / n,
+            totalAmt: pr.totalAmt / n,
+          })
+        );
+      });
+      nightly.sort((a, c) => a.checkin.localeCompare(c.checkin));
+      nightly.forEach((line) => {
+        const prev = out[out.length - 1];
+        const joinable =
+          prev &&
+          prev.roomName === line.roomName &&
+          prev.checkout === line.checkin &&
+          prev.tariff === line.tariff &&
+          prev.discountPct === line.discountPct &&
+          prev.numRooms === line.numRooms &&
+          prev.gstRate === line.gstRate;
+        if (joinable) {
+          prev.checkout = line.checkout;
+          prev.nights += 1;
+          prev.roomCharges += line.roomCharges;
+          prev.discountAmt += line.discountAmt;
+          prev.netCharges += line.netCharges;
+          prev.gstAmt += line.gstAmt;
+          prev.totalAmt += line.totalAmt;
+        } else {
+          out.push({ ...line });
+        }
+      });
+      out.push(...asStored);
+    });
+  });
+  return out;
 }
 
 // Whether a booking's charges belong in revenue reporting. A stay that has

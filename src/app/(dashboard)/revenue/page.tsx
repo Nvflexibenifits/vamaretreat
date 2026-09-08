@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { b2bChargesBreakdown, bookingChargesBreakdown, cashReceived, countsAsRevenue, fmt, paymentSplit, todayStr } from "@/lib/utils";
+import { b2bChargesBreakdown, bookingChargesBreakdown, countsAsRevenue, fmt, paymentSplit, todayStr } from "@/lib/utils";
+import type { B2BBooking, Booking } from "@/types";
 
 // dd/mm/yy
 function fmtShort(d: string): string {
@@ -34,6 +35,94 @@ const groupHdStyle: React.CSSProperties = {
 };
 
 const sectionBorder: React.CSSProperties = { borderLeft: "2px solid var(--bd)" };
+
+// One Revenue Register row for a B2C booking. Pure, so the same figures feed
+// the table and the summary cards.
+function revenueRow(b: Booking) {
+  const isCancelled = b.status === "Cancelled";
+  // Refund cancellations remove the booking's revenue (only a
+  // cancellation charge, if any, is kept). Credit-note cancellations
+  // keep full revenue: no money leaves, the stay obligation remains.
+  const isRefundCancel = isCancelled && b.cancellationDetails?.resolution === "refund";
+  const { roomNet, mealNet, creditNoteUsed, other, otherByItem, gst5, gst18, gstOther } = bookingChargesBreakdown(b);
+  // Value a cancelled booking actually keeps: cancellation charge
+  // retained plus any credit note issued (the CN worth stays with the
+  // hotel; the uncollected balance never arrives).
+  const retained = isCancelled
+    ? (b.cancellationDetails?.cancellationCharge ?? 0) + (b.cancellationDetails?.creditNoteAmount ?? 0)
+    : 0;
+  // A waive-off writes the unpaid balance out of the booking's value
+  // Net of the redeemed credit note — that value was already earned on
+  // the booking that issued the note.
+  const total = isRefundCancel
+    ? retained
+    : b.grandTotal - (b.waiveOff?.totalGross ?? 0) - creditNoteUsed;
+
+  // OTA deductions by type (amount + its GST — both withheld)
+  let dedCommission = 0, dedTds = 0, dedSpecial = 0;
+  (b.deductions ?? []).forEach((d) => {
+    const v = d.amount + d.gst;
+    if (d.type === "Commission") dedCommission += v;
+    else if (d.type === "TDS") dedTds += v;
+    else dedSpecial += v;
+  });
+  const dedTotal = dedCommission + dedTds + dedSpecial;
+
+  const { bank, cash, crNote } = paymentSplit(b);
+  // A credit note brings no new money in — it has already been netted
+  // off the charges above, so it must not count as a receipt too.
+  const received = bank + cash;
+
+  // Recorded refund payouts settle the refund-due balance
+  const refundsPaid = isCancelled
+    ? (b.cancellationDetails?.refundPayouts ?? []).reduce((s, p) => s + p.amount, 0)
+    : 0;
+
+  // Balance convention: positive = pending from guest (amber),
+  // negative = refund the hotel owes the guest (purple).
+  // Credit-note cancellations keep showing the unpaid balance until it
+  // is waived off — the waive-off reduces `total` to what was received,
+  // which drives this to 0. Refund cancellations show only the unpaid
+  // refund as negative until Record Refund clears it.
+  // Balance settles against net of OTA deductions — the deducted part
+  // never arrives, so it must not read as pending.
+  let bal: number;
+  if (!isCancelled) bal = Math.round(total - dedTotal - received);
+  else if (isRefundCancel) bal = Math.min(0, Math.round(retained + refundsPaid - received));
+  else bal = Math.max(0, Math.round(total - dedTotal - received));
+  // Credit-note cancellation still carrying an unpaid balance — the
+  // waive-off hasn't been done yet; shown in red so it stands apart
+  // from money actually expected from guests.
+  const waivePending = isCancelled && !isRefundCancel && bal >= 1;
+  return {
+    id: b.id, guest: b.guest, mobile: b.mobile, checkin: b.checkin,
+    checkout: b.checkout, statusLabel: b.status, href: `/bookings/${b.id}`,
+    roomNet, mealNet, creditNoteUsed, other, otherByItem, gst5, gst18, gstOther,
+    total, dedCommission, dedTds, dedSpecial, bank, cash, crNote, bal,
+    isCancelled, waivePending,
+  };
+}
+
+// One Revenue Register row for a confirmed B2B booking. Pure, like revenueRow.
+function b2bRevenueRow(b: B2BBooking) {
+  const { roomNet, mealNet, other, otherByItem, gst5, gst18, gstOther } =
+    b2bChargesBreakdown(b);
+  let bank = 0, cash = 0;
+  (b.payments ?? []).forEach((p) => {
+    const m = (p.mode || "").toLowerCase();
+    if (m.includes("cash")) cash += p.amount;
+    else bank += p.amount;
+  });
+  const received = bank + cash;
+  const total = b.grandTotal;
+  return {
+    id: b.id, guest: b.orgName, mobile: b.contactNumber, checkin: b.checkin,
+    checkout: b.checkout, statusLabel: b.status, href: `/b2b/${b.id}`,
+    roomNet, mealNet, creditNoteUsed: 0, other, otherByItem, gst5, gst18, gstOther,
+    total, dedCommission: 0, dedTds: 0, dedSpecial: 0, bank, cash, crNote: 0,
+    bal: Math.round(total - received), isCancelled: false, waivePending: false,
+  };
+}
 
 export default function RevenuePage() {
   const { bookings, b2bBookings, currentRole, addOnCategories } = useApp();
@@ -79,70 +168,7 @@ export default function RevenuePage() {
         return true;
       })
       .sort((a, b) => a.checkin.localeCompare(b.checkin))
-      .map((b) => {
-        const isCancelled = b.status === "Cancelled";
-        // Refund cancellations remove the booking's revenue (only a
-        // cancellation charge, if any, is kept). Credit-note cancellations
-        // keep full revenue: no money leaves, the stay obligation remains.
-        const isRefundCancel = isCancelled && b.cancellationDetails?.resolution === "refund";
-        const { roomNet, mealNet, creditNoteUsed, other, otherByItem, gst5, gst18, gstOther } = bookingChargesBreakdown(b);
-        // Value a cancelled booking actually keeps: cancellation charge
-        // retained plus any credit note issued (the CN worth stays with the
-        // hotel; the uncollected balance never arrives).
-        const retained = isCancelled
-          ? (b.cancellationDetails?.cancellationCharge ?? 0) + (b.cancellationDetails?.creditNoteAmount ?? 0)
-          : 0;
-        // A waive-off writes the unpaid balance out of the booking's value
-        // Net of the redeemed credit note — that value was already earned on
-        // the booking that issued the note.
-        const total = isRefundCancel
-          ? retained
-          : b.grandTotal - (b.waiveOff?.totalGross ?? 0) - creditNoteUsed;
-
-        // OTA deductions by type (amount + its GST — both withheld)
-        let dedCommission = 0, dedTds = 0, dedSpecial = 0;
-        (b.deductions ?? []).forEach((d) => {
-          const v = d.amount + d.gst;
-          if (d.type === "Commission") dedCommission += v;
-          else if (d.type === "TDS") dedTds += v;
-          else dedSpecial += v;
-        });
-        const dedTotal = dedCommission + dedTds + dedSpecial;
-
-        const { bank, cash, crNote } = paymentSplit(b);
-        // A credit note brings no new money in — it has already been netted
-        // off the charges above, so it must not count as a receipt too.
-        const received = bank + cash;
-
-        // Recorded refund payouts settle the refund-due balance
-        const refundsPaid = isCancelled
-          ? (b.cancellationDetails?.refundPayouts ?? []).reduce((s, p) => s + p.amount, 0)
-          : 0;
-
-        // Balance convention: positive = pending from guest (amber),
-        // negative = refund the hotel owes the guest (purple).
-        // Credit-note cancellations keep showing the unpaid balance until it
-        // is waived off — the waive-off reduces `total` to what was received,
-        // which drives this to 0. Refund cancellations show only the unpaid
-        // refund as negative until Record Refund clears it.
-        // Balance settles against net of OTA deductions — the deducted part
-        // never arrives, so it must not read as pending.
-        let bal: number;
-        if (!isCancelled) bal = Math.round(total - dedTotal - received);
-        else if (isRefundCancel) bal = Math.min(0, Math.round(retained + refundsPaid - received));
-        else bal = Math.max(0, Math.round(total - dedTotal - received));
-        // Credit-note cancellation still carrying an unpaid balance — the
-        // waive-off hasn't been done yet; shown in red so it stands apart
-        // from money actually expected from guests.
-        const waivePending = isCancelled && !isRefundCancel && bal >= 1;
-        return {
-          id: b.id, guest: b.guest, mobile: b.mobile, checkin: b.checkin,
-          checkout: b.checkout, statusLabel: b.status, href: `/bookings/${b.id}`,
-          roomNet, mealNet, creditNoteUsed, other, otherByItem, gst5, gst18, gstOther,
-          total, dedCommission, dedTds, dedSpecial, bank, cash, crNote, bal,
-          isCancelled, waivePending,
-        };
-      });
+      .map(revenueRow);
   }, [bookings, search, rangeFrom, rangeTo]);
 
   // Confirmed B2B bookings bill entirely through add-on lines, which report
@@ -160,25 +186,7 @@ export default function RevenuePage() {
         if (rangeTo && b.checkin > rangeTo) return false;
         return true;
       })
-      .map((b) => {
-        const { roomNet, mealNet, other, otherByItem, gst5, gst18, gstOther } =
-          b2bChargesBreakdown(b);
-        let bank = 0, cash = 0;
-        (b.payments ?? []).forEach((p) => {
-          const m = (p.mode || "").toLowerCase();
-          if (m.includes("cash")) cash += p.amount;
-          else bank += p.amount;
-        });
-        const received = bank + cash;
-        const total = b.grandTotal;
-        return {
-          id: b.id, guest: b.orgName, mobile: b.contactNumber, checkin: b.checkin,
-          checkout: b.checkout, statusLabel: b.status, href: `/b2b/${b.id}`,
-          roomNet, mealNet, creditNoteUsed: 0, other, otherByItem, gst5, gst18, gstOther,
-          total, dedCommission: 0, dedTds: 0, dedSpecial: 0, bank, cash, crNote: 0,
-          bal: Math.round(total - received), isCancelled: false, waivePending: false,
-        };
-      });
+      .map(b2bRevenueRow);
   }, [b2bBookings, search, rangeFrom, rangeTo]);
 
   // One register: B2C and B2B side by side, ordered by check-in
@@ -279,23 +287,16 @@ export default function RevenuePage() {
     return { sum, count };
   }, [bookings]);
 
-  // Refunds due (global, unaffected by filters) — unpaid refund balance on
-  // refund-cancelled bookings, same formula as the table's balance column.
-  // Only cash and bank money can be owed back; credit note payments went
-  // back to their note on cancellation and never count as received here.
+  // Refunds due (global, unaffected by filters) — the sum of every negative
+  // balance in the register: money the hotel owes back, whether an unpaid
+  // refund on a cancellation or an overpayment on a live booking. Uses the
+  // table's own row maths so the card always agrees with the purple cells.
   const refundsDue = useMemo(() => {
-    let sum = 0;
-    bookings.forEach((b) => {
-      if (b.status !== "Cancelled" || b.cancellationDetails?.resolution !== "refund") return;
-      const retained =
-        (b.cancellationDetails?.cancellationCharge ?? 0) +
-        (b.cancellationDetails?.creditNoteAmount ?? 0);
-      const received = cashReceived(b);
-      const refundsPaid = (b.cancellationDetails?.refundPayouts ?? []).reduce((s, p) => s + p.amount, 0);
-      sum += Math.max(0, Math.round(received - retained - refundsPaid));
-    });
-    return sum;
-  }, [bookings]);
+    const negative = (bal: number) => (bal < 0 ? -bal : 0);
+    const b2c = bookings.filter(countsAsRevenue).reduce((sum, b) => sum + negative(revenueRow(b).bal), 0);
+    const b2b = b2bBookings.filter((b) => b.status === "Confirmed").reduce((sum, b) => sum + negative(b2bRevenueRow(b).bal), 0);
+    return b2c + b2b;
+  }, [bookings, b2bBookings]);
 
   if (currentRole === "Front Office") {
     return (

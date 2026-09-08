@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { bookingChargesBreakdown, bookingMealCharges, cashReceived, creditNoteRedemptions, fmt, fmtIN, dayName, getBookingPricingRows, nightsBetween, todayStr, tryAssignRooms } from "@/lib/utils";
+import { bookingChargesBreakdown, bookingMealCharges, cashReceived, creditNoteRedemptions, fmt, fmtIN, dayName, getBookingPricingRows, nightsBetween, pricingSheetLines, todayStr, tryAssignRooms } from "@/lib/utils";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { CancellationDetails, CancellationPolicy, ChargeHead, SpecialDay, WaiveOffLine } from "@/types";
 
@@ -302,6 +302,7 @@ export default function BookingDetailPage() {
   };
 
   const pricingRows = getBookingPricingRows(b);
+  const sheetLines = pricingSheetLines(b);
 
   // Per-segment meal rows (new bookings store rates per segment); legacy
   // bookings without stored rates fall back to booking-level derived rows.
@@ -1003,10 +1004,10 @@ export default function BookingDetailPage() {
                 </tr>
               </thead>
               <tbody>
-                {pricingRows.length === 0 ? (
+                {sheetLines.length === 0 ? (
                   <tr><td colSpan={12} style={{ padding: "14px 10px", color: "var(--t3)", fontSize: 12, textAlign: "center" }}>No pricing rows</td></tr>
                 ) : (
-                  pricingRows.map((r, i) => {
+                  sheetLines.map((r, i) => {
                     const netRatePerNight = r.nights > 0 && r.numRooms > 0
                       ? Math.round(r.netCharges / r.nights / r.numRooms)
                       : r.tariff;
@@ -1308,6 +1309,29 @@ export default function BookingDetailPage() {
               <span style={{ fontSize: 12, color: "var(--t2)", fontWeight: 600 }}>Amount Received</span>
               <span style={{ fontSize: 14, fontWeight: 700, color: "var(--grn)" }}>{fmt(b.advance)}</span>
             </div>
+            {/* How each receipt came in: bank, cash, credit note or card */}
+            {(b.payments ?? []).length > 0 && (
+              <div style={{ padding: "6px 16px 10px", borderBottom: "1px solid var(--bd)", background: "var(--surf2)" }}>
+                {(b.payments ?? []).map((p, i) => {
+                  const isCn = (p.mode || "").toLowerCase().includes("credit note");
+                  return (
+                    <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "4px 0", fontSize: 12 }}>
+                      <span style={{ color: "var(--t2)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span className="badge" style={{ fontSize: 10, background: isCn ? "var(--acc-lt)" : "var(--grn-lt)", color: isCn ? "var(--acc)" : "var(--grn)" }}>
+                          {p.mode || "Bank Transfer"}
+                          {isCn && p.creditNoteCode ? ` · ${p.creditNoteCode}` : ""}
+                        </span>
+                        <span>{p.type}</span>
+                        <span style={{ color: "var(--t3)" }}>
+                          {fmtIN(p.date)}{p.time ? ` ${p.time}` : ""}{p.by ? ` · by ${p.by}` : ""}
+                        </span>
+                      </span>
+                      <span style={{ fontWeight: 600, color: "var(--t1)", whiteSpace: "nowrap" }}>{fmt(p.amount)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", background: b.balance >= 1 ? "var(--amb-lt)" : "var(--grn-lt)" }}>
               <span style={{ fontSize: 12, fontWeight: 700, color: b.balance >= 1 ? "var(--amb)" : "var(--grn)" }}>
                 {b.balance >= 1 ? "Balance Amount" : "Fully Paid"}

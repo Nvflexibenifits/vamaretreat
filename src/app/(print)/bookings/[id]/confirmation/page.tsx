@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useParams } from "next/navigation";
 import { useApp } from "@/lib/store";
-import { bookingMealCharges, dayName, fmt, fmtIN, getBookingPricingRows, nightsBetween } from "@/lib/utils";
+import { bookingMealCharges, dayName, fmt, fmtIN, getBookingPricingRows, nightsBetween, pricingSheetLines } from "@/lib/utils";
 
 // dd/mm/yy — compact date format matching the booking view page
 function fmtShort(d: string): string {
@@ -11,7 +11,6 @@ function fmtShort(d: string): string {
   const [y, m, dd] = d.split("-");
   return `${dd}/${m}/${y.slice(2)}`;
 }
-import type { PricingRow } from "@/types";
 
 const TH: React.CSSProperties = {
   background: "#0f2318",
@@ -75,6 +74,7 @@ export default function ConfirmationPage() {
   }
 
   const pricingRows = getBookingPricingRows(b);
+  const sheetLines = pricingSheetLines(b);
   const totalRoomBaseCharges = pricingRows.reduce((s, r) => s + r.roomCharges, 0);
   const totalNet = pricingRows.reduce((s, r) => s + r.netCharges, 0);
   const totalRoomGst = pricingRows.reduce((s, r) => s + r.gstAmt, 0);
@@ -391,14 +391,14 @@ export default function ConfirmationPage() {
               </tr>
             </thead>
             <tbody>
-              {pricingRows.length === 0 ? (
+              {sheetLines.length === 0 ? (
                 <tr>
                   <td style={{ ...TD, textAlign: "center" }} colSpan={12}>
                     No pricing rows
                   </td>
                 </tr>
               ) : (
-                pricingRows.map((r: PricingRow, i: number) => {
+                sheetLines.map((r, i) => {
                   const netRatePerNight = r.nights > 0 && r.numRooms > 0
                     ? Math.round(r.netCharges / r.nights / r.numRooms)
                     : r.tariff;
