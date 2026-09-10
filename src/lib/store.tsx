@@ -205,6 +205,24 @@ function normalizeBooking(b: Partial<Booking>): Booking {
   };
 }
 
+// Apply one table's delta to its local rows: changed rows replace their
+// counterparts by key, new rows append, deleted keys drop out. Returns the
+// same array when nothing changed so React skips the re-render.
+export function mergeDelta<T>(
+  prev: T[],
+  changed: T[] | undefined,
+  gone: string[] | undefined,
+  key: (x: T) => string
+): T[] {
+  const rows = Array.isArray(changed) ? changed : [];
+  const drop = new Set(gone ?? []);
+  if (rows.length === 0 && drop.size === 0) return prev;
+  const byKey = new Map(prev.map((x) => [key(x), x]));
+  rows.forEach((x) => byKey.set(key(x), x));
+  drop.forEach((k) => byKey.delete(k));
+  return [...byKey.values()];
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
   const [isAuthed, setIsAuthed] = useState(false);
   const [sessionChecking, setSessionChecking] = useState(true);
@@ -295,15 +313,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const applyServerDelta = useCallback((delta: any) => {
     const deleted: Record<string, string[]> = delta.deleted ?? {};
-    const merge = <T,>(prev: T[], changed: T[] | undefined, gone: string[] | undefined, key: (x: T) => string): T[] => {
-      const rows = Array.isArray(changed) ? changed : [];
-      const drop = new Set(gone ?? []);
-      if (rows.length === 0 && drop.size === 0) return prev;
-      const byKey = new Map(prev.map((x) => [key(x), x]));
-      rows.forEach((x) => byKey.set(key(x), x));
-      drop.forEach((k) => byKey.delete(k));
-      return [...byKey.values()];
-    };
+    const merge = mergeDelta;
     const byId = (x: { id: string }) => x.id;
     setBookings((prev) =>
       merge(prev, (delta.bookings as Partial<Booking>[] | undefined)?.map(normalizeBooking), deleted.bookings, byId)
