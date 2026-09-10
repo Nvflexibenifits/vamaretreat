@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { addDays, bookingChargesBreakdown, countsAsRevenue, findAvailableRoomIds, fmt, fmtIN, formatLongDate, nightsBetween, sevenDaysFrom, todayStr, weekRange } from "@/lib/utils";
+import { addDays, b2bChargesBreakdown, bookingChargesBreakdown, countsAsRevenue, findAvailableRoomIds, fmt, fmtIN, formatLongDate, nightsBetween, sevenDaysFrom, todayStr, weekRange } from "@/lib/utils";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -41,20 +41,27 @@ export default function DashboardPage() {
 
   // ───── Revenue ─────
   // Mirrors the Revenue Register's Total Charges for the current month:
-  // net charges excluding GST for revenue-bearing bookings checking in this
-  // month, so the two screens always show the same number.
+  // net charges excluding GST for revenue-bearing B2C bookings plus confirmed
+  // B2B bookings checking in this month, so the two screens show one number.
   const revData = useMemo(() => {
-    if (!today) return { total: 0 };
+    if (!today) return { total: 0, b2c: 0, b2b: 0 };
     const month = today.slice(0, 7);
-    const total = bookings
+    const b2c = bookings
       .filter(countsAsRevenue)
       .filter((b) => b.checkin.startsWith(month))
       .reduce((s, b) => {
         const c = bookingChargesBreakdown(b);
         return s + c.roomNet + c.mealNet + c.other;
       }, 0);
-    return { total };
-  }, [bookings, today]);
+    const b2b = b2bBookings
+      .filter((b) => b.status === "Confirmed")
+      .filter((b) => b.checkin.startsWith(month))
+      .reduce((s, b) => {
+        const c = b2bChargesBreakdown(b);
+        return s + c.roomNet + c.mealNet + c.other;
+      }, 0);
+    return { total: b2c + b2b, b2c, b2b };
+  }, [bookings, b2bBookings, today]);
 
   // ───── Payment Pending ─────
   const pendingBookings = useMemo(
@@ -996,6 +1003,9 @@ export default function DashboardPage() {
             </div>
           </div>
           <div className="stat-val" style={{ fontSize: 34 }}>{fmt(revData.total)}</div>
+          <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 4 }}>
+            B2C {fmt(revData.b2c)} · B2B {fmt(revData.b2b)} · Excluding GST
+          </div>
         </div>
 
         {/* Payment Pending summary card */}
