@@ -352,6 +352,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!hydrated || !isAuthed) return;
     let cancelled = false;
     let inFlight = false;
+    // A poll that hangs (server restart, flaky network) must not hold the
+    // in-flight lock forever, so every poll gives up after 20 seconds.
+    const fetchWithTimeout = (url: string) => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 20000);
+      return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(timer));
+    };
     const refresh = async () => {
       if (document.visibilityState === "hidden") return;
       if (Date.now() - lastMutationRef.current < 5000) return;
@@ -360,7 +367,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       try {
         const cursor = cursorRef.current;
         if (cursor) {
-          const r = await fetch(`/api/app/changes?since=${encodeURIComponent(cursor)}`);
+          const r = await fetchWithTimeout(`/api/app/changes?since=${encodeURIComponent(cursor)}`);
           if (r.ok) {
             const delta = await r.json();
             if (cancelled) return;
@@ -372,7 +379,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           // Endpoint missing or failing: fall back to a full reload below.
           cursorRef.current = null;
         }
-        const r = await fetch("/api/app/state");
+        const r = await fetchWithTimeout("/api/app/state");
         if (!r.ok) return;
         const data = await r.json();
         if (cancelled) return;
