@@ -1,4 +1,9 @@
-import { pgTable, text, boolean, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, boolean, jsonb, timestamp, primaryKey } from "drizzle-orm/pg-core";
+
+// Every synced table also carries an updated_at column maintained by database
+// triggers (drizzle/0001_delta_sync.sql). It is deliberately left out of these
+// definitions so whole-row selects keep working on a database that has not
+// run that migration yet; /api/app/changes filters on it with raw SQL.
 
 export const users = pgTable("User", {
   id: text("id").primaryKey(),
@@ -63,3 +68,14 @@ export const appSettings = pgTable("app_settings", {
   id: text("id").primaryKey(),
   data: jsonb("data").notNull(),
 });
+
+// Rows deleted from any synced table, so delta polls can drop them client-side.
+export const syncDeletions = pgTable(
+  "sync_deletions",
+  {
+    tableName: text("table_name").notNull(),
+    rowId: text("row_id").notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.tableName, t.rowId] })]
+);

@@ -285,34 +285,95 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (data.creditNoteSettings) setCreditNoteSettings(data.creditNoteSettings);
   }, []);
 
+  // Position of the last server read, for delta polling. Null until the first
+  // full load, or after a delta failed and a full reload is needed.
+  const cursorRef = useRef<string | null>(null);
+
+  // Merge a delta payload from /api/app/changes into local state: changed
+  // rows replace their counterparts by key, deleted ids drop out, and a
+  // changed settings row goes through the same path as a full load.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const applyServerDelta = useCallback((delta: any) => {
+    const deleted: Record<string, string[]> = delta.deleted ?? {};
+    const merge = <T,>(prev: T[], changed: T[] | undefined, gone: string[] | undefined, key: (x: T) => string): T[] => {
+      const rows = Array.isArray(changed) ? changed : [];
+      const drop = new Set(gone ?? []);
+      if (rows.length === 0 && drop.size === 0) return prev;
+      const byKey = new Map(prev.map((x) => [key(x), x]));
+      rows.forEach((x) => byKey.set(key(x), x));
+      drop.forEach((k) => byKey.delete(k));
+      return [...byKey.values()];
+    };
+    const byId = (x: { id: string }) => x.id;
+    setBookings((prev) =>
+      merge(prev, (delta.bookings as Partial<Booking>[] | undefined)?.map(normalizeBooking), deleted.bookings, byId)
+    );
+    setB2BBookings((prev) => merge(prev, delta.b2bBookings, deleted.b2b_bookings, byId));
+    setRooms((prev) => merge(prev, delta.rooms, deleted.rooms, byId));
+    setRoomInventory((prev) => merge(prev, delta.roomInventory, deleted.room_inventory, byId));
+    setVenues((prev) => merge(prev, delta.venues, deleted.venues, byId));
+    setVenueBlocks((prev) => merge(prev, delta.venueBlocks, deleted.venue_blocks, byId));
+    setBulkRoomBlocks((prev) => merge(prev, delta.bulkRoomBlocks, deleted.bulk_room_blocks, byId));
+    setSpecialDays((prev) => merge(prev, delta.specialDays, deleted.special_days, byId));
+    setCreditNotes((prev) => merge(prev, delta.creditNotes, deleted.credit_notes, (c) => c.code));
+    if (delta.settings && typeof delta.settings === "object") applyServerState(delta.settings);
+  }, [applyServerState]);
+
   // Hydrate from Neon DB via API on mount.
   useEffect(() => {
     fetch("/api/app/state")
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (data) applyServerState(data);
+        if (data) {
+          applyServerState(data);
+          cursorRef.current = typeof data.cursor === "string" ? data.cursor : null;
+        }
         setHydrated(true);
       })
       .catch(() => setHydrated(true));
   }, [applyServerState]);
 
-  // Live refresh: re-pull server state on window focus and every 30s so
-  // master-setup and booking changes made in other tabs, devices, or sessions
-  // show up without a manual reload.
+  // Live refresh on window focus and every 30s so changes made in other
+  // tabs, devices, or sessions show up without a manual reload. Each poll
+  // asks only for rows changed since the last one; the answer is usually
+  // empty and a few hundred bytes. A full reload happens only when there is
+  // no cursor, such as when the delta endpoint is unavailable.
   useEffect(() => {
     if (!hydrated || !isAuthed) return;
     let cancelled = false;
-    const refresh = () => {
+    let inFlight = false;
+    const refresh = async () => {
       if (document.visibilityState === "hidden") return;
       if (Date.now() - lastMutationRef.current < 5000) return;
-      fetch("/api/app/state")
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data) => {
-          if (!data || cancelled) return;
-          if (Date.now() - lastMutationRef.current < 5000) return;
-          applyServerState(data);
-        })
-        .catch(() => {});
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const cursor = cursorRef.current;
+        if (cursor) {
+          const r = await fetch(`/api/app/changes?since=${encodeURIComponent(cursor)}`);
+          if (r.ok) {
+            const delta = await r.json();
+            if (cancelled) return;
+            if (Date.now() - lastMutationRef.current < 5000) return;
+            if (delta.changed) applyServerDelta(delta);
+            if (typeof delta.cursor === "string") cursorRef.current = delta.cursor;
+            return;
+          }
+          // Endpoint missing or failing: fall back to a full reload below.
+          cursorRef.current = null;
+        }
+        const r = await fetch("/api/app/state");
+        if (!r.ok) return;
+        const data = await r.json();
+        if (cancelled) return;
+        if (Date.now() - lastMutationRef.current < 5000) return;
+        applyServerState(data);
+        cursorRef.current = typeof data.cursor === "string" ? data.cursor : null;
+      } catch {
+        // Network hiccup: try again on the next tick.
+      } finally {
+        inFlight = false;
+      }
     };
     const iv = setInterval(refresh, 30000);
     window.addEventListener("focus", refresh);
@@ -323,7 +384,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", refresh);
     };
-  }, [hydrated, isAuthed, applyServerState]);
+  }, [hydrated, isAuthed, applyServerState, applyServerDelta]);
 
   // Auto-mark stale Enquiry/Tentative bookings as Lost when checkin date has passed
   useEffect(() => {

@@ -12,7 +12,7 @@ import {
   creditNotes,
   appSettings,
 } from "@/lib/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getSessionUserId } from "@/lib/api-auth";
 
 export async function GET(req: NextRequest) {
@@ -21,6 +21,11 @@ export async function GET(req: NextRequest) {
     if (!userId) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
+
+    // Cursor for delta polling, taken before the reads so nothing written
+    // during them can fall between this load and the first delta.
+    const cursorRows = (await db.execute(sql`select now()::text as now`)).rows as { now: string }[];
+    const cursor = cursorRows[0]?.now ?? null;
 
     const [
       bookingRows,
@@ -50,6 +55,7 @@ export async function GET(req: NextRequest) {
     const settingsData = settingsRow ? (settingsRow.data as Record<string, unknown>) : {};
 
     return NextResponse.json({
+      cursor,
       bookings: bookingRows.map((row) => row.data),
       b2bBookings: b2bBookingRows.map((row) => row.data),
       rooms: roomRows.map((row) => row.data),
