@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { b2bChargesBreakdown, bookingChargesBreakdown, countsAsRevenue, fmt, paymentSplit, todayStr } from "@/lib/utils";
+import { b2bChargesBreakdown, bookingChargesBreakdown, countsAsRevenue, fmt, paymentSplit, pendingPayments, todayStr } from "@/lib/utils";
 import type { B2BBooking, Booking } from "@/types";
 
 // dd/mm/yy
@@ -259,12 +259,12 @@ export default function RevenuePage() {
   // money still shows somewhere rather than vanishing from the table.
   const showOtherCol = totalsOtherResidual >= 1;
 
-  // Pending payments (global, unaffected by filters)
-  const pendingBookings = useMemo(
-    () => bookings.filter((b) => b.status === "Confirmed" && b.balance >= 1),
-    [bookings]
+  // Pending payments (global, unaffected by filters): Confirmed and Completed
+  // bookings, B2C and B2B, same rule as the home page card.
+  const pendingTotal = useMemo(
+    () => pendingPayments(bookings, b2bBookings).reduce((s, r) => s + r.balance, 0),
+    [bookings, b2bBookings]
   );
-  const pendingPayments = pendingBookings.reduce((s, b) => s + b.balance, 0);
 
   // Waive-offs pending (global) — credit-note cancellations still carrying
   // an unpaid balance that has to be written off. Mirrors the red balance
@@ -429,7 +429,7 @@ export default function RevenuePage() {
             Pending Payments (Overall)
           </div>
           <div style={{ fontSize: 22, fontWeight: 800, color: "var(--amb)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>
-            {fmt(pendingPayments)}
+            {fmt(pendingTotal)}
           </div>
         </div>
         <div style={{ background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r4)", padding: "14px 18px" }}>

@@ -650,6 +650,43 @@ export function b2bChargesBreakdown(b: B2BBooking): BookingChargesBreakdown {
   return { roomNet, mealNet, creditNoteUsed: 0, other, otherByItem, gst5, gst18, gstOther };
 }
 
+// ─────── PENDING PAYMENTS ───────
+// One row of money still owed by a guest or organisation. Only bookings the
+// guest has committed to count: Confirmed stays and Completed stays that
+// checked out with a balance. Enquiry and Tentative are not receivables, and
+// Cancelled and Lost settle through their own flows.
+export type PendingPayment = {
+  id: string;
+  kind: "b2c" | "b2b";
+  name: string;
+  contact: string;
+  checkin: string;
+  checkout: string;
+  grandTotal: number;
+  received: number;
+  balance: number;
+  href: string;
+};
+
+export function pendingPayments(bookings: Booking[], b2bBookings: B2BBooking[]): PendingPayment[] {
+  const rows: PendingPayment[] = [];
+  bookings.forEach((b) => {
+    if ((b.status !== "Confirmed" && b.status !== "Completed") || b.balance < 1) return;
+    rows.push({
+      id: b.id, kind: "b2c", name: b.guest, contact: b.mobile, checkin: b.checkin, checkout: b.checkout,
+      grandTotal: b.grandTotal, received: b.advance, balance: b.balance, href: `/bookings/${b.id}`,
+    });
+  });
+  b2bBookings.forEach((b) => {
+    if (b.status !== "Confirmed" || b.balance < 1) return;
+    rows.push({
+      id: b.id, kind: "b2b", name: b.orgName, contact: b.contactNumber, checkin: b.checkin, checkout: b.checkout,
+      grandTotal: b.grandTotal, received: b.advance, balance: b.balance, href: `/b2b/${b.id}`,
+    });
+  });
+  return rows.sort((a, b) => a.checkin.localeCompare(b.checkin));
+}
+
 // ─────── PAYMENTS ───────
 export function isCreditNotePayment(p: Payment): boolean {
   return (p.mode || "").toLowerCase().includes("credit note");

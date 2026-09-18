@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { addDays, b2bChargesBreakdown, bookingChargesBreakdown, countsAsRevenue, findAvailableRoomIds, fmt, fmtIN, formatLongDate, nightsBetween, sevenDaysFrom, todayStr, weekRange } from "@/lib/utils";
+import { addDays, b2bChargesBreakdown, bookingChargesBreakdown, countsAsRevenue, pendingPayments, findAvailableRoomIds, fmt, fmtIN, formatLongDate, nightsBetween, sevenDaysFrom, todayStr, weekRange } from "@/lib/utils";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -64,12 +64,10 @@ export default function DashboardPage() {
   }, [bookings, b2bBookings, today]);
 
   // ───── Payment Pending ─────
+  // Confirmed and Completed only, B2C and B2B, matching the Revenue Register.
   const pendingBookings = useMemo(
-    () =>
-      bookings
-        .filter((b) => b.balance >= 1 && b.status !== "Cancelled" && b.status !== "Lost")
-        .sort((a, b) => a.checkin.localeCompare(b.checkin)),
-    [bookings]
+    () => pendingPayments(bookings, b2bBookings),
+    [bookings, b2bBookings]
   );
 
   const totalPending = useMemo(
@@ -1018,6 +1016,9 @@ export default function DashboardPage() {
           <div className="stat-val" style={{ fontSize: 34, color: "var(--amb)" }}>
             {fmt(totalPending)}
           </div>
+          <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 4 }}>
+            Confirmed and Completed bookings, B2C and B2B
+          </div>
         </div>
 
       </div>
@@ -1168,18 +1169,23 @@ export default function DashboardPage() {
                       </span>
                     </td>
                     <td>
-                      <div style={{ fontWeight: 500, color: "var(--t1)" }}>{b.guest}</div>
-                      <div style={{ fontSize: 11, color: "var(--t3)" }}>{b.mobile}</div>
+                      <div style={{ fontWeight: 500, color: "var(--t1)" }}>
+                        {b.name}
+                        {b.kind === "b2b" && (
+                          <span className="badge" style={{ marginLeft: 6, fontSize: 10, background: "var(--acc-lt)", color: "var(--acc)" }}>B2B</span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--t3)" }}>{b.contact}</div>
                     </td>
                     <td>{fmtIN(b.checkin)}</td>
                     <td>{fmtIN(b.checkout)}</td>
                     <td style={{ textAlign: "right" }}>{fmt(b.grandTotal)}</td>
-                    <td style={{ textAlign: "right", color: "var(--grn)" }}>{fmt(b.advance)}</td>
+                    <td style={{ textAlign: "right", color: "var(--grn)" }}>{fmt(b.received)}</td>
                     <td style={{ textAlign: "right", fontWeight: 700, color: "var(--amb)" }}>{fmt(b.balance)}</td>
                     <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                       <button
                         className="btn btn-ghost btn-xs"
-                        onClick={() => router.push(`/bookings/${b.id}`)}
+                        onClick={() => router.push(b.href)}
                       >
                         View
                       </button>
