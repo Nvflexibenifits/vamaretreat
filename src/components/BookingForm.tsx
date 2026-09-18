@@ -17,6 +17,7 @@ import {
   splitNightsByType,
   todayStr,
   tryAssignRooms,
+  signedBalance,
 } from "@/lib/utils";
 import type { Booking, BookingSegment, BookingStatus, ChargeHead, Deduction, DeductionType, Extra, PackageRates, PricingRow, PricingRowType, SegmentMealItem, SegmentRoom } from "@/types";
 import { COUNTRY_CODES } from "@/lib/data";
@@ -693,9 +694,8 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
 
   // What the hotel actually expects to receive (gross minus OTA deductions)
   const netPayable = Math.max(0, grandTotal - totalDeductions);
-  // Whole rupees: GST math produces paise, guests pay rounded amounts — a
-  // sub-rupee remainder must never count as a pending balance.
-  const balance = Math.max(0, Math.round(netPayable - totalReceived));
+  // Signed: negative means the guest has paid more than the bill.
+  const balance = signedBalance(netPayable, totalReceived);
 
   // ─── Validation ───
   const validate = (): boolean => {
@@ -965,10 +965,10 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       ...(allPayments !== undefined && { payments: allPayments }),
       ...(newAdvance !== undefined && {
         advance: newAdvance,
-        balance: Math.max(0, Math.round(netPayable - newAdvance)),
+        balance: signedBalance(netPayable, newAdvance),
       }),
       ...(newAdvance === undefined && {
-        balance: Math.max(0, Math.round(netPayable - initialAdvance)),
+        balance: signedBalance(netPayable, initialAdvance),
       }),
       allocatedRooms,
     };
@@ -2211,21 +2211,23 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
             className="detail-row"
             style={{
               marginTop: 8,
-              background: balance > 0 ? "var(--amb-lt)" : "var(--grn-lt)",
+              background: balance >= 1 ? "var(--amb-lt)" : balance <= -1 ? "var(--pur-bg)" : "var(--grn-lt)",
               padding: "10px 12px",
               borderRadius: "var(--r2)",
             }}
           >
-            <span className="detail-key" style={{ fontWeight: 600 }}>Balance Amount</span>
+            <span className="detail-key" style={{ fontWeight: 600 }}>
+              {balance <= -1 ? "Excess Received" : "Balance Amount"}
+            </span>
             <span
               className="detail-val"
               style={{
                 fontWeight: 800,
-                color: balance > 0 ? "var(--amb)" : "var(--grn)",
+                color: balance >= 1 ? "var(--amb)" : balance <= -1 ? "var(--pur)" : "var(--grn)",
                 fontSize: 16,
               }}
             >
-              {balance > 0 ? fmt(balance) : "Paid"}
+              {balance >= 1 ? fmt(balance) : balance <= -1 ? fmt(-balance) : "Paid"}
             </span>
           </div>
         </div>

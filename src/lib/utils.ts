@@ -650,6 +650,26 @@ export function b2bChargesBreakdown(b: B2BBooking): BookingChargesBreakdown {
   return { roomNet, mealNet, creditNoteUsed: 0, other, otherByItem, gst5, gst18, gstOther };
 }
 
+// ─────── BALANCE ───────
+// A booking's balance is signed: positive means the guest still owes,
+// negative means the hotel holds more than the bill (excess received).
+// Callers that want "money still to collect" clamp at read time with
+// amountDue(); the stored value must keep the sign so an overpayment is
+// never mistaken for a settled booking.
+export function signedBalance(payable: number, received: number): number {
+  // Whole rupees: GST maths produces paise, guests pay rounded amounts, so a
+  // sub-rupee remainder must not read as pending or as excess.
+  return Math.round(payable - received);
+}
+
+export function amountDue(balance: number): number {
+  return balance >= 1 ? balance : 0;
+}
+
+export function excessReceived(balance: number): number {
+  return balance <= -1 ? -balance : 0;
+}
+
 // ─────── PENDING PAYMENTS ───────
 // One row of money still owed by a guest or organisation. Only bookings the
 // guest has committed to count: Confirmed stays and Completed stays that

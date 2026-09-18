@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useApp } from "@/lib/store";
-import { addDays, extraHead, fmt, fmtIN, nowTime, todayStr } from "@/lib/utils";
+import { addDays, extraHead, fmt, fmtIN, nowTime, todayStr, signedBalance } from "@/lib/utils";
 import type {
   B2BBooking,
   B2BBookingType,
@@ -145,9 +145,8 @@ export function B2BBookingForm({
 
   const newAdvance = newPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
   const totalReceived = (isEdit ? initial!.advance : 0) + newAdvance;
-  // Whole rupees: GST math produces paise, but a sub-rupee remainder must
-  // never read as a pending balance.
-  const balance = Math.max(0, Math.round(grandTotal - totalReceived));
+  // Signed: negative means the organisation has paid more than the bill.
+  const balance = signedBalance(grandTotal, totalReceived);
 
   // ─── Validation ───
   const validate = (): boolean => {
@@ -212,7 +211,7 @@ export function B2BBookingForm({
       grandTotal,
       payments,
       advance,
-      balance: Math.max(0, Math.round(grandTotal - advance)),
+      balance: signedBalance(grandTotal, advance),
       status: intent,
     };
 
@@ -752,17 +751,17 @@ export function B2BBookingForm({
           </div>
           <div className="detail-row">
             <span className="detail-key" style={{ fontWeight: 600 }}>
-              Balance
+              {balance <= -1 ? "Excess Received" : "Balance"}
             </span>
             <span
               className="detail-val"
               style={{
                 fontWeight: 800,
                 fontSize: 16,
-                color: balance > 0 ? "var(--amb)" : "var(--grn)",
+                color: balance >= 1 ? "var(--amb)" : balance <= -1 ? "var(--pur)" : "var(--grn)",
               }}
             >
-              {fmt(balance)}
+              {fmt(Math.abs(balance))}
             </span>
           </div>
         </div>

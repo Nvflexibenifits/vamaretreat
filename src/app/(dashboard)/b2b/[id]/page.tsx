@@ -197,16 +197,18 @@ function B2BReadOnly({ booking: b }: { booking: B2BBooking }) {
             </span>
           </div>
           <div className="detail-row">
-            <span className="detail-key" style={{ fontWeight: 600 }}>Balance</span>
+            <span className="detail-key" style={{ fontWeight: 600 }}>
+              {b.balance <= -1 ? "Excess Received" : "Balance"}
+            </span>
             <span
               className="detail-val"
               style={{
                 fontWeight: 800,
                 fontSize: 16,
-                color: b.balance > 0 ? "var(--amb)" : "var(--grn)",
+                color: b.balance >= 1 ? "var(--amb)" : b.balance <= -1 ? "var(--pur)" : "var(--grn)",
               }}
             >
-              {fmt(b.balance)}
+              {fmt(Math.abs(b.balance))}
             </span>
           </div>
         </div>

@@ -34,7 +34,7 @@ export default function B2BBookingsPage() {
     (t, b) => ({
       grandTotal: t.grandTotal + b.grandTotal,
       advance: t.advance + b.advance,
-      balance: t.balance + b.balance,
+      balance: t.balance + Math.max(0, b.balance),
     }),
     { grandTotal: 0, advance: 0, balance: 0 }
   );
@@ -169,10 +169,11 @@ export default function B2BBookingsPage() {
                       style={{
                         textAlign: "right",
                         fontWeight: 700,
-                        color: b.balance >= 1 ? "var(--amb)" : "var(--grn)",
+                        color: b.balance >= 1 ? "var(--amb)" : b.balance <= -1 ? "var(--pur)" : "var(--grn)",
                       }}
+                      title={b.balance <= -1 ? "Excess received" : undefined}
                     >
-                      {b.balance >= 1 ? fmt(b.balance) : "Nil"}
+                      {b.balance >= 1 ? fmt(b.balance) : b.balance <= -1 ? `Excess ${fmt(-b.balance)}` : "Nil"}
                     </td>
                     <td>
                       <span className={`badge ${statusBadgeClass(b.status)}`}>{b.status}</span>

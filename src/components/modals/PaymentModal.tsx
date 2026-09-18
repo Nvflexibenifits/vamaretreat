@@ -54,7 +54,11 @@ export function PaymentModal() {
       <div className="modal modal-sm">
         <h3>Record Payment</h3>
         <p className="modal-desc">
-          {b ? `Balance due: ${fmt(b.balance)}` : "Record a payment for this booking."}
+          {b
+            ? b.balance <= -1
+              ? `Excess already received: ${fmt(-b.balance)}`
+              : `Balance due: ${fmt(Math.max(0, b.balance))}`
+            : "Record a payment for this booking."}
         </p>
         <div className="fg" style={{ marginBottom: 12 }}>
           <div className="field">

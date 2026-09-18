@@ -53,7 +53,7 @@ import {
   SEED_VENUE_BLOCKS,
   SEED_BULK_ROOM_BLOCKS,
 } from "@/lib/data";
-import { addDays, nowTime, todayStr } from "@/lib/utils";
+import { addDays, nowTime, todayStr, signedBalance } from "@/lib/utils";
 
 type ModalKind = "lost" | "payment" | "complete" | "crm-note" | null;
 
@@ -657,7 +657,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const paid = newExtras.reduce((s, e) => s + (e.totalPaid ?? ((e.amount || 0) + (e.gst || 0))), 0);
         const grandTotal = b.grandTotal + charge;
         const advance = b.advance + paid;
-        const balance = Math.max(0, grandTotal - advance);
+        const balance = signedBalance(grandTotal, advance);
         const updatedExtras = [...b.extras, ...newExtras];
         sync(`/api/app/bookings/${bookingId}`, "PATCH", { extras: updatedExtras, grandTotal, advance, balance });
         return { ...b, extras: updatedExtras, grandTotal, advance, balance };
@@ -853,7 +853,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         prev.map((b) => {
           if (b.id !== bookingId) return b;
           const newAdvance = b.advance + amount;
-          const newBalance = Math.max(0, b.grandTotal - newAdvance);
+          const newBalance = signedBalance(b.grandTotal, newAdvance);
           const payments = [
             ...b.payments,
             {
@@ -903,13 +903,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
             if (e.name && e.amount > 0) {
               newExtras.push(e);
               grandTotal += e.amount;
-              balance = Math.max(0, balance + e.amount);
+              balance = Math.round(balance + e.amount);
             }
           });
           if (extraNights > 0 && b.nights > 0) {
             const perNight = b.totalRoomCharges / b.nights;
             grandTotal += perNight * extraNights;
-            balance = Math.max(0, balance + perNight * extraNights);
+            balance = Math.round(balance + perNight * extraNights);
             nights += extraNights;
             checkout = addDays(checkout, extraNights);
           }
@@ -1038,7 +1038,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 ...newExtras.slice(idx + 1),
               ];
               grandTotal -= removed.upgrade.extraAmount;
-              balance = Math.max(0, balance - removed.upgrade.extraAmount);
+              balance = Math.round(balance - removed.upgrade.extraAmount);
             }
           }
           sync(`/api/app/bookings/${bookingId}`, "PATCH", {

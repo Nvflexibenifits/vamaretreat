@@ -426,8 +426,11 @@ export default function DashboardPage() {
             {b.mealOn ? "Yes" : "No"}
           </span>
         </td>
-        <td style={{ textAlign: "right", fontWeight: 600, color: b.balance >= 1 ? "var(--amb)" : "var(--grn)" }}>
-          {b.balance >= 1 ? fmt(b.balance) : "Nil"}
+        <td
+          style={{ textAlign: "right", fontWeight: 600, color: b.balance >= 1 ? "var(--amb)" : b.balance <= -1 ? "var(--pur)" : "var(--grn)" }}
+          title={b.balance <= -1 ? "Excess received from guest" : undefined}
+        >
+          {b.balance >= 1 ? fmt(b.balance) : b.balance <= -1 ? `Excess ${fmt(-b.balance)}` : "Nil"}
         </td>
         <td style={{ textAlign: "center" }}>
           <button className="btn btn-ghost btn-xs" onClick={() => router.push(`/bookings/${b.id}`)}>

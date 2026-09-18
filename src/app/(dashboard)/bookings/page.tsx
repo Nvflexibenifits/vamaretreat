@@ -207,7 +207,7 @@ export default function BookingsPage() {
                         color:
                           pending >= 1
                             ? "var(--amb)"
-                            : refundDue > 0
+                            : refundDue > 0 || pending <= -1
                             ? "var(--pur)"
                             : "var(--t3)",
                       }}
@@ -216,10 +216,18 @@ export default function BookingsPage() {
                           ? "Amount pending from guest"
                           : refundDue > 0
                           ? "Refund due to guest"
+                          : pending <= -1
+                          ? "Excess received from guest"
                           : "Settled"
                       }
                     >
-                      {pending >= 1 ? fmt(pending) : refundDue > 0 ? `−${fmt(refundDue)}` : "0"}
+                      {pending >= 1
+                        ? fmt(pending)
+                        : refundDue > 0
+                        ? `−${fmt(refundDue)}`
+                        : pending <= -1
+                        ? `Excess ${fmt(-pending)}`
+                        : "0"}
                     </td>
                     <td><StatusBadge status={b.status} /></td>
                     <td style={{ fontSize: 11, color: "var(--t3)" }}>{b.rex}</td>

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { bookingChargesBreakdown, bookingMealCharges, cashReceived, creditNoteRedemptions, fmt, fmtIN, dayName, getBookingPricingRows, nightsBetween, pricingSheetLines, todayStr, tryAssignRooms } from "@/lib/utils";
+import { amountDue, bookingChargesBreakdown, bookingMealCharges, cashReceived, creditNoteRedemptions, excessReceived, fmt, fmtIN, dayName, getBookingPricingRows, nightsBetween, pricingSheetLines, signedBalance, todayStr, tryAssignRooms } from "@/lib/utils";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { CancellationDetails, CancellationPolicy, ChargeHead, SpecialDay, WaiveOffLine } from "@/types";
 
@@ -295,7 +295,7 @@ export default function BookingDetailPage() {
     const totalGross = Math.round(lines.reduce((s, l) => s + l.amount + l.gstAmt, 0) * 100) / 100;
     updateBooking(b.id, {
       waiveOff: { lines, totalGross, date: today, by: currentUser },
-      balance: Math.max(0, Math.round(b.grandTotal - totalGross - b.advance)),
+      balance: signedBalance(b.grandTotal - totalGross, b.advance),
     });
     setShowWaiveModal(false);
     showNotif("Unpaid balance waived off", "success");
@@ -1332,14 +1332,22 @@ export default function BookingDetailPage() {
                 })}
               </div>
             )}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", background: b.balance >= 1 ? "var(--amb-lt)" : "var(--grn-lt)" }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: b.balance >= 1 ? "var(--amb)" : "var(--grn)" }}>
-                {b.balance >= 1 ? "Balance Amount" : "Fully Paid"}
-              </span>
-              <span style={{ fontSize: 14, fontWeight: 800, color: b.balance >= 1 ? "var(--amb)" : "var(--grn)" }}>
-                {b.balance >= 1 ? fmt(b.balance) : "Paid"}
-              </span>
-            </div>
+            {(() => {
+              const due = amountDue(b.balance);
+              const excess = excessReceived(b.balance);
+              const bg = due > 0 ? "var(--amb-lt)" : excess > 0 ? "var(--pur-bg)" : "var(--grn-lt)";
+              const color = due > 0 ? "var(--amb)" : excess > 0 ? "var(--pur)" : "var(--grn)";
+              return (
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", background: bg }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color }}>
+                    {due > 0 ? "Balance Amount" : excess > 0 ? "Excess Received" : "Fully Paid"}
+                  </span>
+                  <span style={{ fontSize: 14, fontWeight: 800, color }}>
+                    {due > 0 ? fmt(due) : excess > 0 ? fmt(excess) : "Paid"}
+                  </span>
+                </div>
+              );
+            })()}
           </div>
 
           {/* Meal Preference + Special Request */}

@@ -590,9 +590,9 @@ export default function ConfirmationPage() {
             </tr>
             <tr>
               <td style={TD} colSpan={11}>
-                <strong>Balance Amount</strong>
+                <strong>{b.balance <= -1 ? "Excess Received" : "Balance Amount"}</strong>
               </td>
-              <td style={TD_YELLOW}>{fmt(b.balance)}</td>
+              <td style={TD_YELLOW}>{fmt(b.balance <= -1 ? -b.balance : b.balance)}</td>
             </tr>
           </tbody>
         </table>
