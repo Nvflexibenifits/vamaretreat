@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { addDays, b2bChargesBreakdown, bookingChargesBreakdown, countsAsRevenue, pendingPayments, findAvailableRoomIds, fmt, fmtIN, formatLongDate, nightsBetween, sevenDaysFrom, todayStr, weekRange } from "@/lib/utils";
+import { addDays, b2bChargesBreakdown, bookingChargesBreakdown, countsAsRevenue, effectiveRoomsOnDate, pendingPayments, findAvailableRoomIds, fmt, fmtIN, formatLongDate, nightsBetween, sevenDaysFrom, todayStr, weekRange } from "@/lib/utils";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -302,6 +302,16 @@ export default function DashboardPage() {
     );
   }, [bookings, foDate]);
 
+  // Villas a guest actually sleeps in on the selected date: the allocation
+  // with any room-chart moves for that night applied. A guest checking out
+  // today holds no room tonight, so show where they stayed last night.
+  const roomsOn = (b: (typeof bookings)[0]): string[] => {
+    if (!foDate) return b.allocatedRooms;
+    const night = b.checkout === foDate && b.checkout > b.checkin ? addDays(foDate, -1) : foDate;
+    const rooms = effectiveRoomsOnDate(b, night);
+    return rooms.length > 0 ? rooms : b.allocatedRooms;
+  };
+
   // ───── Front Office: Meal Guest List for the selected date ─────
   // Everyone who eats on this date: in-house guests (the same population the
   // PAX Count table counts) plus dayout groups, who have no room but do have
@@ -415,7 +425,7 @@ export default function DashboardPage() {
         <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{fmtIN(b.checkin)}</td>
         <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{fmtIN(b.checkout)}</td>
         <td style={{ textAlign: "center", fontWeight: 600 }}>{day}</td>
-        <td style={{ fontSize: 12, color: "var(--t2)" }}>{b.allocatedRooms.join(", ") || "—"}</td>
+        <td style={{ fontSize: 12, color: "var(--t2)" }}>{roomsOn(b).join(", ") || "—"}</td>
         <td style={{ textAlign: "center" }}>{b.adults || "—"}</td>
         <td style={{ textAlign: "center" }}>{b.seniors || "—"}</td>
         <td style={{ textAlign: "center" }}>{b.kidsAbove10 || "—"}</td>
@@ -495,7 +505,7 @@ export default function DashboardPage() {
       ];
       const lines = mealGuestList.map((r, i) => [
         i + 1, r.b.guest, r.b.mobile, fmtIN(r.b.checkin), fmtIN(r.b.checkout), r.day,
-        r.isDayout ? "Dayout" : r.b.allocatedRooms.join(" / ") || "—",
+        r.isDayout ? "Dayout" : roomsOn(r.b).join(" / ") || "—",
         r.adults, r.seniors, r.kGt10, r.kLe10, r.pets, r.mealOn ? "Yes" : "No",
       ]);
       lines.push(["", "Meals — Yes", `${mealYes} bookings`, `${mealYesPax} pax`, "", "", "", "", "", "", "", "", ""]);
@@ -888,7 +898,7 @@ export default function DashboardPage() {
                       <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{fmtIN(r.b.checkout)}</td>
                       <td style={{ textAlign: "center", fontWeight: 600 }}>{r.day}</td>
                       <td style={{ fontSize: 12, color: "var(--t2)" }}>
-                        {r.isDayout ? "Dayout" : r.b.allocatedRooms.join(", ") || "—"}
+                        {r.isDayout ? "Dayout" : roomsOn(r.b).join(", ") || "—"}
                       </td>
                       <td style={{ textAlign: "center" }}>{r.adults || "—"}</td>
                       <td style={{ textAlign: "center" }}>{r.seniors || "—"}</td>

@@ -18,6 +18,7 @@ import {
   todayStr,
   tryAssignRooms,
   signedBalance,
+  pruneNightOverrides,
 } from "@/lib/utils";
 import type { Booking, BookingSegment, BookingStatus, ChargeHead, Deduction, DeductionType, Extra, PackageRates, PricingRow, PricingRowType, SegmentMealItem, SegmentRoom } from "@/types";
 import { COUNTRY_CODES } from "@/lib/data";
@@ -1038,6 +1039,8 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       (initial.segments ?? []).map((s) => [s.id, s.allocatedRooms ?? []])
     );
     if (initial.status === "Tentative" || initial.status === "Confirmed" || promoteToConfirmed) {
+      // Re-run the allocator with the rooms already held offered first, so
+      // an edit that leaves the stay alone leaves the villas alone too.
       const result = tryAssignRooms(
         computedSegments,
         checkin,
@@ -1046,7 +1049,8 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
         roomInventory,
         initial.id,
         bulkRoomBlocks,
-        rooms
+        rooms,
+        initial
       );
       if (!result.ok) {
         showNotif(`No ${result.missingCategoryName} available for selected dates`, "error");
@@ -1059,13 +1063,19 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       segAlloc = {};
     }
     const patch = buildEditPatch(allocatedRooms, segAlloc);
+    // Chart moves that referred to a room this booking no longer holds, or a
+    // night outside the edited stay, would paint a phantom villa.
+    const keptOverrides = pruneNightOverrides(initial.nightOverrides, checkin, checkout, allocatedRooms);
+    if (keptOverrides.length !== (initial.nightOverrides ?? []).length) patch.nightOverrides = keptOverrides;
+    const movedRooms = allocatedRooms.filter((r) => !initial.allocatedRooms.includes(r));
     if (promoteToConfirmed) patch.status = "Confirmed";
     updateBooking(initial.id, patch);
     redeemCreditNoteRows(initial.id);
+    const roomNote = movedRooms.length > 0 ? ` · rooms now ${allocatedRooms.join(", ")}` : "";
     showNotif(
-      promoteToConfirmed
+      (promoteToConfirmed
         ? `Booking ${initial.id} updated — Confirmed (payment received)`
-        : `Booking ${initial.id} updated`,
+        : `Booking ${initial.id} updated`) + roomNote,
       "success"
     );
     if (alsoOpenConfirmation && typeof window !== "undefined") {

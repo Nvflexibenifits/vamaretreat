@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { amountDue, bookingChargesBreakdown, bookingMealCharges, cashReceived, creditNoteRedemptions, excessReceived, fmt, fmtIN, dayName, getBookingPricingRows, nightsBetween, pricingSheetLines, signedBalance, todayStr, tryAssignRooms } from "@/lib/utils";
+import { amountDue, bookingChargesBreakdown, bookingMealCharges, cashReceived, creditNoteRedemptions, excessReceived, fmt, fmtIN, dayName, getBookingPricingRows, nightsBetween, pricingSheetLines, pruneNightOverrides, signedBalance, todayStr, tryAssignRooms } from "@/lib/utils";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { CancellationDetails, CancellationPolicy, ChargeHead, SpecialDay, WaiveOffLine } from "@/types";
 
@@ -212,13 +212,17 @@ export default function BookingDetailPage() {
   const showConfirm = !isReadOnly && (b.status === "Tentative");
 
   const allocateAndSetStatus = (status: "Tentative" | "Confirmed") => {
-    const result = tryAssignRooms(b.segments, b.checkin, b.checkout, bookings, roomInventory, b.id, bulkRoomBlocks, rooms);
+    // A tentative booking already holds villas; confirming keeps them.
+    const result = tryAssignRooms(
+      b.segments, b.checkin, b.checkout, bookings, roomInventory, b.id, bulkRoomBlocks, rooms, b
+    );
     if (!result.ok) {
       showNotif(`No ${result.missingCategoryName} available for selected dates`, "error");
       return;
     }
     const segments = b.segments.map((s) => ({ ...s, allocatedRooms: result.perSegment[s.id] ?? [] }));
-    updateBooking(b.id, { status, allocatedRooms: result.rooms, segments });
+    const nightOverrides = pruneNightOverrides(b.nightOverrides, b.checkin, b.checkout, result.rooms);
+    updateBooking(b.id, { status, allocatedRooms: result.rooms, segments, nightOverrides });
     showNotif(status === "Confirmed" ? `Booking ${b.id} confirmed` : `Booking ${b.id} marked Tentative`, "success");
   };
 

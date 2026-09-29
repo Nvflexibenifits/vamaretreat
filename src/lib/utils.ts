@@ -14,6 +14,7 @@ import type {
   Role,
   RoomInventoryItem,
   RoomMaster,
+  RoomNightOverride,
   SegmentRoom,
 } from "@/types";
 import { ROOM_INVENTORY, ROOMS, SEED_GST_SETTINGS } from "@/lib/data";
@@ -856,6 +857,17 @@ export type AssignmentResult =
 // so a room needed only for part of the stay stays sellable for the rest.
 // Prefers keeping the same physical room across segments of the same category
 // so guests don't switch rooms unnecessarily.
+//
+// `existing` is the booking as currently saved, when re-allocating on an
+// edit or a confirm. Its villas are kept, segment by segment, as long as
+// every night still works: either the villa itself is free that night, or
+// the guest was moved for that night (a chart drag or an upgrade) and the
+// villa they were moved to is free. So an upgraded guest keeps their booked
+// slot and their upgrade even after the vacated villa was resold, and a
+// guest dragged for part of a stay keeps both villas. A villa is replaced
+// only when a night genuinely cannot be honoured, and then the villa the
+// guest actually sleeps in is offered first. Without `existing` the
+// allocator picks the first free rooms.
 export function tryAssignRooms(
   segments: BookingSegment[],
   _checkin: string,
@@ -864,7 +876,8 @@ export function tryAssignRooms(
   inventory: RoomInventoryItem[] = ROOM_INVENTORY,
   ignoreBookingId?: string,
   bulkBlocks: BulkRoomBlock[] = [],
-  roomMaster: RoomMaster[] = ROOMS
+  roomMaster: RoomMaster[] = ROOMS,
+  existing?: Booking
 ): AssignmentResult {
   const union = new Set<string>();
   const perSegment: Record<string, string[]> = {};
@@ -872,6 +885,21 @@ export function tryAssignRooms(
   // overlapping segments of the same booking don't double-book a room.
   const claimed: { checkin: string; checkout: string; roomId: string }[] = [];
   const usedByCat = new Map<string, string[]>();
+  const keep = existing ? currentAllocation(existing) : {};
+  const catOf = (roomId: string) => inventory.find((r) => r.id === roomId)?.cat;
+  const freeOnNight = (roomId: string, date: string) => {
+    const cat = catOf(roomId);
+    return !!cat && findAvailableRoomIds(cat, date, nextDay(date), bookings, inventory, ignoreBookingId, bulkBlocks).includes(roomId);
+  };
+  // Can this booking go on holding `roomId` for every night of the segment,
+  // given where the guest actually sleeps each night?
+  const stillHonoured = (roomId: string, seg: BookingSegment) => {
+    for (let d = seg.checkin; d < seg.checkout; d = nextDay(d)) {
+      const moved = existing?.nightOverrides?.find((o) => o.date === d && o.fromRoomId === roomId);
+      if (!freeOnNight(moved ? moved.toRoomId : roomId, d)) return false;
+    }
+    return true;
+  };
 
   for (const seg of segments) {
     const segAssigned: string[] = [];
@@ -883,26 +911,90 @@ export function tryAssignRooms(
       });
     for (const [cat, count] of need.entries()) {
       if (count <= 0) continue;
+      const notClaimed = (id: string) =>
+        !claimed.some((c) => c.roomId === id && rangesOverlap(c.checkin, c.checkout, seg.checkin, seg.checkout));
+      const take = (id: string) => {
+        segAssigned.push(id);
+        union.add(id);
+        claimed.push({ checkin: seg.checkin, checkout: seg.checkout, roomId: id });
+        const used = usedByCat.get(cat) ?? [];
+        if (!used.includes(id)) usedByCat.set(cat, [...used, id]);
+      };
+      // 1. Villas of this category the booking already holds for this
+      //    segment, kept whenever every night still works out.
+      const storedSeg = existing?.segments?.find((s) => s.id === seg.id);
+      const stored = storedSeg
+        ? (Array.isArray(storedSeg.allocatedRooms) ? storedSeg.allocatedRooms : existing?.allocatedRooms ?? [])
+        : [];
+      let remaining = count;
+      for (const id of stored) {
+        if (remaining <= 0) break;
+        if (catOf(id) !== cat || !notClaimed(id) || segAssigned.includes(id)) continue;
+        if (stillHonoured(id, seg)) {
+          take(id);
+          remaining--;
+        }
+      }
+      if (remaining <= 0) continue;
+      // 2. Otherwise pick free villas: the one the guest sleeps in first,
+      //    then one an earlier segment of the same category used (so guests
+      //    don't switch villas mid-stay), then inventory order.
       const free = findAvailableRoomIds(cat, seg.checkin, seg.checkout, bookings, inventory, ignoreBookingId, bulkBlocks)
-        .filter((id) => !claimed.some((c) => c.roomId === id && rangesOverlap(c.checkin, c.checkout, seg.checkin, seg.checkout)));
-      if (free.length < count) {
+        .filter((id) => notClaimed(id) && !segAssigned.includes(id));
+      if (free.length < remaining) {
         const room = roomMaster.find((r) => r.id === cat);
         return { ok: false, missingCategoryName: room?.name ?? cat };
       }
       const previouslyUsed = usedByCat.get(cat) ?? [];
-      const ordered = [...free].sort(
-        (a, b) => (previouslyUsed.includes(b) ? 1 : 0) - (previouslyUsed.includes(a) ? 1 : 0)
-      );
-      ordered.slice(0, count).forEach((id) => {
-        segAssigned.push(id);
-        union.add(id);
-        claimed.push({ checkin: seg.checkin, checkout: seg.checkout, roomId: id });
-        if (!previouslyUsed.includes(id)) usedByCat.set(cat, [...previouslyUsed, id]);
-      });
+      const held = keep[seg.id] ?? [];
+      const rank = (id: string) => {
+        const i = held.indexOf(id);
+        if (i >= 0) return i;
+        return held.length + (previouslyUsed.includes(id) ? 0 : 1);
+      };
+      [...free].sort((a, b) => rank(a) - rank(b)).slice(0, remaining).forEach(take);
     }
     perSegment[seg.id] = segAssigned;
   }
   return { ok: true, rooms: [...union], perSegment };
+}
+
+// The villas a booking currently occupies, keyed by segment id, in the shape
+// tryAssignRooms takes as `keep`. Where a room-chart drag moved the guest,
+// the villa they actually sleep in ranks ahead of the one originally
+// allocated, weighted by how many nights of the segment it covers, so a
+// full-stay move is kept as the new home and a one-night move keeps the
+// original villa with the move note still valid. Legacy bookings without
+// per-segment allocation offer their whole-stay rooms to every segment.
+export function currentAllocation(b: Booking): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  (b.segments ?? []).forEach((s) => {
+    const stored = Array.isArray(s.allocatedRooms) ? s.allocatedRooms : b.allocatedRooms;
+    const nights = new Map<string, number>();
+    stored.forEach((r) => nights.set(r, 0));
+    for (let d = s.checkin; d < s.checkout; d = nextDay(d)) {
+      effectiveRoomsOnDate(b, d).forEach((r) => nights.set(r, (nights.get(r) ?? 0) + 1));
+    }
+    out[s.id] = [...nights.entries()]
+      .sort((x, y) => y[1] - x[1] || (stored.includes(y[0]) ? 1 : 0) - (stored.includes(x[0]) ? 1 : 0))
+      .map(([r]) => r);
+  });
+  return out;
+}
+
+// Per-night moves (chart drags) that still make sense after an allocation
+// change: the night must fall inside the stay and the room moved from must
+// still be one the booking holds. Anything else is a phantom that would paint
+// a villa the guest is not in.
+export function pruneNightOverrides(
+  overrides: RoomNightOverride[] | undefined,
+  checkin: string,
+  checkout: string,
+  allocatedRooms: string[]
+): RoomNightOverride[] {
+  return (overrides ?? []).filter(
+    (o) => o.date >= checkin && o.date < checkout && allocatedRooms.includes(o.fromRoomId)
+  );
 }
 
 // Marker so the helper above doesn't get treated as dead code by tree shakers
