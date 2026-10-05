@@ -3,7 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useApp } from "@/lib/store";
-import { addDays, extraHead, fmt, fmtIN, nowTime, todayStr, signedBalance } from "@/lib/utils";
+import { addDays, cashOfPayments, extraHead, fmt, fmtIN, nowTime, todayStr, signedBalance, tdsOfPayments } from "@/lib/utils";
+import { REFUND_TYPE } from "@/types";
 import type {
   B2BBooking,
   B2BBookingType,
@@ -39,7 +40,7 @@ type AddOnRow = {
   by?: string;
 };
 
-type PaymentRow = { uid: string; date: string; amount: string; mode: string };
+type PaymentRow = { uid: string; date: string; amount: string; tds: string; mode: string; kind?: "refund" };
 
 type FieldErrors = Partial<
   Record<"orgName" | "contactPerson" | "contactNumber" | "checkin" | "checkout", boolean>
@@ -103,8 +104,11 @@ export function B2BBookingForm({
   );
 
   // ─── Section 5: payments ───
+  // Receipts already recorded, editable on this form. Refund rows stay as
+  // they are: they document money already handed back.
+  const [existingPayments, setExistingPayments] = useState<Payment[]>(initial?.payments ?? []);
   const [newPaymentRows, setNewPaymentRows] = useState<PaymentRow[]>([
-    { uid: newUid(), date: todayDate, amount: "", mode: "Bank Transfer" },
+    { uid: newUid(), date: todayDate, amount: "", tds: "", mode: "Bank Transfer" },
   ]);
 
   const [errors, setErrors] = useState<FieldErrors>({});
@@ -143,10 +147,24 @@ export function B2BBookingForm({
     })
     .filter((e) => e.amount > 0);
 
-  const newAdvance = newPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
-  const totalReceived = (isEdit ? initial!.advance : 0) + newAdvance;
-  // Signed: negative means the organisation has paid more than the bill.
-  const balance = signedBalance(grandTotal, totalReceived);
+  // Refund rows hand money back, so they count against what was received.
+  const newAdvance = newPaymentRows.reduce(
+    (s, r) => s + (parseFloat(r.amount) || 0) * (r.kind === "refund" ? -1 : 1),
+    0
+  );
+  // Cash and bank actually received, net of refunds. TDS is tracked beside
+  // it, not inside it.
+  const existingAdvance = cashOfPayments(existingPayments);
+  const totalReceived = existingAdvance + newAdvance;
+  // TDS the client withheld from each payment. Settles the bill like the
+  // payment itself but never arrives as cash.
+  const existingTds = tdsOfPayments(existingPayments);
+  const newTds = newPaymentRows
+    .filter((r) => r.kind !== "refund")
+    .reduce((s, r) => s + Math.max(0, parseFloat(r.tds) || 0), 0);
+  const totalTds = existingTds + newTds;
+  // Signed: negative means the organisation has settled more than the bill.
+  const balance = signedBalance(grandTotal, totalReceived + totalTds);
 
   // ─── Validation ───
   const validate = (): boolean => {
@@ -180,18 +198,30 @@ export function B2BBookingForm({
     const effCheckout = bookingType === "Dayout" ? checkin : checkout;
 
     const builtPayments: Payment[] = newPaymentRows
-      .map((r) => ({
-        date: r.date || todayDate,
-        time: nowTime(),
-        type: "Advance",
-        amount: parseFloat(r.amount) || 0,
-        mode: r.mode,
-        by: currentUser,
-      }))
-      .filter((p) => p.amount > 0);
+      .map((r) => {
+        const amt = Math.abs(parseFloat(r.amount) || 0);
+        if (r.kind === "refund") {
+          return { date: r.date || todayDate, time: nowTime(), type: REFUND_TYPE, amount: -amt, mode: r.mode, by: currentUser };
+        }
+        const tds = Math.max(0, parseFloat(r.tds) || 0);
+        return {
+          date: r.date || todayDate,
+          time: nowTime(),
+          type: "Advance",
+          amount: amt,
+          mode: r.mode,
+          by: currentUser,
+          ...(tds > 0 ? { tds } : {}),
+        };
+      })
+      // A payment settled entirely by TDS still counts
+      .filter((p) => p.amount !== 0 || (p.tds ?? 0) > 0);
 
-    const payments = [...(initial?.payments ?? []), ...builtPayments];
-    const advance = payments.reduce((s, p) => s + p.amount, 0);
+    const payments = [...existingPayments, ...builtPayments];
+    // Amount received is cash and bank only, net of refunds; TDS settles the
+    // balance but never arrives as money.
+    const tds = tdsOfPayments(payments);
+    const advance = cashOfPayments(payments);
 
     const common = {
       type,
@@ -211,7 +241,7 @@ export function B2BBookingForm({
       grandTotal,
       payments,
       advance,
-      balance: signedBalance(grandTotal, advance),
+      balance: signedBalance(grandTotal, advance + tds),
       status: intent,
     };
 
@@ -625,27 +655,91 @@ export function B2BBookingForm({
             <span className="form-sec-num">5</span>Payment Received
           </div>
 
-          {isEdit && (initial?.payments?.length ?? 0) > 0 && (
+          {isEdit && existingPayments.length > 0 && (
             <table className="pricing-tbl" style={{ marginBottom: 14 }}>
               <thead>
                 <tr>
                   <th>Date</th>
                   <th>Mode</th>
                   <th style={{ textAlign: "right" }}>Amount (₹)</th>
+                  <th style={{ textAlign: "right" }}>TDS (₹)</th>
                   <th style={{ textAlign: "right" }}>Cumulative (₹)</th>
+                  <th style={{ width: 32 }}></th>
                 </tr>
               </thead>
               <tbody>
                 {(() => {
                   let running = 0;
-                  return initial!.payments.map((p, i) => {
+                  return existingPayments.map((p, i) => {
                     running += p.amount;
+                    const isRefund = p.type === REFUND_TYPE || p.amount < 0;
+                    const editable = !isRefund;
+                    const upd = (patch: Partial<Payment>) =>
+                      setExistingPayments((prev) => prev.map((x, j) => (j === i ? { ...x, ...patch } : x)));
                     return (
                       <tr key={i} style={{ cursor: "default" }}>
-                        <td>{fmtIN(p.date)}</td>
-                        <td>{p.mode}</td>
-                        <td style={{ textAlign: "right" }}>{fmt(p.amount)}</td>
+                        <td>
+                          {isRefund && <span className="badge" style={{ fontSize: 10, background: "var(--pur-bg)", color: "var(--pur)", marginRight: 6 }}>Refund</span>}
+                          {editable ? (
+                            <input type="date" value={p.date} onChange={(e) => upd({ date: e.target.value })} />
+                          ) : (
+                            fmtIN(p.date)
+                          )}
+                        </td>
+                        <td>
+                          {editable ? (
+                            <select value={p.mode} onChange={(e) => upd({ mode: e.target.value })}>
+                              {PAYMENT_MODES.map((m) => (
+                                <option key={m}>{m}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            p.mode
+                          )}
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          {editable ? (
+                            <input
+                              type="number"
+                              min={0}
+                              value={p.amount === 0 ? "" : p.amount}
+                              placeholder="0"
+                              onChange={(e) => upd({ amount: parseFloat(e.target.value) || 0 })}
+                              style={{ textAlign: "right" }}
+                            />
+                          ) : (
+                            <span style={{ color: "var(--pur)" }}>−{fmt(-p.amount)}</span>
+                          )}
+                        </td>
+                        <td style={{ textAlign: "right", color: "var(--t3)" }}>
+                          {editable ? (
+                            <input
+                              type="number"
+                              min={0}
+                              value={(p.tds ?? 0) === 0 ? "" : p.tds}
+                              placeholder="0"
+                              onChange={(e) => {
+                                const v = Math.max(0, parseFloat(e.target.value) || 0);
+                                upd({ tds: v > 0 ? v : undefined });
+                              }}
+                              style={{ textAlign: "right" }}
+                            />
+                          ) : (
+                            "—"
+                          )}
+                        </td>
                         <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(running)}</td>
+                        <td>
+                          {editable && (
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-xs"
+                              onClick={() => setExistingPayments((prev) => prev.filter((_, j) => j !== i))}
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     );
                   });
@@ -659,14 +753,18 @@ export function B2BBookingForm({
               <tr>
                 <th>Date</th>
                 <th>Amount (₹)</th>
+                <th title="Withheld by the client from this payment and remitted to the government. Settles the bill but is not cash received.">TDS (₹)</th>
                 <th>Mode</th>
                 <th style={{ width: 32 }}></th>
               </tr>
             </thead>
             <tbody>
               {newPaymentRows.map((row) => (
-                <tr key={row.uid}>
+                <tr key={row.uid} style={row.kind === "refund" ? { background: "var(--pur-lt)" } : undefined}>
                   <td>
+                    {row.kind === "refund" && (
+                      <span className="badge" style={{ fontSize: 10, background: "var(--pur-bg)", color: "var(--pur)", marginRight: 6 }}>Refund</span>
+                    )}
                     <input
                       type="date"
                       value={row.date}
@@ -693,6 +791,25 @@ export function B2BBookingForm({
                         )
                       }
                     />
+                  </td>
+                  <td>
+                    {row.kind === "refund" ? (
+                      <span style={{ color: "var(--t3)" }}>—</span>
+                    ) : (
+                      <input
+                        type="number"
+                        min={0}
+                        placeholder="0"
+                        value={row.tds}
+                        onChange={(e) =>
+                          setNewPaymentRows((prev) =>
+                            prev.map((r) =>
+                              r.uid === row.uid ? { ...r, tds: e.target.value } : r
+                            )
+                          )
+                        }
+                      />
+                    )}
                   </td>
                   <td>
                     <select
@@ -728,18 +845,36 @@ export function B2BBookingForm({
             </tbody>
           </table>
 
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={() =>
-              setNewPaymentRows((prev) => [
-                ...prev,
-                { uid: newUid(), date: todayDate, amount: "", mode: "Bank Transfer" },
-              ])
-            }
-          >
-            Add Payment
-          </button>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() =>
+                setNewPaymentRows((prev) => [
+                  ...prev,
+                  { uid: newUid(), date: todayDate, amount: "", tds: "", mode: "Bank Transfer" },
+                ])
+              }
+            >
+              Add Payment
+            </button>
+            {isEdit && balance <= -1 && (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                style={{ color: "var(--pur)" }}
+                title="Record money handed back for the excess received"
+                onClick={() =>
+                  setNewPaymentRows((prev) => [
+                    ...prev,
+                    { uid: newUid(), date: todayDate, amount: String(-balance), tds: "", mode: "Bank Transfer", kind: "refund" },
+                  ])
+                }
+              >
+                Record Refund of {fmt(-balance)}
+              </button>
+            )}
+          </div>
 
           <div className="detail-row" style={{ marginTop: 16 }}>
             <span className="detail-key" style={{ fontWeight: 600 }}>
@@ -749,6 +884,14 @@ export function B2BBookingForm({
               {fmt(totalReceived)}
             </span>
           </div>
+          {totalTds > 0 && (
+            <div className="detail-row">
+              <span className="detail-key" style={{ fontWeight: 600 }}>TDS</span>
+              <span className="detail-val" style={{ fontWeight: 700, fontSize: 14, color: "var(--t2)" }}>
+                {fmt(totalTds)}
+              </span>
+            </div>
+          )}
           <div className="detail-row">
             <span className="detail-key" style={{ fontWeight: 600 }}>
               {balance <= -1 ? "Excess Received" : "Balance"}

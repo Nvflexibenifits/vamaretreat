@@ -10,6 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { REFUND_TYPE } from "@/types";
 import type {
   AddOnCategory,
   B2BBooking,
@@ -53,7 +54,7 @@ import {
   SEED_VENUE_BLOCKS,
   SEED_BULK_ROOM_BLOCKS,
 } from "@/lib/data";
-import { addDays, nowTime, todayStr, signedBalance } from "@/lib/utils";
+import { addDays, nowTime, todayStr } from "@/lib/utils";
 
 type ModalKind = "lost" | "payment" | "complete" | "crm-note" | null;
 
@@ -80,6 +81,13 @@ type AppContextValue = {
   createBooking: (b: Booking) => void;
   updateBooking: (bookingId: string, patch: Partial<Booking>) => void;
   addExtras: (bookingId: string, extras: Extra[]) => void;
+  // Single add-on charge from the room chart popup; `paid` records the money
+  // as a receipt there and then, otherwise the charge raises the balance
+  addExtra: (bookingId: string, extra: Extra, paid?: { mode: string }) => void;
+  // Change an add-on by id; `paid` undefined keeps its paid state, null makes
+  // it unpaid, { mode } makes it paid
+  updateExtra: (bookingId: string, extraId: string, patch: Partial<Extra>, paid?: { mode: string } | null) => void;
+  removeExtra: (bookingId: string, extraId: string) => void;
   // B2B (corporate / school / institute) bookings
   b2bBookings: B2BBooking[];
   createB2BBooking: (b: B2BBooking) => void;
@@ -148,6 +156,8 @@ type AppContextValue = {
   creditNotes: CreditNote[];
   cancelBooking: (bookingId: string, details: CancellationDetails) => void;
   recordRefund: (bookingId: string, payout: RefundPayout) => void;
+  // Pay back excess received on a live or completed booking
+  recordExcessRefund: (bookingId: string, payout: RefundPayout) => void;
   updateCreditNoteSettings: (s: CreditNoteSettings) => void;
   updateGstSettings: (s: GstSettings) => void;
   updateCancellationPolicy: (p: CancellationPolicy) => void;
@@ -617,6 +627,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
+  // Money handed back to a guest who paid more than the bill. Stored as a
+  // negative payment so the balance, register and refund cards all settle
+  // through the payments list; status is untouched.
+  const recordExcessRefund = useCallback((bookingId: string, payout: RefundPayout) => {
+    setBookings((prev) =>
+      prev.map((b) => {
+        if (b.id !== bookingId) return b;
+        const payments = [
+          ...b.payments,
+          {
+            date: payout.date,
+            time: nowTime(),
+            type: REFUND_TYPE,
+            amount: -Math.abs(payout.amount),
+            mode: payout.mode,
+            by: payout.by,
+            ...(payout.reference ? { reference: payout.reference } : {}),
+          },
+        ];
+        const advance = b.advance - Math.abs(payout.amount);
+        const balance = Math.round(b.balance + Math.abs(payout.amount));
+        sync(`/api/app/bookings/${bookingId}`, "PATCH", { payments, advance, balance });
+        return { ...b, payments, advance, balance };
+      })
+    );
+  }, []);
+
   // Redeem part (or all) of a credit note against a booking. Validates the
   // code and remaining balance, records the transaction, and persists.
   const redeemCreditNote = useCallback(
@@ -657,10 +694,102 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const paid = newExtras.reduce((s, e) => s + (e.totalPaid ?? ((e.amount || 0) + (e.gst || 0))), 0);
         const grandTotal = b.grandTotal + charge;
         const advance = b.advance + paid;
-        const balance = signedBalance(grandTotal, advance);
+        // Move the balance by what changed rather than recomputing it from
+        // the bill: the stored balance already accounts for OTA deductions
+        // and waive-offs, which bill minus received would silently drop.
+        const balance = Math.round(b.balance + charge - paid);
         const updatedExtras = [...b.extras, ...newExtras];
         sync(`/api/app/bookings/${bookingId}`, "PATCH", { extras: updatedExtras, grandTotal, advance, balance });
         return { ...b, extras: updatedExtras, grandTotal, advance, balance };
+      })
+    );
+  }, []);
+
+  // Add-on charges managed one row at a time, with the receipt linked to the
+  // row so a paid charge can be edited or removed cleanly. All maths is by
+  // delta, so whatever the booking's balance was computed against stays true.
+  const extraTotal = (e: Extra) => (e.amount || 0) + (e.gst || 0);
+
+  const addExtra = useCallback((bookingId: string, extra: Extra, paid?: { mode: string }) => {
+    setBookings((prev) =>
+      prev.map((b) => {
+        if (b.id !== bookingId) return b;
+        const id = extra.id ?? `x-${Math.random().toString(36).slice(2, 9)}`;
+        const total = extraTotal(extra);
+        const paidAmt = paid ? total : 0;
+        const row: Extra = { ...extra, id, totalPaid: paidAmt };
+        const payments = paid
+          ? [...b.payments, { date: todayStr(), time: nowTime(), type: "Add-on", amount: total, mode: paid.mode, by: extra.by, extraId: id }]
+          : b.payments;
+        const next = {
+          extras: [...b.extras, row],
+          payments,
+          grandTotal: b.grandTotal + total,
+          advance: b.advance + paidAmt,
+          balance: Math.round(b.balance + total - paidAmt),
+        };
+        sync(`/api/app/bookings/${bookingId}`, "PATCH", next);
+        return { ...b, ...next };
+      })
+    );
+  }, []);
+
+  const updateExtra = useCallback(
+    (bookingId: string, extraId: string, patch: Partial<Extra>, paid?: { mode: string } | null) => {
+      setBookings((prev) =>
+        prev.map((b) => {
+          if (b.id !== bookingId) return b;
+          const old = b.extras.find((e) => e.id === extraId);
+          if (!old) return b;
+          const updated: Extra = { ...old, ...patch, id: extraId };
+          const oldTotal = extraTotal(old);
+          const newTotal = extraTotal(updated);
+          const receipt = b.payments.find((p) => p.extraId === extraId);
+          const nowPaid = paid === undefined ? !!receipt : paid !== null;
+          const paidOld = receipt ? receipt.amount : 0;
+          const paidNew = nowPaid ? newTotal : 0;
+          let payments = b.payments;
+          if (nowPaid && receipt) {
+            payments = payments.map((p) => (p.extraId === extraId ? { ...p, amount: newTotal, ...(paid?.mode ? { mode: paid.mode } : {}) } : p));
+          } else if (nowPaid && !receipt) {
+            payments = [...payments, { date: todayStr(), time: nowTime(), type: "Add-on", amount: newTotal, mode: paid?.mode ?? "Cash", by: updated.by, extraId }];
+          } else if (!nowPaid && receipt) {
+            payments = payments.filter((p) => p.extraId !== extraId);
+          }
+          updated.totalPaid = paidNew;
+          const next = {
+            extras: b.extras.map((e) => (e.id === extraId ? updated : e)),
+            payments,
+            grandTotal: b.grandTotal + newTotal - oldTotal,
+            advance: b.advance + paidNew - paidOld,
+            balance: Math.round(b.balance + (newTotal - oldTotal) - (paidNew - paidOld)),
+          };
+          sync(`/api/app/bookings/${bookingId}`, "PATCH", next);
+          return { ...b, ...next };
+        })
+      );
+    },
+    []
+  );
+
+  const removeExtra = useCallback((bookingId: string, extraId: string) => {
+    setBookings((prev) =>
+      prev.map((b) => {
+        if (b.id !== bookingId) return b;
+        const old = b.extras.find((e) => e.id === extraId);
+        if (!old) return b;
+        const total = extraTotal(old);
+        const receipt = b.payments.find((p) => p.extraId === extraId);
+        const paidOld = receipt ? receipt.amount : 0;
+        const next = {
+          extras: b.extras.filter((e) => e.id !== extraId),
+          payments: b.payments.filter((p) => p.extraId !== extraId),
+          grandTotal: b.grandTotal - total,
+          advance: b.advance - paidOld,
+          balance: Math.round(b.balance - total + paidOld),
+        };
+        sync(`/api/app/bookings/${bookingId}`, "PATCH", next);
+        return { ...b, ...next };
       })
     );
   }, []);
@@ -853,7 +982,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         prev.map((b) => {
           if (b.id !== bookingId) return b;
           const newAdvance = b.advance + amount;
-          const newBalance = signedBalance(b.grandTotal, newAdvance);
+          // Delta, not bill minus received: the stored balance already
+          // accounts for OTA deductions and waive-offs.
+          const newBalance = Math.round(b.balance - amount);
           const payments = [
             ...b.payments,
             {
@@ -1101,7 +1232,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       cancelBooking,
       redeemCreditNote,
       recordRefund,
+      recordExcessRefund,
       addExtras,
+      addExtra,
+      updateExtra,
+      removeExtra,
       b2bBookings,
       createB2BBooking,
       updateB2BBooking,
@@ -1173,6 +1308,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       createBooking,
       updateBooking,
       addExtras,
+      addExtra,
+      updateExtra,
+      removeExtra,
       b2bBookings,
       createB2BBooking,
       updateB2BBooking,
@@ -1193,6 +1331,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       cancelBooking,
       redeemCreditNote,
       recordRefund,
+      recordExcessRefund,
       gstSettings,
       cancellationPolicy,
       venues,

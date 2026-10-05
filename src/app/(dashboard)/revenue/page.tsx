@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "@/lib/store";
 import { b2bChargesBreakdown, bookingChargesBreakdown, countsAsRevenue, fmt, paymentSplit, pendingPayments, todayStr } from "@/lib/utils";
 import type { B2BBooking, Booking } from "@/types";
@@ -96,9 +96,13 @@ function revenueRow(b: Booking) {
   const waivePending = isCancelled && !isRefundCancel && bal >= 1;
   return {
     id: b.id, guest: b.guest, mobile: b.mobile, checkin: b.checkin,
-    checkout: b.checkout, statusLabel: b.status, href: `/bookings/${b.id}`,
+    checkout: b.checkout, statusLabel: b.status,
+    source: b.source === "OTA" && b.otaProvider ? `OTA (${b.otaProvider})` : b.source || "Direct",
+    href: `/bookings/${b.id}`,
     roomNet, mealNet, creditNoteUsed, other, otherByItem, gst5, gst18, gstOther,
-    total, dedCommission, dedTds, dedSpecial, bank, cash, crNote, bal,
+    // TDS is a settlement, not a deduction: the OTA withheld it and remits
+    // it to the government, so it sits beside bank and cash.
+    total, dedCommission, dedSpecial, bank, cash, tds: dedTds, crNote, bal,
     isCancelled, waivePending,
   };
 }
@@ -107,21 +111,130 @@ function revenueRow(b: Booking) {
 function b2bRevenueRow(b: B2BBooking) {
   const { roomNet, mealNet, other, otherByItem, gst5, gst18, gstOther } =
     b2bChargesBreakdown(b);
-  let bank = 0, cash = 0;
+  let bank = 0, cash = 0, tds = 0;
   (b.payments ?? []).forEach((p) => {
     const m = (p.mode || "").toLowerCase();
-    if (m.includes("cash")) cash += p.amount;
+    tds += p.tds ?? 0;
+    if (m.trim() === "tds") tds += p.amount;
+    else if (m.includes("cash")) cash += p.amount;
     else bank += p.amount;
   });
   const received = bank + cash;
   const total = b.grandTotal;
   return {
     id: b.id, guest: b.orgName, mobile: b.contactNumber, checkin: b.checkin,
-    checkout: b.checkout, statusLabel: b.status, href: `/b2b/${b.id}`,
+    checkout: b.checkout, statusLabel: b.status, source: "B2B", href: `/b2b/${b.id}`,
     roomNet, mealNet, creditNoteUsed: 0, other, otherByItem, gst5, gst18, gstOther,
-    total, dedCommission: 0, dedTds: 0, dedSpecial: 0, bank, cash, crNote: 0,
-    bal: Math.round(total - received), isCancelled: false, waivePending: false,
+    total, dedCommission: 0, dedSpecial: 0, bank, cash, tds, crNote: 0,
+    // TDS settles the bill like a payment; only the cash is less.
+    bal: Math.round(total - received - tds), isCancelled: false, waivePending: false,
   };
+}
+
+// Scroll box for a wide table. Sized to the space left under it on screen so
+// its bottom edge, and the scrollbar drawn beneath it, are always visible
+// without scrolling the page. Native bars on macOS are overlays that stay
+// hidden until the user scrolls, and staff kept having to hunt for them, so
+// the bar is drawn here: a track and a draggable thumb kept in step with
+// the box both ways.
+function WideScroll({ children }: { children: React.ReactNode }) {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ startX: number; startLeft: number } | null>(null);
+  const [geom, setGeom] = useState({ thumbPct: 100, leftPct: 0 });
+
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el) return;
+    // Thumb geometry follows the box's scroll position and content width.
+    // It never touches layout, so observing size changes cannot loop.
+    const measure = () => {
+      const { scrollWidth, clientWidth, scrollLeft } = el;
+      const next =
+        scrollWidth <= clientWidth
+          ? { thumbPct: 100, leftPct: 0 }
+          : { thumbPct: Math.max(8, (clientWidth / scrollWidth) * 100), leftPct: (scrollLeft / scrollWidth) * 100 };
+      setGeom((prev) =>
+        Math.abs(prev.thumbPct - next.thumbPct) < 0.01 && Math.abs(prev.leftPct - next.leftPct) < 0.01 ? prev : next
+      );
+    };
+    // The box is sized to the space left under it on screen so its bottom
+    // edge and the bar beneath it stay visible. Measured once after mount
+    // and on window resize only: sizing from a resize observer would move
+    // the box's own top edge and feed back into itself.
+    const fit = () => {
+      const top = el.getBoundingClientRect().top;
+      const h = `${Math.max(240, Math.round(window.innerHeight - top - 44))}px`;
+      if (el.style.maxHeight !== h) el.style.maxHeight = h;
+      measure();
+    };
+    // A timer, not an animation frame: frames never fire in a background
+    // tab, and staff often open the register in one and switch to it later.
+    const timer = window.setTimeout(fit, 0);
+    el.addEventListener("scroll", measure);
+    window.addEventListener("resize", fit);
+    const ro = new ResizeObserver(measure);
+    if (el.firstElementChild) ro.observe(el.firstElementChild);
+    return () => {
+      window.clearTimeout(timer);
+      el.removeEventListener("scroll", measure);
+      window.removeEventListener("resize", fit);
+      ro.disconnect();
+    };
+  }, []);
+
+  const onThumbDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    const el = boxRef.current;
+    if (!el) return;
+    drag.current = { startX: e.clientX, startLeft: el.scrollLeft };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  };
+  const onThumbMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const el = boxRef.current;
+    const track = trackRef.current;
+    if (!drag.current || !el || !track) return;
+    el.scrollLeft = drag.current.startLeft + (e.clientX - drag.current.startX) * (el.scrollWidth / track.clientWidth);
+  };
+  const onThumbUp = () => {
+    drag.current = null;
+  };
+  const onTrackClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const el = boxRef.current;
+    const track = trackRef.current;
+    if (!el || !track || e.target !== track) return;
+    const x = e.clientX - track.getBoundingClientRect().left;
+    const dir = x / track.clientWidth < geom.leftPct / 100 ? -1 : 1;
+    el.scrollBy({ left: dir * el.clientWidth * 0.8, behavior: "smooth" });
+  };
+
+  return (
+    <>
+      <div className="rev-scroll" ref={boxRef}>{children}</div>
+      {geom.thumbPct < 100 && (
+        <div
+          ref={trackRef}
+          className="hscroll-track"
+          onClick={onTrackClick}
+          role="scrollbar"
+          aria-orientation="horizontal"
+          aria-valuenow={Math.round(geom.leftPct)}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label="Scroll the table sideways"
+        >
+          <div
+            className="hscroll-thumb"
+            style={{ width: `${geom.thumbPct}%`, left: `${geom.leftPct}%` }}
+            onPointerDown={onThumbDown}
+            onPointerMove={onThumbMove}
+            onPointerUp={onThumbUp}
+            onPointerCancel={onThumbUp}
+          />
+        </div>
+      )}
+    </>
+  );
 }
 
 export default function RevenuePage() {
@@ -208,14 +321,14 @@ export default function RevenuePage() {
           gstOther: t.gstOther + r.gstOther,
           total: t.total + r.total,
           dedCommission: t.dedCommission + r.dedCommission,
-          dedTds: t.dedTds + r.dedTds,
           dedSpecial: t.dedSpecial + r.dedSpecial,
           bank: t.bank + r.bank,
           cash: t.cash + r.cash,
+          tds: t.tds + r.tds,
           crNote: t.crNote + r.crNote,
           bal: t.bal + r.bal,
         }),
-        { roomNet: 0, mealNet: 0, creditNoteUsed: 0, other: 0, gst5: 0, gst18: 0, gstOther: 0, total: 0, dedCommission: 0, dedTds: 0, dedSpecial: 0, bank: 0, cash: 0, crNote: 0, bal: 0 }
+        { roomNet: 0, mealNet: 0, creditNoteUsed: 0, other: 0, gst5: 0, gst18: 0, gstOther: 0, total: 0, dedCommission: 0, dedSpecial: 0, bank: 0, cash: 0, tds: 0, crNote: 0, bal: 0 }
       ),
     [allRows]
   );
@@ -314,28 +427,28 @@ export default function RevenuePage() {
 
   const exportExcel = () => {
     const headers = [
-      "SL No.", "Check-in", "Check-out", "Guest Name", "Mobile", "Booking ID", "Status",
+      "SL No.", "Check-in", "Check-out", "Guest Name", "Mobile", "Booking ID", "Status", "Source",
       "Room Charges", "Meal Charges", ...addOnCols.map((c) => c.label), ...(showOtherCol ? ["Other Charges"] : []), "GST 5%", "GST 18%", "Total Charges", "Credit Note Used",
-      "Commission", "TDS", "Special Discount",
-      "Received - Bank", "Received - Cash", "Balance",
+      "Commission", "Special Discount",
+      "Received - Bank", "Received - Cash", "TDS", "Balance",
     ];
     const lines = allRows.map((r, i) => [
-      i + 1, fmtShort(r.checkin), fmtShort(r.checkout), r.guest, r.mobile, r.id, r.statusLabel,
+      i + 1, fmtShort(r.checkin), fmtShort(r.checkout), r.guest, r.mobile, r.id, r.statusLabel, r.source,
       Math.round(r.roomNet), Math.round(r.mealNet),
       ...addOnCols.map((c) => Math.round(r.otherByItem[c.label] ?? 0)),
       ...(showOtherCol ? [Math.round(otherResidual(r))] : []),
       Math.round(r.gst5), Math.round(r.gst18), Math.round(r.total), Math.round(r.creditNoteUsed),
-      Math.round(r.dedCommission), Math.round(r.dedTds), Math.round(r.dedSpecial),
-      Math.round(r.bank), Math.round(r.cash), Math.round(r.bal),
+      Math.round(r.dedCommission), Math.round(r.dedSpecial),
+      Math.round(r.bank), Math.round(r.cash), Math.round(r.tds), Math.round(r.bal),
     ]);
     lines.push([
-      "", "", "", "", "", "Total", "",
+      "", "", "", "", "", "Total", "", "",
       Math.round(totals.roomNet), Math.round(totals.mealNet),
       ...addOnCols.map((c) => Math.round(c.total)),
       ...(showOtherCol ? [Math.round(totalsOtherResidual)] : []),
       Math.round(totals.gst5), Math.round(totals.gst18), Math.round(totals.total), Math.round(totals.creditNoteUsed),
-      Math.round(totals.dedCommission), Math.round(totals.dedTds), Math.round(totals.dedSpecial),
-      Math.round(totals.bank), Math.round(totals.cash), Math.round(totals.bal),
+      Math.round(totals.dedCommission), Math.round(totals.dedSpecial),
+      Math.round(totals.bank), Math.round(totals.cash), Math.round(totals.tds), Math.round(totals.bal),
     ]);
     const csv = [headers, ...lines]
       .map((cols) => cols.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
@@ -468,14 +581,14 @@ export default function RevenuePage() {
             <strong style={{ color: "var(--red)" }}>Waive-off pending</strong>
           </div>
         </div>
-        <div style={{ overflowX: "auto" }}>
+        <WideScroll>
           <table style={{ minWidth: 1520 }}>
             <thead>
               <tr>
                 <th colSpan={5} style={groupHdStyle}>Booking Info</th>
                 <th colSpan={chargesCols} style={{ ...groupHdStyle, ...sectionBorder }}>Charges</th>
-                <th colSpan={3} style={{ ...groupHdStyle, ...sectionBorder }}>Deductions</th>
-                <th colSpan={2} style={{ ...groupHdStyle, ...sectionBorder }}>Payments Received</th>
+                <th colSpan={2} style={{ ...groupHdStyle, ...sectionBorder }}>Deductions</th>
+                <th colSpan={3} style={{ ...groupHdStyle, ...sectionBorder }}>Payments Received</th>
                 <th style={{ ...groupHdStyle, ...sectionBorder, textAlign: "right" }}>Bal</th>
                 <th style={{ ...groupHdStyle, ...sectionBorder }}></th>
               </tr>
@@ -498,10 +611,10 @@ export default function RevenuePage() {
                   Cr Note
                 </th>
                 <th style={{ textAlign: "right", whiteSpace: "nowrap", ...sectionBorder }}>Commission</th>
-                <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>TDS</th>
                 <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>Spl Disc</th>
                 <th style={{ textAlign: "right", ...sectionBorder }}>Bank</th>
                 <th style={{ textAlign: "right" }}>Cash</th>
+                <th style={{ textAlign: "right", whiteSpace: "nowrap" }} title="Withheld by the client or OTA and remitted to the government. Settles the bill, not cash received.">TDS</th>
                 <th style={{ textAlign: "right", ...sectionBorder }}>₹</th>
                 <th style={{ textAlign: "center", width: 60, ...sectionBorder }}></th>
               </tr>
@@ -552,14 +665,12 @@ export default function RevenuePage() {
                       <td style={{ ...numTd, ...sectionBorder, color: r.dedCommission > 0 ? "var(--red)" : "var(--t3)" }}>
                         {r.dedCommission > 0 ? `−${nfmt(r.dedCommission)}` : "0"}
                       </td>
-                      <td style={{ ...numTd, color: r.dedTds > 0 ? "var(--red)" : "var(--t3)" }}>
-                        {r.dedTds > 0 ? `−${nfmt(r.dedTds)}` : "0"}
-                      </td>
                       <td style={{ ...numTd, color: r.dedSpecial > 0 ? "var(--red)" : "var(--t3)" }}>
                         {r.dedSpecial > 0 ? `−${nfmt(r.dedSpecial)}` : "0"}
                       </td>
                       <td style={{ ...numTd, ...sectionBorder }}>{nfmt(r.bank)}</td>
                       <td style={numTd}>{nfmt(r.cash)}</td>
+                      <td style={{ ...numTd, color: r.tds > 0 ? "var(--t1)" : "var(--t3)" }}>{nfmt(r.tds)}</td>
                       <td
                         style={{
                           ...numTd,
@@ -608,14 +719,12 @@ export default function RevenuePage() {
                     <td style={{ ...numTd, ...sectionBorder, fontWeight: 700, color: totals.dedCommission > 0 ? "var(--red)" : "var(--t3)" }}>
                       {totals.dedCommission > 0 ? `−${nfmt(totals.dedCommission)}` : "0"}
                     </td>
-                    <td style={{ ...numTd, fontWeight: 700, color: totals.dedTds > 0 ? "var(--red)" : "var(--t3)" }}>
-                      {totals.dedTds > 0 ? `−${nfmt(totals.dedTds)}` : "0"}
-                    </td>
                     <td style={{ ...numTd, fontWeight: 700, color: totals.dedSpecial > 0 ? "var(--red)" : "var(--t3)" }}>
                       {totals.dedSpecial > 0 ? `−${nfmt(totals.dedSpecial)}` : "0"}
                     </td>
                     <td style={{ ...numTd, ...sectionBorder, fontWeight: 700 }}>{nfmt(totals.bank)}</td>
                     <td style={{ ...numTd, fontWeight: 700 }}>{nfmt(totals.cash)}</td>
+                    <td style={{ ...numTd, fontWeight: 700 }}>{nfmt(totals.tds)}</td>
                     <td style={{ ...numTd, ...sectionBorder, fontWeight: 800, color: totals.bal > 0 ? "var(--amb)" : totals.bal < 0 ? "var(--pur)" : "var(--grn)" }}>
                       {totals.bal === 0 ? "0" : totals.bal > 0 ? nfmt(totals.bal) : `−${nfmt(-totals.bal)}`}
                     </td>
@@ -625,7 +734,7 @@ export default function RevenuePage() {
               )}
             </tbody>
           </table>
-        </div>
+        </WideScroll>
       </div>
 
     </div>

@@ -4,8 +4,9 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { amountDue, bookingChargesBreakdown, bookingMealCharges, cashReceived, creditNoteRedemptions, excessReceived, fmt, fmtIN, dayName, getBookingPricingRows, nightsBetween, pricingSheetLines, pruneNightOverrides, signedBalance, todayStr, tryAssignRooms } from "@/lib/utils";
+import { amountDue, bookingChargesBreakdown, bookingMealCharges, cashReceived, creditNoteRedemptions, excessReceived, fmt, fmtIN, dayName, getBookingPricingRows, nightsBetween, nowTime, pricingSheetLines, pruneNightOverrides, signedBalance, todayStr, tryAssignRooms } from "@/lib/utils";
 import { StatusBadge } from "@/components/StatusBadge";
+import { REFUND_TYPE } from "@/types";
 import type { CancellationDetails, CancellationPolicy, ChargeHead, SpecialDay, WaiveOffLine } from "@/types";
 
 // ─── helpers ───────────────────────────────────────────────────────────────
@@ -121,6 +122,7 @@ export default function BookingDetailPage() {
     openModal,
     cancelBooking,
     recordRefund,
+    recordExcessRefund,
     hydrated,
     currentRole,
     currentUser,
@@ -147,6 +149,9 @@ export default function BookingDetailPage() {
   const [refDate, setRefDate] = useState("");
   const [refMode, setRefMode] = useState("Bank Transfer");
   const [refNote, setRefNote] = useState("");
+  // What the refund settles: an unpaid cancellation refund, or excess
+  // received on a live or completed stay
+  const [refTarget, setRefTarget] = useState<"cancellation" | "excess">("cancellation");
 
   // Waive-off modal (cancelled bookings: write off the unpaid balance)
   const [showWaiveModal, setShowWaiveModal] = useState(false);
@@ -388,7 +393,6 @@ export default function BookingDetailPage() {
   };
 
   const onConfirmRefund = () => {
-    if (!b.cancellationDetails) return;
     const amt = parseFloat(refAmount);
     if (!amt || amt <= 0) {
       showNotif("Enter a valid refund amount", "error");
@@ -398,6 +402,24 @@ export default function BookingDetailPage() {
       showNotif("Pick the payout date", "error");
       return;
     }
+    if (refTarget === "excess") {
+      const excess = excessReceived(b.balance);
+      if (amt > excess + 0.5) {
+        showNotif(`Only ${fmt(excess)} is due back to the guest`, "error");
+        return;
+      }
+      recordExcessRefund(b.id, {
+        date: refDate,
+        amount: amt,
+        mode: refMode,
+        reference: refNote.trim() || undefined,
+        by: currentUser,
+      });
+      setShowRefundModal(false);
+      showNotif(`Refund of ${fmt(amt)} recorded`, "success");
+      return;
+    }
+    if (!b.cancellationDetails) return;
     const paidOut = (b.cancellationDetails.refundPayouts ?? []).reduce((s, p) => s + p.amount, 0);
     const remaining = Math.max(0, b.cancellationDetails.refundAmount - paidOut);
     if (amt > remaining) {
@@ -533,6 +555,12 @@ export default function BookingDetailPage() {
             <h3>Record Refund</h3>
             <p className="modal-desc">
               {b.guest} · {b.id}
+              {refTarget === "excess" && (
+                <>
+                  <br />
+                  Excess received <strong style={{ color: "var(--pur)" }}>{fmt(excessReceived(b.balance))}</strong> to be returned to the guest.
+                </>
+              )}
             </p>
             <div className="fg" style={{ marginBottom: 12 }}>
               <div className="field">
@@ -716,6 +744,16 @@ export default function BookingDetailPage() {
       <div>
         <div className="status-bar">
           <span><StatusBadge status={b.status} /></span>
+          {b.checkedIn && (
+            <span className="badge" style={{ background: "var(--grn)", color: "#fff" }} title={`Checked in by ${b.checkedIn.by} at ${b.checkedIn.at}`}>
+              Checked in · {b.checkedIn.by}
+            </span>
+          )}
+          {b.roomLock && (
+            <span className="badge" style={{ background: "var(--t1)", color: "#fff" }} title={`Villas locked by ${b.roomLock.by} at ${b.roomLock.at}. Unlock from the room chart.`}>
+              Room locked · {b.roomLock.by}
+            </span>
+          )}
           {b.status === "Lost" && b.lostReason && (
             <span style={{ fontSize: 12, color: "var(--red)" }}>Reason: {b.lostReason}</span>
           )}
@@ -736,6 +774,36 @@ export default function BookingDetailPage() {
             >
               View Pricing
             </a>
+            {!isReadOnly && b.status === "Confirmed" && today >= b.checkin && today <= b.checkout && (
+              b.checkedIn ? (
+                <button className="btn btn-ghost btn-sm" onClick={() => { updateBooking(b.id, { checkedIn: null }); showNotif("Check-in undone", "success"); }}>
+                  Undo check-in
+                </button>
+              ) : (
+                <button
+                  className="btn btn-success btn-sm"
+                  onClick={() => { updateBooking(b.id, { checkedIn: { at: `${fmtIN(today)} ${nowTime()}`, by: currentUser } }); showNotif(`${b.guest} checked in`, "success"); }}
+                >
+                  Check in
+                </button>
+              )
+            )}
+            {!isReadOnly && (b.status === "Confirmed" || b.status === "Completed") && excessReceived(b.balance) > 0 && (
+              <button
+                className="btn btn-ghost btn-sm"
+                style={{ color: "var(--pur)" }}
+                onClick={() => {
+                  setRefTarget("excess");
+                  setRefAmount(String(excessReceived(b.balance)));
+                  setRefDate(today);
+                  setRefMode("Bank Transfer");
+                  setRefNote("");
+                  setShowRefundModal(true);
+                }}
+              >
+                Record Refund
+              </button>
+            )}
             {showBookTentative && (
               <button
                 className="btn btn-primary btn-sm"
@@ -867,6 +935,7 @@ export default function BookingDetailPage() {
                               <button
                                 className="btn btn-primary btn-xs"
                                 onClick={() => {
+                                  setRefTarget("cancellation");
                                   setRefAmount(String(remaining));
                                   setRefDate(today);
                                   setRefMode("Bank Transfer");
@@ -1318,19 +1387,22 @@ export default function BookingDetailPage() {
               <div style={{ padding: "6px 16px 10px", borderBottom: "1px solid var(--bd)", background: "var(--surf2)" }}>
                 {(b.payments ?? []).map((p, i) => {
                   const isCn = (p.mode || "").toLowerCase().includes("credit note");
+                  const isRefund = p.type === REFUND_TYPE || p.amount < 0;
                   return (
                     <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "4px 0", fontSize: 12 }}>
                       <span style={{ color: "var(--t2)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                        <span className="badge" style={{ fontSize: 10, background: isCn ? "var(--acc-lt)" : "var(--grn-lt)", color: isCn ? "var(--acc)" : "var(--grn)" }}>
+                        <span className="badge" style={{ fontSize: 10, background: isRefund ? "var(--pur-bg)" : isCn ? "var(--acc-lt)" : "var(--grn-lt)", color: isRefund ? "var(--pur)" : isCn ? "var(--acc)" : "var(--grn)" }}>
                           {p.mode || "Bank Transfer"}
                           {isCn && p.creditNoteCode ? ` · ${p.creditNoteCode}` : ""}
                         </span>
                         <span>{p.type}</span>
                         <span style={{ color: "var(--t3)" }}>
-                          {fmtIN(p.date)}{p.time ? ` ${p.time}` : ""}{p.by ? ` · by ${p.by}` : ""}
+                          {fmtIN(p.date)}{p.time ? ` ${p.time}` : ""}{p.by ? ` · by ${p.by}` : ""}{p.reference ? ` · ${p.reference}` : ""}
                         </span>
                       </span>
-                      <span style={{ fontWeight: 600, color: "var(--t1)", whiteSpace: "nowrap" }}>{fmt(p.amount)}</span>
+                      <span style={{ fontWeight: 600, color: isRefund ? "var(--pur)" : "var(--t1)", whiteSpace: "nowrap" }}>
+                        {p.amount < 0 ? `−${fmt(-p.amount)}` : fmt(p.amount)}
+                      </span>
                     </div>
                   );
                 })}

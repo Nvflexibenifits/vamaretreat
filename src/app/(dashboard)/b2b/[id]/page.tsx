@@ -4,7 +4,7 @@ import Link from "next/link";
 import { use } from "react";
 import { B2BBookingForm } from "@/components/B2BBookingForm";
 import { useApp } from "@/lib/store";
-import { fmt, fmtIN, statusBadgeClass } from "@/lib/utils";
+import { fmt, fmtIN, statusBadgeClass, tdsOfPayments } from "@/lib/utils";
 import type { B2BBooking } from "@/types";
 
 export default function EditB2BBookingPage({
@@ -171,6 +171,7 @@ function B2BReadOnly({ booking: b }: { booking: B2BBooking }) {
                   <th>Date</th>
                   <th>Mode</th>
                   <th style={{ textAlign: "right" }}>Amount (₹)</th>
+                  <th style={{ textAlign: "right" }}>TDS (₹)</th>
                 </tr>
               </thead>
               <tbody>
@@ -179,6 +180,7 @@ function B2BReadOnly({ booking: b }: { booking: B2BBooking }) {
                     <td>{fmtIN(p.date)}</td>
                     <td>{p.mode}</td>
                     <td style={{ textAlign: "right" }}>{fmt(p.amount)}</td>
+                    <td style={{ textAlign: "right", color: "var(--t3)" }}>{(p.tds ?? 0) > 0 ? fmt(p.tds ?? 0) : "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -196,6 +198,17 @@ function B2BReadOnly({ booking: b }: { booking: B2BBooking }) {
               {fmt(b.advance)}
             </span>
           </div>
+          {tdsOfPayments(b.payments) > 0 && (
+            <div className="detail-row">
+              <span className="detail-key" style={{ fontWeight: 600 }}>
+                TDS
+                <span style={{ fontSize: 11, color: "var(--t3)", fontWeight: 500, marginLeft: 8 }}>withheld by client, settles the bill</span>
+              </span>
+              <span className="detail-val" style={{ fontWeight: 700, fontSize: 14, color: "var(--t2)" }}>
+                {fmt(tdsOfPayments(b.payments))}
+              </span>
+            </div>
+          )}
           <div className="detail-row">
             <span className="detail-key" style={{ fontWeight: 600 }}>
               {b.balance <= -1 ? "Excess Received" : "Balance"}

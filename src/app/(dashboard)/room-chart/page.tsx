@@ -3,18 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "@/lib/store";
-import { blockOccupancyEnd, compareRoomLabels, findAvailableRoomIds, fmt, fmtIN, roomsHeldOnDate, sortRoomInventory, todayStr } from "@/lib/utils";
-import type {
-  BlockGuestCounts,
-  Booking,
-  BulkRoomBlock,
-  BulkRoomBlockRow,
-  RoomMaster,
-  RoomNightUpgrade,
-  Venue,
-  VenueBlock,
-  VenueType,
-} from "@/types";
+import { blockOccupancyEnd, compareRoomLabels, findAvailableRoomIds, fmt, fmtIN, roomsHeldOnDate, sortRoomInventory, todayStr, nowTime, extraHead, effectiveRoomsOnDate } from "@/lib/utils";
+import type { BlockGuestCounts, Booking, BulkRoomBlock, BulkRoomBlockRow, RoomMaster, RoomNightUpgrade, Venue, VenueBlock, VenueType, AddOnCategory, Extra, CheckIn } from "@/types";
 
 const DAYS_WINDOW = 30;
 
@@ -172,6 +162,11 @@ export default function RoomChartPage() {
     currentUser,
     currentRole,
     showNotif,
+    addExtra,
+    updateExtra,
+    removeExtra,
+    addOnCategories,
+    updateBooking,
   } = useApp();
 
   const [offset, setOffset] = useState(0);
@@ -200,6 +195,20 @@ export default function RoomChartPage() {
 
   // Bulk block detail/delete modal
   const [bulkDetail, setBulkDetail] = useState<BulkRoomBlock | null>(null);
+  // Front office works from a popup on the chart instead of the booking page
+  const [foBookingId, setFoBookingId] = useState<string | null>(null);
+  const isFrontOffice = currentRole === "Front Office";
+  // Only Sales and Admin lock or unlock villas, and only from here.
+  const canLock = currentRole === "Admin" || currentRole === "Sales";
+  const toggleLock = (b: Booking) => {
+    if (b.roomLock) {
+      updateBooking(b.id, { roomLock: null });
+      showNotif(`${b.guest}: villas unlocked`, "success");
+    } else {
+      updateBooking(b.id, { roomLock: { at: `${fmtIN(today)} ${nowTime()}`, by: currentUser } });
+      showNotif(`${b.guest}: villas locked. Nobody can move them until unlocked here.`, "success");
+    }
+  };
 
   // Drag-and-drop state
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -807,8 +816,10 @@ export default function RoomChartPage() {
   };
 
   // ─── Drag & drop handlers (per-night room override) ───
+  // A checked-in guest is in the villa, and locked villas were promised:
+  // nobody moves either.
   const isBookingDraggable = (b: Booking) =>
-    b.status === "Tentative" || b.status === "Confirmed";
+    (b.status === "Tentative" || b.status === "Confirmed") && !b.checkedIn && !b.roomLock;
 
   // For a single night, is target room free? Free means: no other booking holds
   // it that night AND no other override of any booking redirects to it.
@@ -863,6 +874,10 @@ export default function RoomChartPage() {
   const handleBulkDrop = (drag: Extract<DragState, { kind: "bulk" }>, targetRoomId: string) => {
     const blk = bulkRoomBlocks.find((x) => x.id === drag.blockId);
     if (!blk || targetRoomId === drag.fromRoomId) return;
+    if (blk.checkedIn) {
+      showNotif("This group is checked in. Its rooms cannot be moved.", "error");
+      return;
+    }
     if (blk.rows.some((r) => r.roomIds.includes(targetRoomId))) {
       showNotif("That room is already part of this block", "error");
       return;
@@ -1201,6 +1216,14 @@ export default function RoomChartPage() {
               Blocked
             </div>
             <div className="rc-legend-item">
+              <div className="rc-legend-dot" style={{ background: "var(--grn)", border: "1px solid var(--grn)" }}></div>
+              Checked in
+            </div>
+            <div className="rc-legend-item">
+              <div className="rc-legend-dot" style={{ background: "var(--grn-bg)", borderLeft: "3px solid var(--t1)", border: "1px solid var(--grn)", borderLeftWidth: 3, borderLeftColor: "var(--t1)" }}></div>
+              Locked
+            </div>
+            <div className="rc-legend-item">
               <div className="rc-legend-dot" style={{ background: "var(--red-bg)", border: "2px solid var(--red)" }}></div>
               Double-booked
             </div>
@@ -1420,6 +1443,7 @@ export default function RoomChartPage() {
                       const cls =
                         "rc-cell-booked" +
                         (blk.status === "Tentative" ? " status-tentative" : "") +
+                        (blk.checkedIn ? " status-checkedin" : "") +
                         (conflict ? " has-conflict" : "");
                       const isDragSource = drag?.kind === "bulk" && drag.blockId === blk.id && drag.fromRoomId === room.id;
                       return (
@@ -1458,6 +1482,8 @@ export default function RoomChartPage() {
                       if (booking.pets > 0) cls += " status-pet";
                       else if (booking.status === "Completed") cls += " status-completed";
                       else if (booking.status === "Tentative") cls += " status-tentative";
+                      if (booking.checkedIn) cls += " status-checkedin";
+                      if (booking.roomLock) cls += " is-locked";
                       if (conflict) cls += " has-conflict";
                       const draggable = isBookingDraggable(booking);
                       // For per-night drag: drop is allowed only on the same date column.
@@ -1517,6 +1543,11 @@ export default function RoomChartPage() {
                             }}
                             onClick={() => {
                               if (drag) return;
+                              if (isFrontOffice) {
+                                setFoBookingId(booking.id);
+                                setHover(null);
+                                return;
+                              }
                               router.push(`/bookings/${booking.id}`);
                             }}
                             onMouseEnter={(e) =>
@@ -1539,14 +1570,38 @@ export default function RoomChartPage() {
                             }}
                             title={
                               conflictTitle ??
-                              (draggable
+                              (booking.roomLock
+                                ? `Villas locked by ${booking.roomLock.by} · Click to open`
+                                : booking.checkedIn
+                                ? "Checked in · Click to open"
+                                : draggable
                                 ? cell.kind === "booking" && cell.isOverridden
                                   ? "Drag to move · Click to open · Night reassigned"
                                   : "Drag to move · Click to open"
                                 : undefined)
                             }
                           >
-                            {booking.guest.split(" ")[0]}
+                            <span className="rc-cell-label">{booking.guest.split(" ")[0]}</span>
+                            {canLock && (booking.status === "Confirmed" || booking.status === "Tentative") && (
+                              <button
+                                type="button"
+                                className={`rc-lock-btn${booking.roomLock ? " on" : ""}`}
+                                title={booking.roomLock ? "Unlock villas" : "Lock villas to this guest"}
+                                aria-label={booking.roomLock ? "Unlock villas" : "Lock villas"}
+                                draggable={false}
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  e.preventDefault();
+                                  toggleLock(booking);
+                                }}
+                              >
+                                <svg width="9" height="10" viewBox="0 0 9 10" aria-hidden="true">
+                                  <rect x="1" y="4.5" width="7" height="5" rx="1" fill="currentColor" />
+                                  <path d="M2.5 4.5V3a2 2 0 0 1 4 0v1.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
+                                </svg>
+                              </button>
+                            )}
                           </div>
                         </td>
                       );
@@ -2076,6 +2131,26 @@ export default function RoomChartPage() {
       )}
 
       {/* Bulk block detail modal */}
+      {foBookingId && (() => {
+        const fb = bookings.find((x) => x.id === foBookingId);
+        if (!fb) return null;
+        return (
+          <FrontOfficeBookingModal
+            booking={fb}
+            today={today}
+            currentUser={currentUser}
+            addOnCategories={addOnCategories}
+            onClose={() => setFoBookingId(null)}
+            onOpen={() => router.push(`/bookings/${fb.id}`)}
+            onCheckIn={(value) => updateBooking(fb.id, { checkedIn: value })}
+            addExtra={addExtra}
+            updateExtra={updateExtra}
+            removeExtra={removeExtra}
+            showNotif={showNotif}
+          />
+        );
+      })()}
+
       {bulkDetail && (
         <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setBulkDetail(null); }}>
           <div className="modal modal-sm">
@@ -2118,6 +2193,11 @@ export default function RoomChartPage() {
                 <div style={{ marginTop: 4 }}>{guestSummary(bulkDetail.guests, bulkDetail.pax)}</div>
               )}
               {bulkDetail.amount > 0 && <div style={{ marginTop: 4 }}>{fmt(bulkDetail.amount)}</div>}
+              {bulkDetail.checkedIn && (
+                <div style={{ marginTop: 6, color: "var(--grn)", fontWeight: 600 }}>
+                  Checked in · {bulkDetail.checkedIn.by} · {bulkDetail.checkedIn.at}
+                </div>
+              )}
             </div>
             <div style={{ marginTop: 10 }}>
               {bulkDetail.rows.map((row) => (
@@ -2127,6 +2207,27 @@ export default function RoomChartPage() {
               ))}
             </div>
             <div className="modal-actions" style={{ marginTop: 16 }}>
+              {bulkDetail.status === "Confirmed" && today >= bulkDetail.checkin && today <= bulkDetail.checkout && (
+                bulkDetail.checkedIn ? (
+                  <button
+                    className="btn btn-ghost"
+                    onClick={() => { updateBulkRoomBlock(bulkDetail.id, { checkedIn: null }); showNotif("Check-in undone", "success"); setBulkDetail(null); }}
+                  >
+                    Undo check-in
+                  </button>
+                ) : (
+                  <button
+                    className="btn btn-success"
+                    onClick={() => {
+                      updateBulkRoomBlock(bulkDetail.id, { checkedIn: { at: `${fmtIN(today)} ${nowTime()}`, by: currentUser } });
+                      showNotif(`${bulkDetail.label || bulkDetail.guestName} checked in`, "success");
+                      setBulkDetail(null);
+                    }}
+                  >
+                    Check in group
+                  </button>
+                )
+              )}
               <button
                 className="btn btn-ghost"
                 style={{ color: "var(--red)" }}
@@ -2346,6 +2447,16 @@ function BookingHoverCard({
       <div style={{ fontSize: 11, color: "var(--t3)", marginBottom: 8 }}>
         {booking.id} · {fmtIN(booking.checkin)} to {fmtIN(booking.checkout)}
       </div>
+      {booking.checkedIn && (
+        <div style={{ fontSize: 11, color: "var(--grn)", fontWeight: 700, marginBottom: 8 }}>
+          Checked in · {booking.checkedIn.by} · {booking.checkedIn.at}
+        </div>
+      )}
+      {booking.roomLock && (
+        <div style={{ fontSize: 11, color: "var(--t1)", fontWeight: 700, marginBottom: 8 }}>
+          Villas locked · {booking.roomLock.by} · {booking.roomLock.at}
+        </div>
+      )}
       {conflictWith && conflictWith.length > 0 && (
         <div className="hover-conflict">
           Double-booked on {fmtIN(date)} with{" "}
@@ -2588,6 +2699,246 @@ function HoverRow({
       <span style={{ fontWeight: 600, color: highlight || "var(--t1)" }}>
         {value}
       </span>
+    </div>
+  );
+}
+
+// What the front office can do with a booking from the chart: see who is
+// in which villa, check the guest in, and add charges to the bill. Only
+// charges added here can be changed here; the rest of the booking stays as
+// sales saved it.
+function FrontOfficeBookingModal({
+  booking: b,
+  today,
+  currentUser,
+  addOnCategories,
+  onClose,
+  onOpen,
+  onCheckIn,
+  addExtra,
+  updateExtra,
+  removeExtra,
+  showNotif,
+}: {
+  booking: Booking;
+  today: string;
+  currentUser: string;
+  addOnCategories: AddOnCategory[];
+  onClose: () => void;
+  onOpen: () => void;
+  onCheckIn: (value: CheckIn | null) => void;
+  addExtra: (bookingId: string, extra: Extra, paid?: { mode: string }) => void;
+  updateExtra: (bookingId: string, extraId: string, patch: Partial<Extra>, paid?: { mode: string } | null) => void;
+  removeExtra: (bookingId: string, extraId: string) => void;
+  showNotif: (msg: string, kind: "success" | "error") => void;
+}) {
+  const PAID_MODES = ["Cash", "UPI / QR", "Bank Transfer", "Card"];
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [category, setCategory] = useState(addOnCategories[0]?.name ?? "");
+  const [amount, setAmount] = useState("");
+  const [gstPct, setGstPct] = useState("18");
+  const [paid, setPaid] = useState(false);
+  const [payMode, setPayMode] = useState("Cash");
+
+  const canAddOns = b.status === "Confirmed";
+  const inStay = b.status === "Confirmed" && today >= b.checkin && today <= b.checkout;
+  // The villa the guest actually sleeps in on the night shown, as the chart
+  // paints it: chart moves and upgrades applied.
+  const night = today < b.checkin ? b.checkin : today >= b.checkout ? addDays(b.checkout, -1) : today;
+  const rooms = effectiveRoomsOnDate(b, night);
+  const shown = rooms.length > 0 ? rooms : b.allocatedRooms;
+
+  const resetForm = () => {
+    setEditingId(null);
+    setCategory(addOnCategories[0]?.name ?? "");
+    setAmount("");
+    setGstPct("18");
+    setPaid(false);
+    setPayMode("Cash");
+  };
+  const startEdit = (e: Extra) => {
+    setEditingId(e.id ?? null);
+    setCategory(e.name);
+    setAmount(String(e.amount));
+    setGstPct(e.amount > 0 && e.gst ? String(Math.round((e.gst / e.amount) * 10000) / 100) : "0");
+    const receipt = b.payments.find((p) => p.extraId === e.id);
+    setPaid(!!receipt);
+    setPayMode(receipt?.mode ?? "Cash");
+  };
+  const submit = () => {
+    const amt = parseFloat(amount) || 0;
+    if (amt <= 0) {
+      showNotif("Enter the charge amount", "error");
+      return;
+    }
+    const cat = category.trim() || "Add-on Charge";
+    const gst = Math.round(amt * (parseFloat(gstPct) || 0)) / 100;
+    const head = addOnCategories.find((c) => c.name === cat)?.head ?? extraHead({ name: cat, amount: amt, date: "", by: "" });
+    if (editingId) {
+      updateExtra(b.id, editingId, { name: cat, amount: amt, gst, head }, paid ? { mode: payMode } : null);
+      showNotif("Charge updated", "success");
+    } else {
+      addExtra(
+        b.id,
+        { name: cat, amount: amt, gst, head, date: today, by: currentUser, source: "front-office" },
+        paid ? { mode: payMode } : undefined
+      );
+      showNotif(paid ? `${fmt(amt + gst)} charged and received` : `${fmt(amt + gst)} added to the bill`, "success");
+    }
+    resetForm();
+  };
+
+  return (
+    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal" style={{ width: 560, maxWidth: "calc(100vw - 32px)" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+          <div style={{ flex: 1 }}>
+            <h3 style={{ marginBottom: 2 }}>{b.guest}</h3>
+            <div style={{ fontSize: 12, color: "var(--t3)" }}>
+              {b.id} · {fmtIN(b.checkin)} to {fmtIN(b.checkout)}{b.mobile ? ` · ${b.mobile}` : ""}
+            </div>
+            <div style={{ fontSize: 12, color: "var(--t2)", marginTop: 4 }}>
+              Villas: <strong>{[...shown].sort(compareRoomLabels).join(", ") || "not allocated"}</strong>
+            </div>
+          </div>
+          <span className="badge" style={{ background: b.status === "Confirmed" ? "var(--grn-bg)" : "var(--amb-bg)", color: b.status === "Confirmed" ? "var(--grn)" : "var(--amb)" }}>
+            {b.status}
+          </span>
+        </div>
+
+        {/* Check-in */}
+        <div style={{ marginTop: 14, padding: "10px 12px", border: "1px solid var(--bd)", borderRadius: "var(--r2)", display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ flex: 1, fontSize: 12 }}>
+            {b.checkedIn ? (
+              <span style={{ color: "var(--grn)", fontWeight: 700 }}>Checked in · {b.checkedIn.by} · {b.checkedIn.at}</span>
+            ) : inStay ? (
+              <span style={{ color: "var(--t2)" }}>Guest not checked in yet</span>
+            ) : (
+              <span style={{ color: "var(--t3)" }}>Check-in opens on {fmtIN(b.checkin)}</span>
+            )}
+            {b.checkedIn && <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 2 }}>Villas are locked while the guest is in-house.</div>}
+            {b.roomLock && <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 2 }}>Villas locked by {b.roomLock.by}. Only Sales or Admin can unlock them on the chart.</div>}
+          </div>
+          {b.checkedIn ? (
+            <button className="btn btn-ghost btn-sm" onClick={() => { onCheckIn(null); showNotif("Check-in undone", "success"); }}>Undo</button>
+          ) : (
+            inStay && (
+              <button
+                className="btn btn-success btn-sm"
+                onClick={() => { onCheckIn({ at: `${fmtIN(today)} ${nowTime()}`, by: currentUser }); showNotif(`${b.guest} checked in`, "success"); }}
+              >
+                Check in
+              </button>
+            )
+          )}
+        </div>
+
+        {/* Add-on charges */}
+        {canAddOns ? (
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 6 }}>Add-on charges</div>
+            {b.extras.length > 0 && (
+              <table className="pricing-tbl" style={{ marginBottom: 10 }}>
+                <thead>
+                  <tr>
+                    <th>Charge</th>
+                    <th style={{ textAlign: "right" }}>Amount</th>
+                    <th>Paid</th>
+                    <th>By</th>
+                    <th style={{ width: 90 }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {b.extras.map((e, i) => {
+                    const mine = e.source === "front-office" && !!e.id;
+                    const receipt = b.payments.find((p) => p.extraId === e.id);
+                    const isPaid = receipt ? true : (e.totalPaid ?? 0) >= (e.amount || 0) + (e.gst || 0);
+                    return (
+                      <tr key={e.id ?? i}>
+                        <td>{e.name}</td>
+                        <td style={{ textAlign: "right" }}>{fmt((e.amount || 0) + (e.gst || 0))}</td>
+                        <td>
+                          <span className="badge" style={{ fontSize: 10, background: isPaid ? "var(--grn-lt)" : "var(--amb-lt)", color: isPaid ? "var(--grn)" : "var(--amb)" }}>
+                            {isPaid ? `Paid${receipt ? ` · ${receipt.mode}` : ""}` : "Unpaid"}
+                          </span>
+                        </td>
+                        <td style={{ fontSize: 11, color: "var(--t3)" }}>{e.by}</td>
+                        <td style={{ whiteSpace: "nowrap" }}>
+                          {mine ? (
+                            <>
+                              <button type="button" className="btn btn-ghost btn-xs" onClick={() => startEdit(e)}>Edit</button>
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-xs"
+                                style={{ color: "var(--red)" }}
+                                onClick={() => { removeExtra(b.id, e.id!); if (editingId === e.id) resetForm(); showNotif("Charge removed", "success"); }}
+                              >
+                                Remove
+                              </button>
+                            </>
+                          ) : (
+                            <span style={{ fontSize: 10, color: "var(--t3)" }}>Sales</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+            <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr .7fr 1fr", gap: 8, alignItems: "end" }}>
+              <div className="field">
+                <label>Category</label>
+                <select value={category} onChange={(e) => setCategory(e.target.value)}>
+                  {addOnCategories.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+                  {category && !addOnCategories.some((c) => c.name === category) && <option value={category}>{category}</option>}
+                </select>
+              </div>
+              <div className="field">
+                <label>Amount (₹)</label>
+                <input type="number" min={0} placeholder="0" value={amount} onChange={(e) => setAmount(e.target.value)} />
+              </div>
+              <div className="field">
+                <label>GST %</label>
+                <input type="number" min={0} max={28} value={gstPct} onChange={(e) => setGstPct(e.target.value)} />
+              </div>
+              <div className="field">
+                <label>Payment</label>
+                <select value={paid ? "paid" : "unpaid"} onChange={(e) => setPaid(e.target.value === "paid")}>
+                  <option value="unpaid">Unpaid · add to bill</option>
+                  <option value="paid">Paid now</option>
+                </select>
+              </div>
+            </div>
+            {paid && (
+              <div className="field" style={{ marginTop: 8, maxWidth: 220 }}>
+                <label>Received by</label>
+                <select value={payMode} onChange={(e) => setPayMode(e.target.value)}>
+                  {PAID_MODES.map((m) => <option key={m}>{m}</option>)}
+                </select>
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center" }}>
+              <button type="button" className="btn btn-primary btn-sm" onClick={submit}>
+                {editingId ? "Save charge" : "Add charge"}
+              </button>
+              {editingId && <button type="button" className="btn btn-ghost btn-sm" onClick={resetForm}>Cancel edit</button>}
+              <span style={{ fontSize: 11, color: "var(--t3)", marginLeft: "auto" }}>
+                Total {fmt((parseFloat(amount) || 0) * (1 + (parseFloat(gstPct) || 0) / 100))}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div style={{ marginTop: 14, fontSize: 12, color: "var(--t3)" }}>
+            Add-on charges can be added to confirmed bookings only.
+          </div>
+        )}
+
+        <div className="modal-actions" style={{ marginTop: 16 }}>
+          <button className="btn btn-ghost" onClick={onOpen}>Open booking</button>
+          <button className="btn btn-primary" onClick={onClose}>Done</button>
+        </div>
+      </div>
     </div>
   );
 }

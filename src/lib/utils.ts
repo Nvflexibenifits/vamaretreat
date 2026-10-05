@@ -720,6 +720,7 @@ export function isCreditNotePayment(p: Payment): boolean {
 export function paymentSplit(b: Booking): { bank: number; cash: number; crNote: number } {
   let bank = 0, cash = 0, crNote = 0;
   (b.payments ?? []).forEach((p) => {
+    if (isTdsPayment(p)) return;
     const m = (p.mode || "").toLowerCase();
     if (m.includes("cash")) cash += p.amount;
     else if (m.includes("credit note")) crNote += p.amount;
@@ -727,6 +728,23 @@ export function paymentSplit(b: Booking): { bank: number; cash: number; crNote: 
   });
   if (bank + cash + crNote === 0 && b.advance > 0) bank = b.advance;
   return { bank, cash, crNote };
+}
+
+// TDS entries on a booking: the client withheld this and remitted it to the
+// government, so it settles the bill without ever arriving as cash.
+export function isTdsPayment(p: Payment): boolean {
+  return (p.mode || "").trim().toLowerCase() === "tds";
+}
+
+export function tdsOfPayments(payments: Payment[] | undefined): number {
+  return (payments ?? []).reduce((s, p) => s + (p.tds ?? 0) + (isTdsPayment(p) ? p.amount : 0), 0);
+}
+
+// Sum of payment amounts excluding TDS entries: the per-payment `tds` field
+// is tracked beside the amount, not inside it, so only legacy mode-TDS rows
+// need removing. Refunds are negative amounts and net off here.
+export function cashOfPayments(payments: Payment[] | undefined): number {
+  return (payments ?? []).filter((p) => !isTdsPayment(p)).reduce((s, p) => s + p.amount, 0);
 }
 
 // Cash and bank money actually received on a booking.
@@ -930,7 +948,9 @@ export function tryAssignRooms(
       for (const id of stored) {
         if (remaining <= 0) break;
         if (catOf(id) !== cat || !notClaimed(id) || segAssigned.includes(id)) continue;
-        if (stillHonoured(id, seg)) {
+        // A guest who is in-house, or whose villas Sales has locked, keeps
+        // their villa no matter what.
+        if (existing?.checkedIn || existing?.roomLock || stillHonoured(id, seg)) {
           take(id);
           remaining--;
         }

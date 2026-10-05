@@ -342,6 +342,25 @@ input[type=range] { width: 100%; accent-color: var(--acc); height: 4px; cursor: 
 .rc-legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--t3); }
 .rc-legend-dot { width: 10px; height: 10px; border-radius: 2px; }
 .rc-table-wrap { overflow-x: auto; }
+/* Revenue register: the table scrolls inside a viewport-high box so its
+   horizontal scrollbar is always on screen, with both header rows pinned.
+   The scrollbar is drawn explicitly so macOS overlay settings cannot hide it. */
+/* No scrollbar-width / scrollbar-color here: Chrome ignores the explicit
+   ::-webkit-scrollbar styling below when either is set, and the macOS
+   overlay scrollbar then stays hidden until the user scrolls. */
+.rev-scroll { overflow: auto; max-height: calc(100vh - 250px); }
+.rev-scroll::-webkit-scrollbar { height: 12px; width: 12px; }
+.rev-scroll::-webkit-scrollbar-track { background: var(--surf2); }
+.rev-scroll::-webkit-scrollbar-thumb { background: var(--bd2); border-radius: 6px; border: 2px solid var(--surf2); }
+.rev-scroll::-webkit-scrollbar-thumb:hover { background: var(--t3); }
+.rev-scroll thead th { position: sticky; z-index: 2; }
+.rev-scroll thead tr:first-child th { top: 0; height: 30px; }
+.rev-scroll thead tr:nth-child(2) th { top: 30px; }
+/* Hand-drawn horizontal scrollbar under wide tables (see HScrollbar). */
+.hscroll-track { position: relative; height: 14px; margin: 0 8px 8px; background: var(--surf2); border: 1px solid var(--bd); border-radius: 7px; cursor: pointer; user-select: none; }
+.hscroll-thumb { position: absolute; top: 2px; bottom: 2px; min-width: 32px; background: var(--bd2); border-radius: 5px; cursor: grab; touch-action: none; }
+.hscroll-thumb:hover, .hscroll-thumb:active { background: var(--t3); cursor: grabbing; }
+.hscroll-track:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
 .rc-table { border-collapse: collapse; min-width: 100%; table-layout: fixed; }
 .rc-table th { padding: 7px 4px; font-size: 10px; font-weight: 700; color: var(--t3); text-align: center; border-bottom: 1px solid var(--bd); border-right: 1px solid var(--bd); background: var(--surf2); white-space: nowrap; width: 48px; }
 .rc-table th.rc-room-col { width: 90px; text-align: left; padding: 7px 12px; font-size: 11px; }
@@ -355,6 +374,17 @@ input[type=range] { width: 100%; accent-color: var(--acc); height: 4px; cursor: 
 .rc-cell-booked.status-completed { background: var(--yel-bg); color: var(--yel); }
 .rc-cell-booked.status-tentative { background: var(--amb-bg); color: var(--amb); }
 .rc-cell-booked.status-pet { background: var(--pur-bg); color: var(--pur); }
+.rc-cell-booked { position: relative; }
+.rc-cell-label { overflow: hidden; text-overflow: ellipsis; }
+/* Sales lock: a dark left bar, kept distinct from the checked-in fill */
+.rc-cell-booked.is-locked { box-shadow: inset 3px 0 0 var(--t1); padding-left: 7px; }
+.rc-lock-btn { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; border: none; border-radius: 3px; background: rgba(255,255,255,.85); color: var(--t2); display: none; align-items: center; justify-content: center; padding: 0; cursor: pointer; }
+.rc-cell-booked:hover .rc-lock-btn, .rc-lock-btn.on { display: inline-flex; }
+.rc-lock-btn.on { background: var(--t1); color: #fff; }
+.rc-lock-btn:hover { background: var(--t1); color: #fff; }
+.rc-lock-btn:focus-visible { outline: 2px solid var(--acc); }
+.rc-cell-booked.status-checkedin { background: var(--grn); color: #fff; }
+.rc-cell-booked.status-checkedin::before { content: "IN"; font-size: 8px; font-weight: 800; letter-spacing: .3px; margin-right: 4px; opacity: .9; }
 .rc-cell-booked.has-conflict { box-shadow: inset 0 0 0 2px var(--red) !important; background: var(--red-bg); color: var(--red); }
 .rc-cell-booked.has-conflict::before { content: "!"; font-weight: 800; margin-right: 4px; }
 .rc-table tr:last-child td { border-bottom: none; }

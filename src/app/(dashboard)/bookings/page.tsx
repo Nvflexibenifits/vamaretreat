@@ -1,5 +1,7 @@
 "use client";
 
+import { OTA_PROVIDERS } from "@/types";
+
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -135,6 +137,7 @@ export default function BookingsPage() {
               <th>ID</th>
               <th>Guest</th>
               <th>Source</th>
+              <th>Provider</th>
               <th>Check-in</th>
               <th>Check-out</th>
               <th>Nights</th>
@@ -149,7 +152,7 @@ export default function BookingsPage() {
           <tbody>
             {data.length === 0 ? (
               <tr>
-                <td colSpan={12}>
+                <td colSpan={13}>
                   <div className="empty-state">
                     <h3>No bookings found</h3>
                     <p>Try adjusting your filters</p>
@@ -195,6 +198,11 @@ export default function BookingsPage() {
                     </td>
                     <td>
                       <span style={{ fontSize: 11, color: "var(--t3)" }}>{b.source || "—"}</span>
+                    </td>
+                    <td>
+                      <span style={{ fontSize: 11, color: b.otaProvider ? "var(--t1)" : "var(--t3)" }} title={b.otaProvider ? OTA_PROVIDERS.find((p) => p.id === b.otaProvider)?.name : undefined}>
+                        {b.otaProvider || "—"}
+                      </span>
                     </td>
                     <td>{fmtIN(b.checkin)}</td>
                     <td>{fmtIN(b.checkout)}</td>

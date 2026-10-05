@@ -20,7 +20,8 @@ import {
   signedBalance,
   pruneNightOverrides,
 } from "@/lib/utils";
-import type { Booking, BookingSegment, BookingStatus, ChargeHead, Deduction, DeductionType, Extra, PackageRates, PricingRow, PricingRowType, SegmentMealItem, SegmentRoom } from "@/types";
+import type { Booking, BookingSegment, BookingStatus, ChargeHead, Deduction, DeductionType, Extra, PackageRates, Payment, PricingRow, PricingRowType, SegmentMealItem, SegmentRoom, OtaProvider } from "@/types";
+import { OTA_PROVIDERS, REFUND_TYPE } from "@/types";
 import { COUNTRY_CODES } from "@/lib/data";
 
 type FormRow = {
@@ -65,6 +66,7 @@ type FieldErrors = {
   checkin?: boolean;
   checkout?: boolean;
   rooms?: boolean;
+  otaProvider?: boolean;
 };
 
 const ROW_LABEL: Record<PricingRowType, string> = {
@@ -226,6 +228,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   const [source, setSource] = useState<"Direct" | "OTA">(
     initial?.source === "OTA" ? "OTA" : "Direct"
   );
+  const [otaProvider, setOtaProvider] = useState<OtaProvider | "">(initial?.otaProvider ?? "");
   const [notes, setNotes] = useState(initial?.notes ?? "");
 
   const defaultSegGuests = {
@@ -247,15 +250,29 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   });
 
   const initialAdvance = initial?.advance ?? 0;
+  // Receipts already recorded. Editable on this form until the stay has
+  // completed; credit note redemptions and refunds are never edited here.
+  // Legacy bookings without itemised payments keep their stored advance.
+  const [existingPayments, setExistingPayments] = useState<Payment[]>(initial?.payments ?? []);
+  const paymentsLocked = initial?.status === "Completed";
+  const existingAdvance = !initial
+    ? 0
+    : (initial.payments?.length ?? 0) > 0
+    ? existingPayments.reduce((s, p) => s + p.amount, 0)
+    : initialAdvance;
 
   const [errors, setErrors] = useState<FieldErrors>({});
 
-  type AddOnRow = { uid: string; category: string; amount: string; gstPct: string; date?: string; by?: string };
+  type AddOnRow = { uid: string; category: string; amount: string; gstPct: string; date?: string; by?: string
+  ref?: Extra;
+};
   // Edit mode: load saved extras back as editable add-on rows so they stay
   // visible and keep counting toward the grand total on re-save.
   const [addOnRows, setAddOnRows] = useState<AddOnRow[]>(() =>
     (initial?.extras ?? []).map((e) => ({
       uid: newUid(),
+      // The saved row, so its id, origin and paid amount survive a re-save
+      ref: e,
       category: e.name,
       amount: String(e.amount),
       gstPct: e.amount > 0 && e.gst ? String(Math.round((e.gst / e.amount) * 10000) / 100) : "0",
@@ -634,7 +651,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
 
   const createAdvance = newPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
   // Cumulative payments: previously recorded (edit mode) plus rows entered in this form
-  const totalReceived = (isEdit ? initialAdvance : 0) + createAdvance;
+  const totalReceived = existingAdvance + createAdvance;
 
   const addOnTotals = addOnRows.map(r => {
     const amt = parseFloat(r.amount) || 0;
@@ -652,6 +669,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       const amt = parseFloat(r.amount) || 0;
       const category = r.category.trim();
       return {
+        ...(r.ref ?? {}),
         name: category || "Add-on Charge",
         amount: amt,
         gst: (amt * (parseFloat(r.gstPct) || 0)) / 100,
@@ -709,6 +727,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       : digits.length >= 6 && digits.length <= 14;
     // OTA bookings come without a guest phone — mobile is optional there,
     // but when one is entered it still has to be a valid number.
+    if (source === "OTA" && !otaProvider) errs.otaProvider = true;
     if (source === "OTA" && digits === "") {
       // valid: no mobile for an OTA booking
     } else if (!/^\d+$/.test(digits) || !lenOk) {
@@ -818,6 +837,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       mobile: mobile.trim() ? `${dial} ${mobile.trim()}` : "",
       email: email.trim(),
       source,
+      otaProvider: source === "OTA" && otaProvider ? otaProvider : undefined,
       notes: notes.trim(),
       rex: currentUser,
       createdAt: todayDate,
@@ -890,11 +910,12 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
         by: currentUser,
         ...(p.mode === "Credit Note" && p.cnCode.trim() ? { creditNoteCode: p.cnCode.trim() } : {}),
       }));
-    const allPayments = validNewPayments.length > 0
-      ? [...(initial?.payments ?? []), ...validNewPayments]
+    const paymentsEdited = JSON.stringify(existingPayments) !== JSON.stringify(initial?.payments ?? []);
+    const allPayments = validNewPayments.length > 0 || paymentsEdited
+      ? [...existingPayments, ...validNewPayments]
       : undefined;
-    const newAdvance = validNewPayments.length > 0
-      ? initialAdvance + validNewPayments.reduce((s, p) => s + p.amount, 0)
+    const newAdvance = allPayments !== undefined
+      ? existingAdvance + validNewPayments.reduce((s, p) => s + p.amount, 0)
       : undefined;
     const segsFull = computedSegments
       .map((cs, i) => {
@@ -929,6 +950,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       mobile: mobile.trim() ? `${dial} ${mobile.trim()}` : "",
       email: email.trim(),
       source,
+      otaProvider: source === "OTA" && otaProvider ? otaProvider : undefined,
       notes: notes.trim(),
 
       checkin,
@@ -969,7 +991,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
         balance: signedBalance(netPayable, newAdvance),
       }),
       ...(newAdvance === undefined && {
-        balance: signedBalance(netPayable, initialAdvance),
+        balance: signedBalance(netPayable, existingAdvance),
       }),
       allocatedRooms,
     };
@@ -1055,6 +1077,17 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       if (!result.ok) {
         showNotif(`No ${result.missingCategoryName} available for selected dates`, "error");
         return;
+      }
+      if (initial.roomLock) {
+        const before = [...initial.allocatedRooms].sort().join(",");
+        const after = [...result.rooms].sort().join(",");
+        if (before !== after) {
+          showNotif(
+            `Villas are locked by ${initial.roomLock.by}. Unlock on the room chart before changing the stay.`,
+            "error"
+          );
+          return;
+        }
       }
       allocatedRooms = result.rooms;
       segAlloc = result.perSegment;
@@ -1191,6 +1224,24 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                 <option value="OTA">OTA</option>
               </select>
             </div>
+            {source === "OTA" && (
+              <div className={`field${errors.otaProvider ? " error" : ""}`}>
+                <label>OTA Provider *</label>
+                <select
+                  value={otaProvider}
+                  onChange={(e) => {
+                    setOtaProvider(e.target.value as OtaProvider | "");
+                    setErrors((p) => ({ ...p, otaProvider: false }));
+                  }}
+                >
+                  <option value="">Select provider</option>
+                  {OTA_PROVIDERS.map((p) => (
+                    <option key={p.id} value={p.id}>{p.id} · {p.name}</option>
+                  ))}
+                </select>
+                <div className="field-err">Pick the OTA this booking came through</div>
+              </div>
+            )}
           </div>
           <div className="field" style={{ marginTop: 11 }}>
             <label>Special Request / Notes</label>
@@ -2056,38 +2107,96 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
           <div className="form-sec-title">
             <span className="form-sec-num">5</span>Payment Received
           </div>
-          {isEdit && (initial?.payments?.length ?? 0) > 0 && (
-            <table className="pricing-tbl" style={{ marginBottom: 14 }}>
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Mode</th>
-                  <th style={{ textAlign: "right" }}>Amount (₹)</th>
-                  <th style={{ textAlign: "right" }}>Cumulative (₹)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(() => {
-                  let running = 0;
-                  return initial!.payments.map((p, i) => {
-                    running += p.amount;
-                    return (
-                      <tr key={i} style={{ cursor: "default" }}>
-                        <td>{fmtIN(p.date)}</td>
-                        <td>
-                          {p.mode}
-                          {p.creditNoteCode ? (
-                            <span style={{ fontSize: 11, color: "var(--t3)", marginLeft: 6 }}>{p.creditNoteCode}</span>
-                          ) : null}
-                        </td>
-                        <td style={{ textAlign: "right" }}>{fmt(p.amount)}</td>
-                        <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(running)}</td>
-                      </tr>
-                    );
-                  });
-                })()}
-              </tbody>
-            </table>
+          {isEdit && existingPayments.length > 0 && (
+            <>
+              <table className="pricing-tbl" style={{ marginBottom: paymentsLocked ? 6 : 14 }}>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Mode</th>
+                    <th style={{ textAlign: "right" }}>Amount (₹)</th>
+                    <th style={{ textAlign: "right" }}>Cumulative (₹)</th>
+                    {!paymentsLocked && <th style={{ width: 32 }}></th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(() => {
+                    let running = 0;
+                    return existingPayments.map((p, i) => {
+                      running += p.amount;
+                      const isRefund = p.type === REFUND_TYPE || p.amount < 0;
+                      const editable = !paymentsLocked && !p.creditNoteCode && !isRefund;
+                      const upd = (patch: Partial<Payment>) =>
+                        setExistingPayments((prev) => prev.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+                      return (
+                        <tr key={i} style={{ cursor: "default" }}>
+                          <td>
+                            {editable ? (
+                              <input type="date" value={p.date} onChange={(e) => upd({ date: e.target.value })} />
+                            ) : (
+                              fmtIN(p.date)
+                            )}
+                          </td>
+                          <td>
+                            {editable ? (
+                              <select value={p.mode} onChange={(e) => upd({ mode: e.target.value })}>
+                      <option>Bank Transfer</option>
+                      <option>Cash</option>
+                      <option>Credit Card</option>
+                      <option>Credit Note</option>
+                              </select>
+                            ) : (
+                              <>
+                                {isRefund && <span className="badge" style={{ fontSize: 10, background: "var(--pur-bg)", color: "var(--pur)", marginRight: 6 }}>Refund</span>}
+                                {p.mode}
+                                {p.creditNoteCode ? (
+                                  <span style={{ fontSize: 11, color: "var(--t3)", marginLeft: 6 }}>{p.creditNoteCode}</span>
+                                ) : null}
+                              </>
+                            )}
+                          </td>
+                          <td style={{ textAlign: "right" }}>
+                            {editable ? (
+                              <input
+                                type="number"
+                                min={0}
+                                value={p.amount === 0 ? "" : p.amount}
+                                placeholder="0"
+                                onChange={(e) => upd({ amount: parseFloat(e.target.value) || 0 })}
+                                style={{ textAlign: "right" }}
+                              />
+                            ) : p.amount < 0 ? (
+                              <span style={{ color: "var(--pur)" }}>−{fmt(-p.amount)}</span>
+                            ) : (
+                              fmt(p.amount)
+                            )}
+                          </td>
+                          <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(running)}</td>
+                          {!paymentsLocked && (
+                            <td>
+                              {editable && (
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost btn-xs"
+                                  onClick={() => setExistingPayments((prev) => prev.filter((_, j) => j !== i))}
+                                >
+                                  Remove
+                                </button>
+                              )}
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    });
+                  })()}
+                </tbody>
+              </table>
+              {paymentsLocked && (
+                <div style={{ fontSize: 11, color: "var(--t3)", marginBottom: 12 }}>
+                  Recorded payments are locked after checkout. Excess received is returned with Record Refund on the booking page.
+                </div>
+              )}
+            </>
           )}
           <table className="pricing-tbl" style={{ marginBottom: 8 }}>
             <thead>

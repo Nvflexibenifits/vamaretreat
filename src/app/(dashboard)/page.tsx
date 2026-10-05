@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { addDays, b2bChargesBreakdown, bookingChargesBreakdown, countsAsRevenue, effectiveRoomsOnDate, pendingPayments, findAvailableRoomIds, fmt, fmtIN, formatLongDate, nightsBetween, sevenDaysFrom, todayStr, weekRange } from "@/lib/utils";
+import { addDays, effectiveRoomsOnDate, findAvailableRoomIds, fmt, fmtIN, formatLongDate, nightsBetween, sevenDaysFrom, todayStr } from "@/lib/utils";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -26,7 +26,6 @@ export default function DashboardPage() {
   }, [rooms, roomInventory]);
 
   const [today, setToday] = useState("");
-  const [pendingOpen, setPendingOpen] = useState(false);
   const [foFilter, setFoFilter] = useState<"today" | "tomorrow" | "custom">("today");
   const [foCustomDate, setFoCustomDate] = useState("");
   // Front Office dashboard tabs: guest movement tables vs daily summaries
@@ -38,42 +37,6 @@ export default function DashboardPage() {
   useEffect(() => {
     setToday(todayStr());
   }, []);
-
-  // ───── Revenue ─────
-  // Mirrors the Revenue Register's Total Charges for the current month:
-  // net charges excluding GST for revenue-bearing B2C bookings plus confirmed
-  // B2B bookings checking in this month, so the two screens show one number.
-  const revData = useMemo(() => {
-    if (!today) return { total: 0, b2c: 0, b2b: 0 };
-    const month = today.slice(0, 7);
-    const b2c = bookings
-      .filter(countsAsRevenue)
-      .filter((b) => b.checkin.startsWith(month))
-      .reduce((s, b) => {
-        const c = bookingChargesBreakdown(b);
-        return s + c.roomNet + c.mealNet + c.other;
-      }, 0);
-    const b2b = b2bBookings
-      .filter((b) => b.status === "Confirmed")
-      .filter((b) => b.checkin.startsWith(month))
-      .reduce((s, b) => {
-        const c = b2bChargesBreakdown(b);
-        return s + c.roomNet + c.mealNet + c.other;
-      }, 0);
-    return { total: b2c + b2b, b2c, b2b };
-  }, [bookings, b2bBookings, today]);
-
-  // ───── Payment Pending ─────
-  // Confirmed and Completed only, B2C and B2B, matching the Revenue Register.
-  const pendingBookings = useMemo(
-    () => pendingPayments(bookings, b2bBookings),
-    [bookings, b2bBookings]
-  );
-
-  const totalPending = useMemo(
-    () => pendingBookings.reduce((s, b) => s + b.balance, 0),
-    [pendingBookings]
-  );
 
   // ───── Room Availability (7 days from the selected tab's anchor) ─────
   const roomDates = useMemo(() => {
@@ -108,12 +71,22 @@ export default function DashboardPage() {
             else if (b.status === "Tentative") tentative += qty;
           }
         });
-        const available = Math.max(0, cat.total - booked - tentative);
+        // Available is the physical count the room chart shows: villas of
+        // this category with nobody sleeping in them that night, after chart
+        // moves, upgrades, group blocks and maintenance. Counting booked
+        // quantities instead drifted from the chart whenever a booking held
+        // more villas than its rows said, or a guest was upgraded out of
+        // the category.
+        const available = cat.cats.reduce(
+          (sum, catId) =>
+            sum + findAvailableRoomIds(catId, d, addDays(d, 1), bookings, roomInventory, undefined, bulkRoomBlocks).length,
+          0
+        );
         return { date: d, booked, tentative, available };
       });
       return { ...cat, cells };
     });
-  }, [bookings, roomDates, roomCategories]);
+  }, [bookings, roomDates, roomCategories, roomInventory, bulkRoomBlocks]);
 
   // ───── Front Office: daily report filter date (shared by all FO tabs) ─────
   const foDate = useMemo(() => {
@@ -419,7 +392,14 @@ export default function DashboardPage() {
       <tr key={b.id}>
         <td style={{ textAlign: "center", color: "var(--t3)", fontSize: 11 }}>{idx + 1}</td>
         <td>
-          <div style={{ fontWeight: 500, color: "var(--t1)" }}>{b.guest}</div>
+          <div style={{ fontWeight: 500, color: "var(--t1)" }}>
+            {b.guest}
+            {b.checkedIn && (
+              <span className="badge" style={{ marginLeft: 6, fontSize: 10, background: "var(--grn)", color: "#fff" }} title={`Checked in by ${b.checkedIn.by} at ${b.checkedIn.at}`}>
+                Checked in
+              </span>
+            )}
+          </div>
           <div style={{ fontSize: 11, color: "var(--t3)" }}>{b.mobile}</div>
         </td>
         <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{fmtIN(b.checkin)}</td>
@@ -998,44 +978,6 @@ export default function DashboardPage() {
         <a href="/bookings/new" className="btn btn-primary btn-sm">New Booking</a>
       </div>
 
-      {/* ───────── Top summary cards ───────── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
-
-        {/* Revenue card */}
-        <div className="card">
-          <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
-            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--t1)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>
-              Revenue
-            </span>
-            <div style={{ marginLeft: "auto" }}>
-              <span className="filter-btn on" style={{ fontSize: 11, padding: "3px 8px" }}>
-                Month
-              </span>
-            </div>
-          </div>
-          <div className="stat-val" style={{ fontSize: 34 }}>{fmt(revData.total)}</div>
-          <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 4 }}>
-            B2C {fmt(revData.b2c)} · B2B {fmt(revData.b2b)} · Excluding GST
-          </div>
-        </div>
-
-        {/* Payment Pending summary card */}
-        <div className="card">
-          <div style={{ marginBottom: 14 }}>
-            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--t1)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>
-              Payment Pending
-            </span>
-          </div>
-          <div className="stat-val" style={{ fontSize: 34, color: "var(--amb)" }}>
-            {fmt(totalPending)}
-          </div>
-          <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 4 }}>
-            Confirmed and Completed bookings, B2C and B2B
-          </div>
-        </div>
-
-      </div>
-
       {/* ───────── Room Availability ───────── */}
       <div className="tbl-wrap" style={{ marginBottom: 16 }}>
         <div className="tbl-hd">
@@ -1116,101 +1058,6 @@ export default function DashboardPage() {
           </table>
         </div>
       </div>
-
-      {/* ───────── Payment Pending list (collapsible) ───────── */}
-      <div className="tbl-wrap" style={{ marginBottom: 16 }}>
-        <div
-          className="tbl-hd"
-          style={{ cursor: "pointer", userSelect: "none" }}
-          onClick={() => setPendingOpen((v) => !v)}
-        >
-          <h3>Payment Pending List</h3>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginLeft: "auto" }}>
-            {pendingBookings.length > 0 && (
-              <span
-                className="badge"
-                style={{ background: "var(--amb-bg)", color: "var(--amb)", fontWeight: 700 }}
-              >
-                {pendingBookings.length}
-              </span>
-            )}
-            <span
-              style={{
-                fontSize: 18,
-                color: "var(--t3)",
-                lineHeight: 1,
-                transform: pendingOpen ? "rotate(180deg)" : "none",
-                transition: "transform .2s",
-                display: "inline-block",
-              }}
-            >
-              &#8964;
-            </span>
-          </div>
-        </div>
-
-        {pendingOpen && (
-          <table>
-            <thead>
-              <tr>
-                <th>Booking ID</th>
-                <th>Guest Name</th>
-                <th>Check-in</th>
-                <th>Check-out</th>
-                <th style={{ textAlign: "right", width: 130, whiteSpace: "nowrap" }}>Amount Due</th>
-                <th style={{ textAlign: "right", width: 140, whiteSpace: "nowrap" }}>Amount Received</th>
-                <th style={{ textAlign: "right", width: 140, whiteSpace: "nowrap" }}>Balance Amount</th>
-                <th style={{ textAlign: "right", width: 100, whiteSpace: "nowrap" }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pendingBookings.length === 0 ? (
-                <tr>
-                  <td colSpan={8}>
-                    <div className="empty-state">
-                      <h3>All bookings paid up</h3>
-                      <p>No pending balances right now</p>
-                    </div>
-                  </td>
-                </tr>
-              ) : (
-                pendingBookings.map((b) => (
-                  <tr key={b.id}>
-                    <td>
-                      <span style={{ fontSize: 11, fontFamily: "var(--font-outfit), Outfit, sans-serif", color: "var(--t3)", fontWeight: 700 }}>
-                        {b.id}
-                      </span>
-                    </td>
-                    <td>
-                      <div style={{ fontWeight: 500, color: "var(--t1)" }}>
-                        {b.name}
-                        {b.kind === "b2b" && (
-                          <span className="badge" style={{ marginLeft: 6, fontSize: 10, background: "var(--acc-lt)", color: "var(--acc)" }}>B2B</span>
-                        )}
-                      </div>
-                      <div style={{ fontSize: 11, color: "var(--t3)" }}>{b.contact}</div>
-                    </td>
-                    <td>{fmtIN(b.checkin)}</td>
-                    <td>{fmtIN(b.checkout)}</td>
-                    <td style={{ textAlign: "right" }}>{fmt(b.grandTotal)}</td>
-                    <td style={{ textAlign: "right", color: "var(--grn)" }}>{fmt(b.received)}</td>
-                    <td style={{ textAlign: "right", fontWeight: 700, color: "var(--amb)" }}>{fmt(b.balance)}</td>
-                    <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                      <button
-                        className="btn btn-ghost btn-xs"
-                        onClick={() => router.push(b.href)}
-                      >
-                        View
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        )}
-      </div>
-
     </div>
   );
 }

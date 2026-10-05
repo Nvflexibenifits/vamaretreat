@@ -1,6 +1,15 @@
 // Finance is read-only: the Revenue Register and booking views, nothing else.
 export type Role = "Sales" | "Front Office" | "Admin" | "Finance";
 
+// Online travel agencies bookings come through. A static list for now;
+// a master-setup screen can replace it later without touching the data.
+export const OTA_PROVIDERS = [
+  { id: "MMT", name: "MakeMyTrip" },
+  { id: "CT", name: "Cleartrip" },
+  { id: "BKG", name: "Booking.com" },
+] as const;
+export type OtaProvider = (typeof OTA_PROVIDERS)[number]["id"];
+
 export type BookingStatus =
   | "Enquiry"
   | "Tentative"
@@ -59,7 +68,23 @@ export type Payment = {
   by: string;
   // Set when mode is "Credit Note" — the code of the redeemed note
   creditNoteCode?: string;
+  // TDS the payer withheld from this payment and remits to the government.
+  // Settles the bill alongside `amount` but never arrives as cash.
+  tds?: number;
+  // Free text, e.g. a transaction reference on a refund
+  reference?: string;
+  // Receipt taken for a specific add-on charge (links to Extra.id)
+  extraId?: string;
 };
+
+// Guest (or group) physically in the villa. While set, the villas cannot be
+// moved by anyone: not by a chart drag, not by a re-save.
+export type CheckIn = { at: string; by: string };
+
+// A refund of excess money is stored as a payment with type "Refund" and a
+// negative amount, so advance, balance, the register and the cards all
+// settle through the one payments list.
+export const REFUND_TYPE = "Refund";
 
 // Revenue head an amount reports under in the Revenue Register.
 export type ChargeHead = "room" | "meal" | "other";
@@ -74,6 +99,12 @@ export type AddOnCategory = {
 };
 
 export type Extra = {
+  // Rows added from the room chart popup carry an id so they can be edited
+  // or removed individually; legacy rows have none.
+  id?: string;
+  // "front-office" marks a row the front office added from the room chart.
+  // Only those rows may be changed from there.
+  source?: "front-office";
   name: string;
   amount: number;
   gst?: number;
@@ -242,6 +273,17 @@ export type Booking = {
   mobile: string;
   email: string;
   source: string;
+  // Which OTA the booking came through. Set only when source is "OTA".
+  otaProvider?: OtaProvider;
+  // Set when the guest has been checked in at the front office. Cleared
+  // with null, not undefined: the API merges patches, so an absent field
+  // would leave the old value in place.
+  checkedIn?: CheckIn | null;
+  // Sales promised the guest these villas. Set and cleared only from the
+  // room chart by Sales or Admin. While set, nobody can move the villas:
+  // not a drag, not a re-save, not the allocator. Distinct from checkedIn,
+  // which is the front office's in-house state.
+  roomLock?: CheckIn | null;
   notes: string;
   rex: string;
   // Date the booking was made (YYYY-MM-DD); legacy bookings may lack it
@@ -489,6 +531,8 @@ export type BulkRoomBlock = {
   rows: BulkRoomBlockRow[];
   createdBy: string;
   createdAt: string;
+  // Set when the group has been checked in at the front office (null clears)
+  checkedIn?: CheckIn | null;
 };
 
 export type VenueBlock = {
