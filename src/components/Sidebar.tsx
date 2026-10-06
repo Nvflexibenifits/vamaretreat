@@ -21,12 +21,35 @@ export function Sidebar() {
 
   const inBookingsGroup = (p: string) =>
     p.startsWith("/bookings") || p.startsWith("/b2b");
+  const inReportsGroup = (p: string) => p.startsWith("/reports");
 
   const [bookingsOpen, setBookingsOpen] = useState<boolean>(inBookingsGroup(pathname));
+  const [reportsOpen, setReportsOpen] = useState<boolean>(inReportsGroup(pathname));
 
   useEffect(() => {
     if (inBookingsGroup(pathname)) setBookingsOpen(true);
+    if (inReportsGroup(pathname)) setReportsOpen(true);
   }, [pathname]);
+
+  const reportLink = (href: string, label: string) => (
+    <Link href={href} className={`nav-it child${isSimpleActive(pathname, href) ? " active" : ""}`}>
+      {label}
+    </Link>
+  );
+  const financeReports = (
+    <>
+      <div className="nav-sub-head">Finance</div>
+      {reportLink("/reports/payment-pending", "Payment Pending")}
+      {reportLink("/reports/payments-received", "Payments Received")}
+    </>
+  );
+  const dataReports = (
+    <>
+      <div className="nav-sub-head">Data</div>
+      {reportLink("/reports/lost", "Enquiries / Lost")}
+      {reportLink("/reports/bookings", "Bookings")}
+    </>
+  );
 
   const onLogout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -58,6 +81,16 @@ export function Sidebar() {
           >
             Revenue
           </Link>
+          <button
+            type="button"
+            className={`nav-it${reportsOpen ? " active" : ""}`}
+            onClick={() => setReportsOpen((v) => !v)}
+            style={{ background: "transparent", border: "none", width: "100%", textAlign: "left" }}
+          >
+            Reports
+            <span className={`nav-arrow${reportsOpen ? " open" : ""}`}>{reportsOpen ? "-" : "+"}</span>
+          </button>
+          {reportsOpen && <div className="nav-children">{financeReports}</div>}
         </nav>
         <div className="sb-ft">
           <div style={{ fontSize: 11, color: "var(--t3)", paddingLeft: 12 }}>
@@ -145,10 +178,21 @@ export function Sidebar() {
               Credit Notes
             </Link>
 
-            <span className="nav-it soon">
+            <button
+              type="button"
+              className={`nav-it${reportsOpen ? " active" : ""}`}
+              onClick={() => setReportsOpen((v) => !v)}
+              style={{ background: "transparent", border: "none", width: "100%", textAlign: "left" }}
+            >
               Reports
-              <span className="nav-soon">Coming Soon</span>
-            </span>
+              <span className={`nav-arrow${reportsOpen ? " open" : ""}`}>{reportsOpen ? "-" : "+"}</span>
+            </button>
+            {reportsOpen && (
+              <div className="nav-children">
+                {financeReports}
+                {dataReports}
+              </div>
+            )}
 
             {isAdmin && (
               <Link
