@@ -4,6 +4,18 @@ import type { ReactNode } from "react";
 import { OTA_PROVIDERS } from "@/types";
 import { B2B_TYPES, shortcutRange, type ReportFilter } from "@/lib/reports";
 
+// One flat list of every business line, so a user picks exactly the slice
+// they want in a single step: each OTA provider and each B2B type on its
+// own, with the group totals still one click away.
+const SEGMENT_OPTIONS: { value: string; label: string }[] = [
+  { value: "all:", label: "All" },
+  { value: "b2c-direct:", label: "B2C · Direct" },
+  { value: "b2c-ota:", label: "B2C · OTA (all)" },
+  ...OTA_PROVIDERS.map((p) => ({ value: `b2c-ota:${p.id}`, label: `B2C · OTA · ${p.name}` })),
+  { value: "b2b:", label: "B2B (all)" },
+  ...B2B_TYPES.map((t) => ({ value: `b2b:${t}`, label: `B2B · ${t}` })),
+];
+
 // The filter bar every report shares: business segment with its sub-choice,
 // an inclusive date range with shortcuts, any report-specific controls, and
 // the export button. Reports own the state; this only renders and edits it.
@@ -37,31 +49,19 @@ export function ReportFilters({
     <div className="report-filters">
       <label className="report-filter">
         <span>Segment</span>
-        <select value={filter.segment} onChange={(e) => set({ segment: e.target.value as ReportFilter["segment"], sub: "" })} style={ctl}>
-          <option value="all">All</option>
-          <option value="b2c-direct">B2C · Direct</option>
-          <option value="b2c-ota">B2C · OTA</option>
-          <option value="b2b">B2B</option>
+        <select
+          value={`${filter.segment}:${filter.sub}`}
+          onChange={(e) => {
+            const [segment, sub = ""] = e.target.value.split(":");
+            set({ segment: segment as ReportFilter["segment"], sub });
+          }}
+          style={ctl}
+        >
+          {SEGMENT_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
         </select>
       </label>
-      {filter.segment === "b2c-ota" && (
-        <label className="report-filter">
-          <span>Provider</span>
-          <select value={filter.sub} onChange={(e) => set({ sub: e.target.value })} style={ctl}>
-            <option value="">All providers</option>
-            {OTA_PROVIDERS.map((p) => <option key={p.id} value={p.id}>{p.id} · {p.name}</option>)}
-          </select>
-        </label>
-      )}
-      {filter.segment === "b2b" && (
-        <label className="report-filter">
-          <span>Type</span>
-          <select value={filter.sub} onChange={(e) => set({ sub: e.target.value })} style={ctl}>
-            <option value="">All types</option>
-            {B2B_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-          </select>
-        </label>
-      )}
       <label className="report-filter">
         <span>{dateLabel} from</span>
         <input type="date" value={filter.from} onChange={(e) => set({ from: e.target.value })} style={ctl} />
