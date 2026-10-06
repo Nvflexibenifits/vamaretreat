@@ -1020,7 +1020,7 @@ export default function DashboardPage() {
           <table>
             <thead>
               <tr>
-                <th rowSpan={2} style={{ verticalAlign: "bottom" }}>Room Category</th>
+                <th rowSpan={2} style={{ verticalAlign: "middle" }}>Room Category</th>
                 {roomDates.map((d) => {
                   const dt = new Date(d + "T00:00:00");
                   const wk = dt.toLocaleDateString("en-IN", { weekday: "short" });
