@@ -29,6 +29,7 @@ type Tab =
   | "addons"
   | "special"
   | "cancellation"
+  | "disclaimer"
   | "users";
 
 const TABS: { id: Tab; label: string }[] = [
@@ -39,6 +40,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "addons", label: "Add-on Charges" },
   { id: "special", label: "Special Days" },
   { id: "cancellation", label: "Cancellation Setup" },
+  { id: "disclaimer", label: "Disclaimer" },
   { id: "users", label: "Users" },
 ];
 
@@ -104,6 +106,7 @@ export default function MasterSetupPage() {
           {tab === "addons" && <AddOnChargesTab />}
           {tab === "special" && <SpecialDaysTab />}
           {tab === "cancellation" && <CancellationSetupTab />}
+          {tab === "disclaimer" && <DisclaimerTab />}
           {tab === "users" && <UsersTab />}
         </div>
       </div>
@@ -1683,6 +1686,52 @@ function formatDate(d: string): string {
 }
 
 // ─────────── Cancellation Setup ───────────
+// Free text printed above the signature block on every pricing sheet and
+// booking confirmation. Blank lines are kept, so terms can be listed.
+function DisclaimerTab() {
+  const { disclaimer, updateDisclaimer, showNotif } = useApp();
+  // null = not edited, so the field follows the saved text until typed in
+  const [edited, setEdited] = useState<string | null>(null);
+  const draft = edited ?? disclaimer;
+  const setDraft = (v: string) => setEdited(v);
+  const dirty = draft !== disclaimer;
+  return (
+    <div className="form-panel">
+      <div className="form-sec">
+        <div className="form-sec-title">Disclaimer on pricing sheet and booking confirmation</div>
+        <p style={{ fontSize: 12, color: "var(--t3)", margin: "0 0 10px" }}>
+          Printed at the foot of every View Pricing and Booking Confirmation sheet, above the guest signature. Leave empty to print no disclaimer.
+        </p>
+        <textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          rows={10}
+          placeholder={"Example:\nCheck-in 2 pm, check-out 11 am.\nRates include GST as shown. Cancellation as per the policy communicated at booking."}
+          style={{ width: "100%", fontFamily: "inherit", fontSize: 13, lineHeight: 1.5, padding: "10px 12px", border: "1px solid var(--bd)", borderRadius: "var(--r2)", background: "var(--surf)", color: "var(--t1)", resize: "vertical" }}
+        />
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            disabled={!dirty}
+            onClick={() => { updateDisclaimer(draft.trim()); setEdited(null); showNotif("Disclaimer saved", "success"); }}
+          >
+            Save Disclaimer
+          </button>
+          {dirty && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEdited(null)}>Discard changes</button>}
+          <span style={{ fontSize: 11, color: "var(--t3)", marginLeft: "auto" }}>{draft.length} characters</span>
+        </div>
+        {draft.trim() && (
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 6 }}>Preview</div>
+            <div style={{ border: "1px solid var(--bd)", padding: "10px 12px", fontSize: 11, lineHeight: 1.5, color: "var(--t2)", whiteSpace: "pre-wrap", background: "var(--surf2)" }}>{draft}</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function CancellationSetupTab() {
   return (
     <>

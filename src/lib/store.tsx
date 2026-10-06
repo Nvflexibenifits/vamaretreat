@@ -134,6 +134,9 @@ type AppContextValue = {
   specialDays: SpecialDay[];
   creditNoteSettings: CreditNoteSettings;
   gstSettings: GstSettings;
+  // Text printed above the signature block on every pricing sheet and
+  // booking confirmation; edited in Master Setup
+  disclaimer: string;
   cancellationPolicy: CancellationPolicy;
   venues: Venue[];
   venueTypes: string[];
@@ -160,6 +163,7 @@ type AppContextValue = {
   recordExcessRefund: (bookingId: string, payout: RefundPayout) => void;
   updateCreditNoteSettings: (s: CreditNoteSettings) => void;
   updateGstSettings: (s: GstSettings) => void;
+  updateDisclaimer: (text: string) => void;
   updateCancellationPolicy: (p: CancellationPolicy) => void;
   addVenue: (v: Venue) => void;
   updateVenue: (id: string, patch: Partial<Venue>) => void;
@@ -254,6 +258,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [b2bBookings, setB2BBookings] = useState<B2BBooking[]>([]);
   const [gstSettings, setGstSettings] =
     useState<GstSettings>(SEED_GST_SETTINGS);
+  const [disclaimer, setDisclaimer] = useState<string>("");
   const [cancellationPolicy, setCancellationPolicy] =
     useState<CancellationPolicy>(SEED_CANCELLATION_POLICY);
   const [venues, setVenues] = useState<Venue[]>(SEED_VENUES);
@@ -307,6 +312,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (Array.isArray(data.b2bBookings)) setB2BBookings(data.b2bBookings);
     if (data.guestNotes && typeof data.guestNotes === "object") setGuestNotes(data.guestNotes);
     if (data.gstSettings) setGstSettings(data.gstSettings);
+    if (typeof data.disclaimer === "string") setDisclaimer(data.disclaimer);
     if (data.cancellationPolicy && "standardThreshold" in data.cancellationPolicy) setCancellationPolicy(data.cancellationPolicy);
     if (data.packageRates) setPackageRatesState({ ...SEED_PACKAGE_RATES, ...data.packageRates });
     if (data.discountCaps) setDiscountCapsState({ sales: (data.discountCaps.sales as number) ?? SEED_DISCOUNT_CAPS.sales, admin: (data.discountCaps.admin as number | null) ?? SEED_DISCOUNT_CAPS.admin });
@@ -878,6 +884,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  const updateDisclaimer = useCallback((text: string) => {
+    setDisclaimer(text);
+    sync("/api/app/settings", "PUT", { disclaimer: text });
+  }, []);
+
   const updateCancellationPolicy = useCallback(
     (p: CancellationPolicy) => {
       setCancellationPolicy(p);
@@ -1255,6 +1266,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       creditNoteSettings,
       creditNotes,
       gstSettings,
+      disclaimer,
       cancellationPolicy,
       venues,
       venueTypes,
@@ -1276,6 +1288,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       removeSpecialDay,
       updateCreditNoteSettings,
       updateGstSettings,
+      updateDisclaimer,
       updateCancellationPolicy,
       addVenue,
       updateVenue,
@@ -1333,6 +1346,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       recordRefund,
       recordExcessRefund,
       gstSettings,
+      disclaimer,
       cancellationPolicy,
       venues,
       venueTypes,
@@ -1354,6 +1368,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       removeSpecialDay,
       updateCreditNoteSettings,
       updateGstSettings,
+      updateDisclaimer,
       updateCancellationPolicy,
       addVenue,
       updateVenue,

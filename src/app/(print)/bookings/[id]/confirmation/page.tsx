@@ -47,7 +47,7 @@ const TD_YELLOW: React.CSSProperties = {
 };
 export default function ConfirmationPage() {
   const params = useParams<{ id: string }>();
-  const { bookings, hydrated } = useApp();
+  const { bookings, hydrated, disclaimer } = useApp();
   const id = params?.id;
   const b = bookings.find((x) => x.id === id);
 
@@ -204,6 +204,9 @@ export default function ConfirmationPage() {
           padding: "24px 32px",
           fontFamily: "DM Sans, sans-serif",
           color: "#1a1a16",
+          minHeight: "calc(100vh - 57px)",
+          display: "flex",
+          flexDirection: "column",
         }}
       >
         {/* Letterhead */}
@@ -632,6 +635,31 @@ export default function ConfirmationPage() {
             <div style={{ fontSize: 12, color: "#1a1a16" }}>{b.notes || "—"}</div>
           </div>
         </div>
+
+        {/* Foot: disclaimer from Master Setup, then signatures. Sits at the
+            bottom of the page so the printed sheet always ends with them. */}
+        <div className="confirmation-foot" style={{ marginTop: "auto", paddingTop: 12 }}>
+          {disclaimer.trim() && (
+            <div style={{ border: "1px solid #d0c9bc", padding: "10px 12px", marginBottom: 14 }}>
+              <div style={{ fontSize: 10, fontWeight: 800, color: "#52524a", textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 4 }}>
+                Disclaimer
+              </div>
+              <div style={{ fontSize: 10.5, lineHeight: 1.5, color: "#1a1a16", whiteSpace: "pre-wrap" }}>{disclaimer}</div>
+            </div>
+          )}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 40, paddingTop: 26 }}>
+            <div>
+              <div style={{ borderTop: "1px solid #1a1a16", paddingTop: 6, fontSize: 11, fontWeight: 700, color: "#1a1a16" }}>Guest Signature</div>
+              <div style={{ fontSize: 10, color: "#52524a", marginTop: 4 }}>Name: {b.guest}</div>
+              <div style={{ fontSize: 10, color: "#52524a", marginTop: 2 }}>Date: ______________</div>
+            </div>
+            <div>
+              <div style={{ borderTop: "1px solid #1a1a16", paddingTop: 6, fontSize: 11, fontWeight: 700, color: "#1a1a16" }}>For Vama Retreats</div>
+              <div style={{ fontSize: 10, color: "#52524a", marginTop: 4 }}>Name: ______________</div>
+              <div style={{ fontSize: 10, color: "#52524a", marginTop: 2 }}>Date: ______________</div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <style jsx global>{`
@@ -660,6 +688,10 @@ export default function ConfirmationPage() {
           .confirmation-sheet {
             padding: 12mm 12mm !important;
             max-width: none !important;
+            min-height: 297mm;
+          }
+          .confirmation-foot {
+            page-break-inside: avoid;
           }
         }
       `}</style>
