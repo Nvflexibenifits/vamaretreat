@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { addDays, effectiveRoomsOnDate, findAvailableRoomIds, fmt, fmtIN, formatLongDate, nightsBetween, sevenDaysFrom, todayStr } from "@/lib/utils";
+import { addDays, blockOccupancyEnd, effectiveRoomsOnDate, findAvailableRoomIds, fmt, fmtIN, formatLongDate, nightsBetween, sevenDaysFrom, todayStr } from "@/lib/utils";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -49,34 +49,43 @@ export default function DashboardPage() {
   }, [today, weekTab, rangeStart]);
 
   const roomStatus = useMemo(() => {
+    // Every column counts physical villas, exactly as the room chart paints
+    // them: who sleeps in each villa that night after chart moves and
+    // upgrades, plus group and corporate blocks. Booked is confirmed stays
+    // and confirmed blocks, Tentative is tentative stays and tentative
+    // blocks, Available is what is left to sell. Counting booked quantities
+    // from booking rows instead drifted from the chart whenever a booking
+    // held more villas than its rows said, a guest was upgraded out of the
+    // category, or a block held villas with no booking behind it.
+    const live = bookings.filter((b) => b.status === "Confirmed" || b.status === "Completed" || b.status === "Tentative");
     return roomCategories.map((cat) => {
+      const villas = roomInventory.filter((r) => cat.cats.includes(r.cat) && r.active).map((r) => r.id);
       const cells = roomDates.map((d) => {
+        const holder = new Map<string, "booked" | "tentative">();
+        live.forEach((b) => {
+          if (!(b.checkin <= d && d < b.checkout)) return;
+          const kind = b.status === "Tentative" ? "tentative" : "booked";
+          effectiveRoomsOnDate(b, d).forEach((roomId) => {
+            if (!holder.has(roomId) || kind === "booked") holder.set(roomId, kind);
+          });
+        });
+        bulkRoomBlocks.forEach((blk) => {
+          if (blk.status === "Maintenance") return;
+          if (!(blk.checkin <= d && d < blockOccupancyEnd(blk.checkin, blk.checkout))) return;
+          const kind = blk.status === "Tentative" ? "tentative" : "booked";
+          blk.rows.forEach((row) =>
+            row.roomIds.forEach((roomId) => {
+              if (!holder.has(roomId) || kind === "booked") holder.set(roomId, kind);
+            })
+          );
+        });
         let booked = 0;
         let tentative = 0;
-        bookings.forEach((b) => {
-          if (b.checkin <= d && d < b.checkout) {
-            const qtyByCat = new Map<string, number>();
-            b.segments
-              .filter((seg) => seg.checkin <= d && d < seg.checkout)
-              .forEach((seg) => {
-                seg.rooms.forEach((r) => {
-                  if (!cat.cats.includes(r.roomId)) return;
-                  const prev = qtyByCat.get(r.roomId) || 0;
-                  qtyByCat.set(r.roomId, Math.max(prev, r.numRooms));
-                });
-              });
-            const qty = Array.from(qtyByCat.values()).reduce((s, n) => s + n, 0);
-            if (qty <= 0) return;
-            if (b.status === "Confirmed" || b.status === "Completed") booked += qty;
-            else if (b.status === "Tentative") tentative += qty;
-          }
+        villas.forEach((id) => {
+          const h = holder.get(id);
+          if (h === "booked") booked++;
+          else if (h === "tentative") tentative++;
         });
-        // Available is the physical count the room chart shows: villas of
-        // this category with nobody sleeping in them that night, after chart
-        // moves, upgrades, group blocks and maintenance. Counting booked
-        // quantities instead drifted from the chart whenever a booking held
-        // more villas than its rows said, or a guest was upgraded out of
-        // the category.
         const available = cat.cats.reduce(
           (sum, catId) =>
             sum + findAvailableRoomIds(catId, d, addDays(d, 1), bookings, roomInventory, undefined, bulkRoomBlocks).length,
