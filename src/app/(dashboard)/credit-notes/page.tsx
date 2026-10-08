@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
 import { fmt, fmtIN } from "@/lib/utils";
 import type { CreditNote } from "@/types";
@@ -14,10 +14,19 @@ function statusStyle(status: CreditNote["status"]): React.CSSProperties {
 
 export default function CreditNotesPage() {
   const { creditNotes, bookings, currentRole } = useApp();
+  // Notes issued by a cancellation here, or loaded from the pre-system
+  // register. Same store, same redemption; only the origin differs.
+  const [tab, setTab] = useState<"system" | "older">("system");
+  const [search, setSearch] = useState("");
+  const olderCount = creditNotes.filter((n) => n.imported).length;
+  const systemCount = creditNotes.length - olderCount;
 
   const notes = useMemo(() => {
+    const q = search.trim().toLowerCase();
     return [...creditNotes]
-      .sort((a, b) => b.cancellationDate.localeCompare(a.cancellationDate))
+      .filter((n) => (tab === "older" ? !!n.imported : !n.imported))
+      .filter((n) => !q || n.code.toLowerCase().includes(q) || n.guestName.toLowerCase().includes(q) || n.guestMobile.includes(q))
+      .sort((a, b) => (tab === "older" ? a.code.localeCompare(b.code, undefined, { numeric: true }) : b.cancellationDate.localeCompare(a.cancellationDate)))
       .map((n) => {
         // Advance actually received on the cancelled source booking
         const b = bookings.find((x) => x.id === n.originalBookingId);
@@ -25,7 +34,7 @@ export default function CreditNotesPage() {
         if (advance === 0 && (b?.advance ?? 0) > 0) advance = b!.advance;
         return { n, advance };
       });
-  }, [creditNotes, bookings]);
+  }, [creditNotes, bookings, tab, search]);
 
   const totals = useMemo(
     () =>
@@ -56,6 +65,22 @@ export default function CreditNotesPage() {
       <div className="pg-hd">
         <div>
           <h2>Credit Notes</h2>
+          <p>{tab === "older" ? "Loaded from the credit note register as on 31 Aug 2026. Redeem them on a booking like any other note." : "Issued by cancellations in this system."}</p>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <button type="button" className={`filter-btn${tab === "system" ? " on" : ""}`} onClick={() => setTab("system")}>
+            Issued by System ({systemCount})
+          </button>
+          <button type="button" className={`filter-btn${tab === "older" ? " on" : ""}`} onClick={() => setTab("older")}>
+            Older Credit Notes ({olderCount})
+          </button>
+          <input
+            type="text"
+            placeholder="Search code, guest, mobile"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{ height: 32, padding: "0 10px", fontSize: 13, border: "1px solid var(--bd)", borderRadius: "var(--r2)", background: "var(--surf)", color: "var(--t1)", minWidth: 220 }}
+          />
         </div>
       </div>
 
@@ -84,10 +109,10 @@ export default function CreditNotesPage() {
             <thead>
               <tr>
                 <th style={{ whiteSpace: "nowrap" }}>Credit Note No.</th>
-                <th style={{ whiteSpace: "nowrap" }}>Issued On</th>
+                <th style={{ whiteSpace: "nowrap" }}>{tab === "older" ? "Register Date" : "Issued On"}</th>
                 <th>Guest</th>
-                <th style={{ whiteSpace: "nowrap" }}>Booking ID</th>
-                <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>Advance Amt</th>
+                <th style={{ whiteSpace: "nowrap" }}>{tab === "older" ? "Remark" : "Booking ID"}</th>
+                {tab === "system" && <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>Advance Amt</th>}
                 <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>Credit Note Amt</th>
                 <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>Redeemed</th>
                 <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>Balance</th>
@@ -100,7 +125,7 @@ export default function CreditNotesPage() {
                 <tr>
                   <td colSpan={10}>
                     <div className="empty-state" style={{ padding: 32 }}>
-                      <p>No credit notes issued yet. They are created when a booking is cancelled with a credit note resolution.</p>
+                      <p>{tab === "older" ? (search ? "No older credit notes match the search." : "No older credit notes loaded.") : "No credit notes issued yet. They are created when a booking is cancelled with a credit note resolution."}</p>
                     </div>
                   </td>
                 </tr>
@@ -118,15 +143,19 @@ export default function CreditNotesPage() {
                       <div style={{ fontWeight: 500, color: "var(--t1)" }}>{n.guestName}</div>
                       <div style={{ fontSize: 11, color: "var(--t3)" }}>{n.guestMobile}</div>
                     </td>
-                    <td style={{ whiteSpace: "nowrap" }}>
-                      <Link
-                        href={`/bookings/${n.originalBookingId}`}
-                        style={{ fontSize: 11, fontFamily: "var(--font-outfit), Outfit, sans-serif", color: "var(--acc)", fontWeight: 700, textDecoration: "none" }}
-                      >
-                        {n.originalBookingId}
-                      </Link>
-                    </td>
-                    <td style={{ textAlign: "right" }}>{advance > 0 ? fmt(advance) : "—"}</td>
+                    {n.imported ? (
+                      <td style={{ fontSize: 11, color: "var(--t3)", maxWidth: 260 }}>{n.imported.remark || "—"}</td>
+                    ) : (
+                      <td style={{ whiteSpace: "nowrap" }}>
+                        <Link
+                          href={`/bookings/${n.originalBookingId}`}
+                          style={{ fontSize: 11, fontFamily: "var(--font-outfit), Outfit, sans-serif", color: "var(--acc)", fontWeight: 700, textDecoration: "none" }}
+                        >
+                          {n.originalBookingId}
+                        </Link>
+                      </td>
+                    )}
+                    {tab === "system" && <td style={{ textAlign: "right" }}>{advance > 0 ? fmt(advance) : "—"}</td>}
                     <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(n.totalAmount)}</td>
                     <td style={{ textAlign: "right" }}>
                       {n.usedAmount > 0 ? fmt(n.usedAmount) : "—"}
@@ -151,15 +180,19 @@ export default function CreditNotesPage() {
                       <span className="badge" style={statusStyle(n.status)}>{n.status}</span>
                     </td>
                     <td style={{ textAlign: "center" }}>
-                      <Link href={`/bookings/${n.originalBookingId}`} className="btn btn-ghost btn-xs">
-                        View
-                      </Link>
+                      {n.imported ? (
+                        <span style={{ fontSize: 10, color: "var(--t3)" }}>Imported</span>
+                      ) : (
+                        <Link href={`/bookings/${n.originalBookingId}`} className="btn btn-ghost btn-xs">
+                          View
+                        </Link>
+                      )}
                     </td>
                   </tr>
                 ))}
                 <tr style={{ background: "var(--surf2)", fontWeight: 700 }}>
                   <td colSpan={4} style={{ textAlign: "right", fontSize: 12, color: "var(--t2)" }}>Total</td>
-                  <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(totals.advance)}</td>
+                  {tab === "system" && <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(totals.advance)}</td>}
                   <td style={{ textAlign: "right", fontWeight: 800 }}>{fmt(totals.issued)}</td>
                   <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(totals.redeemed)}</td>
                   <td style={{ textAlign: "right", fontWeight: 800, color: totals.outstanding > 0 ? "var(--amb)" : "var(--t3)" }}>

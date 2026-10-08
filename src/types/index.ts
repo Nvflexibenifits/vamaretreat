@@ -246,6 +246,14 @@ export type CreditNote = {
   remainingAmount: number;
   status: "Available" | "Partially Used" | "Fully Used";
   transactions: CreditNoteTransaction[];
+  // Present on notes loaded from the pre-system register rather than issued
+  // by a cancellation here. originalBookingId is empty on these.
+  imported?: {
+    registerDate: string;
+    sheetRow?: number;
+    mergedRows?: number[];
+    remark?: string;
+  };
 };
 
 export type RoomNightUpgrade = {
