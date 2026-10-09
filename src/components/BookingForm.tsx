@@ -250,11 +250,12 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   });
 
   const initialAdvance = initial?.advance ?? 0;
-  // Receipts already recorded. Editable on this form until the stay has
-  // completed; credit note redemptions and refunds are never edited here.
-  // Legacy bookings without itemised payments keep their stored advance.
+  // Receipts already recorded. Editable on this form for every status, so a
+  // receipt entered wrongly can be corrected even after the stay completed.
+  // Credit note redemptions and refunds are never edited here. Legacy
+  // bookings without itemised payments keep their stored advance.
   const [existingPayments, setExistingPayments] = useState<Payment[]>(initial?.payments ?? []);
-  const paymentsLocked = initial?.status === "Completed";
+  const paymentsLocked = false;
   const existingAdvance = !initial
     ? 0
     : (initial.payments?.length ?? 0) > 0
@@ -2191,9 +2192,9 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                   })()}
                 </tbody>
               </table>
-              {paymentsLocked && (
+              {initial?.status === "Completed" && (
                 <div style={{ fontSize: 11, color: "var(--t3)", marginBottom: 12 }}>
-                  Recorded payments are locked after checkout. Excess received is returned with Record Refund on the booking page.
+                  This stay has completed. Correct a receipt here only to fix an entry error; money returned to the guest is recorded with Record Refund on the booking page.
                 </div>
               )}
             </>
