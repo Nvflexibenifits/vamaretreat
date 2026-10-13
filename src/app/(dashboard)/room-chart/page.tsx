@@ -235,7 +235,12 @@ export default function RoomChartPage() {
     if (!today) return out;
     const start = new Date(today);
     start.setDate(start.getDate() + offset);
-    for (let i = 0; i < DAYS_WINDOW; i++) {
+    // From today the chart rolls a fixed window forward. From the first of a
+    // month it shows that whole month, so a 31-day month is never cut off
+    // at the 30th.
+    const daysInMonth = new Date(start.getUTCFullYear(), start.getUTCMonth() + 1, 0).getDate();
+    const len = start.getUTCDate() === 1 ? Math.max(DAYS_WINDOW, daysInMonth) : DAYS_WINDOW;
+    for (let i = 0; i < len; i++) {
       const d = new Date(start);
       d.setDate(d.getDate() + i);
       out.push(d.toISOString().split("T")[0]);

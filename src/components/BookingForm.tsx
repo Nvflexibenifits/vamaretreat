@@ -2246,33 +2246,36 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                     {row.mode === "Credit Note" && (
                       <div style={{ marginTop: 5 }}>
                         {(() => {
-                          // The code prefix is fixed (Master Setup); users type
-                          // only the number. cnCode still stores the full code.
-                          const cnPrefix = `${creditNoteSettings.prefix}-`;
-                          const typed = row.cnCode.toLowerCase().startsWith(cnPrefix.toLowerCase())
-                            ? row.cnCode.slice(cnPrefix.length)
-                            : row.cnCode;
+                          // Any credit note code is accepted: ones issued here
+                          // (CRV-0016), and older ones loaded from the register
+                          // (CRV233, CRV05/21-22). A bare number is treated as a
+                          // system code; anything else is matched as typed.
+                          const listId = `cn-list-${row.uid}`;
+                          const open = creditNotes.filter((c) => c.remainingAmount > 0);
                           return (
-                            <div style={{ display: "flex", alignItems: "center", border: "1px solid var(--bd)", borderRadius: "var(--r3)", background: "var(--surf)", overflow: "hidden" }}>
-                              <span style={{ padding: "5px 0 5px 8px", fontSize: 12, fontWeight: 600, color: "var(--t3)", whiteSpace: "nowrap" }}>
-                                {cnPrefix}
-                              </span>
+                            <>
                               <input
                                 type="text"
-                                placeholder="0001"
-                                value={typed}
+                                list={listId}
+                                placeholder={`${creditNoteSettings.prefix}-0001 or older code`}
+                                value={row.cnCode}
                                 onChange={(e) => {
-                                  let v = e.target.value.trim();
-                                  // Pasting a full code must not double the prefix
-                                  if (v.toLowerCase().startsWith(cnPrefix.toLowerCase())) v = v.slice(cnPrefix.length);
-                                  const full = v ? `${creditNoteSettings.prefix}-${v}` : "";
+                                  const v = e.target.value.trim();
+                                  const exact = creditNotes.find((c) => c.code.toLowerCase() === v.toLowerCase());
+                                  // A bare number means a system code, padded the way they are issued (CRV-0016)
+                                  const full = exact ? exact.code : /^\d+$/.test(v) ? `${creditNoteSettings.prefix}-${v.padStart(4, "0")}` : v;
                                   setNewPaymentRows((prev) =>
                                     prev.map((r) => r.uid === row.uid ? { ...r, cnCode: full } : r)
                                   );
                                 }}
-                                style={{ flex: 1, minWidth: 0, padding: "5px 8px 5px 2px", border: "none", fontSize: 12, background: "transparent", outline: "none" }}
+                                style={{ width: "100%", padding: "5px 8px", border: "1px solid var(--bd)", borderRadius: "var(--r3)", fontSize: 12, background: "var(--surf)" }}
                               />
-                            </div>
+                              <datalist id={listId}>
+                                {open.map((c) => (
+                                  <option key={c.code} value={c.code}>{`${c.guestName} · ${fmt(c.remainingAmount)}`}</option>
+                                ))}
+                              </datalist>
+                            </>
                           );
                         })()}
                         {row.cnCode.trim() && (() => {
