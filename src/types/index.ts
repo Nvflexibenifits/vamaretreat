@@ -246,6 +246,9 @@ export type CreditNote = {
   remainingAmount: number;
   status: "Available" | "Partially Used" | "Fully Used";
   transactions: CreditNoteTransaction[];
+  // Present on notes issued by hand from a completed booking, e.g. for
+  // villas booked but not used. originalBookingId is that booking.
+  issued?: { reason: string; by: string; at: string };
   // Present on notes loaded from the pre-system register rather than issued
   // by a cancellation here. originalBookingId is empty on these.
   imported?: {
@@ -328,6 +331,8 @@ export type Booking = {
   grandTotal: number;
 
   creditNoteApplied?: AppliedCreditNote;
+  // Credit notes issued by hand from this booking after the stay
+  creditNotesIssued?: { code: string; amount: number; reason: string; date: string; by: string }[];
 
   advance: number;
   balance: number;

@@ -158,6 +158,8 @@ type AppContextValue = {
   removeSpecialDay: (id: string) => void;
   creditNotes: CreditNote[];
   cancelBooking: (bookingId: string, details: CancellationDetails) => void;
+  // Issue a credit note by hand from a booking, e.g. for villas not used
+  issueCreditNote: (bookingId: string, note: { code: string; amount: number; reason: string }) => void;
   recordRefund: (bookingId: string, payout: RefundPayout) => void;
   // Pay back excess received on a live or completed booking
   recordExcessRefund: (bookingId: string, payout: RefundPayout) => void;
@@ -616,6 +618,49 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     },
     []
+  );
+
+  // A goodwill credit note from a stay: the booking keeps its revenue, the
+  // guest gets value to redeem on a future booking, which nets it off there.
+  const issueCreditNote = useCallback(
+    (bookingId: string, note: { code: string; amount: number; reason: string }) => {
+      const date = todayStr();
+      let guestName = "";
+      let guestMobile = "";
+      setBookings((prev) => {
+        const found = prev.find((b) => b.id === bookingId);
+        if (!found) return prev;
+        guestName = found.guest;
+        guestMobile = found.mobile;
+        const creditNotesIssued = [
+          ...(found.creditNotesIssued ?? []),
+          { code: note.code, amount: note.amount, reason: note.reason, date, by: currentUser },
+        ];
+        sync(`/api/app/bookings/${bookingId}`, "PATCH", { creditNotesIssued });
+        return prev.map((b) => (b.id === bookingId ? { ...b, creditNotesIssued } : b));
+      });
+      const cn: CreditNote = {
+        code: note.code,
+        guestName,
+        guestMobile,
+        originalBookingId: bookingId,
+        cancellationDate: date,
+        totalAmount: note.amount,
+        usedAmount: 0,
+        remainingAmount: note.amount,
+        status: "Available",
+        transactions: [],
+        issued: { reason: note.reason, by: currentUser, at: date },
+      };
+      setCreditNotes((prev) => [...prev, cn]);
+      sync("/api/app/credit-notes", "POST", cn);
+      setCreditNoteSettings((prev) => {
+        const next = { ...prev, nextNumber: prev.nextNumber + 1 };
+        sync("/api/app/settings", "PUT", { creditNoteSettings: next });
+        return next;
+      });
+    },
+    [currentUser]
   );
 
   // Record a cash/bank refund payout against a cancelled booking's refund due.
@@ -1241,6 +1286,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       createBooking,
       updateBooking,
       cancelBooking,
+      issueCreditNote,
       redeemCreditNote,
       recordRefund,
       recordExcessRefund,
@@ -1342,6 +1388,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       creditNoteSettings,
       creditNotes,
       cancelBooking,
+      issueCreditNote,
       redeemCreditNote,
       recordRefund,
       recordExcessRefund,

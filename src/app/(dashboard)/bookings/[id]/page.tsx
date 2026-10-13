@@ -123,6 +123,8 @@ export default function BookingDetailPage() {
     cancelBooking,
     recordRefund,
     recordExcessRefund,
+    issueCreditNote,
+    creditNotes,
     hydrated,
     currentRole,
     currentUser,
@@ -145,6 +147,10 @@ export default function BookingDetailPage() {
 
   // Record Refund modal (cancelled bookings with a cash refund due)
   const [showRefundModal, setShowRefundModal] = useState(false);
+  // Issue Credit Note modal (completed bookings: value owed back as credit)
+  const [showCnModal, setShowCnModal] = useState(false);
+  const [cnAmount, setCnAmount] = useState("");
+  const [cnReason, setCnReason] = useState("");
   const [refAmount, setRefAmount] = useState("");
   const [refDate, setRefDate] = useState("");
   const [refMode, setRefMode] = useState("Bank Transfer");
@@ -544,6 +550,54 @@ export default function BookingDetailPage() {
         </div>
       )}
 
+      {showCnModal && (() => {
+        const nextCode = `${creditNoteSettings.prefix}-${String(creditNoteSettings.nextNumber).padStart(4, "0")}`;
+        const amt = Math.round(parseFloat(cnAmount) || 0);
+        const overPaid = amt > b.advance;
+        const confirm = () => {
+          if (amt <= 0) { showNotif("Enter the credit note amount", "error"); return; }
+          if (!cnReason.trim()) { showNotif("Give the reason for the credit note", "error"); return; }
+          issueCreditNote(b.id, { code: nextCode, amount: amt, reason: cnReason.trim() });
+          setShowCnModal(false);
+          showNotif(`${nextCode} for ${fmt(amt)} issued to ${b.guest}`, "success");
+        };
+        return (
+          <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setShowCnModal(false); }}>
+            <div className="modal modal-sm">
+              <h3>Issue Credit Note</h3>
+              <p className="modal-desc">
+                {b.guest} · {b.id}
+                <br />
+                Value the guest can redeem on a future booking. The revenue of this stay stays as it is; the amount is netted off the booking it is redeemed on.
+              </p>
+              <div className="fg" style={{ marginBottom: 12 }}>
+                <div className="field">
+                  <label>Credit Note No.</label>
+                  <input type="text" value={nextCode} readOnly style={{ background: "var(--surf2)", color: "var(--t2)" }} />
+                </div>
+                <div className="field">
+                  <label>Amount (₹) *</label>
+                  <input type="number" min={1} value={cnAmount} onChange={(e) => setCnAmount(e.target.value)} placeholder="0" />
+                </div>
+              </div>
+              <div className="field" style={{ marginBottom: 12 }}>
+                <label>Reason *</label>
+                <input type="text" value={cnReason} onChange={(e) => setCnReason(e.target.value)} placeholder="e.g. 2 villas booked, 1 used" />
+              </div>
+              {overPaid && (
+                <p style={{ fontSize: 11, color: "var(--amb)", fontWeight: 600, marginBottom: 12 }}>
+                  This is more than the {fmt(b.advance)} the guest paid on this booking.
+                </p>
+              )}
+              <div className="modal-actions">
+                <button className="btn btn-ghost" onClick={() => setShowCnModal(false)}>Cancel</button>
+                <button className="btn btn-primary" onClick={confirm}>Issue {amt > 0 ? fmt(amt) : "Credit Note"}</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {showRefundModal && (
         <div
           className="modal-overlay"
@@ -787,6 +841,15 @@ export default function BookingDetailPage() {
                   Check in
                 </button>
               )
+            )}
+            {!isReadOnly && b.status === "Completed" && (
+              <button
+                className="btn btn-ghost btn-sm"
+                style={{ color: "var(--acc)" }}
+                onClick={() => { setCnAmount(""); setCnReason(""); setShowCnModal(true); }}
+              >
+                Issue Credit Note
+              </button>
             )}
             {!isReadOnly && (b.status === "Confirmed" || b.status === "Completed") && excessReceived(b.balance) > 0 && (
               <button
@@ -1425,6 +1488,30 @@ export default function BookingDetailPage() {
               );
             })()}
           </div>
+
+          {(b.creditNotesIssued ?? []).length > 0 && (
+            <div style={{ borderTop: "1px solid var(--bd)", padding: "10px 16px", background: "var(--acc-lt)" }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 6 }}>
+                Credit notes issued from this booking
+              </div>
+              {(b.creditNotesIssued ?? []).map((n) => {
+                const live = creditNotes.find((c) => c.code === n.code);
+                return (
+                  <div key={n.code} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "3px 0", fontSize: 12 }}>
+                    <span style={{ color: "var(--t2)" }}>
+                      <Link href="/credit-notes" style={{ color: "var(--acc)", fontWeight: 700, textDecoration: "none" }}>{n.code}</Link>
+                      <span style={{ marginLeft: 8 }}>{n.reason}</span>
+                      <span style={{ color: "var(--t3)", marginLeft: 8 }}>{fmtIN(n.date)} · by {n.by}</span>
+                    </span>
+                    <span style={{ whiteSpace: "nowrap", fontWeight: 600, color: "var(--t1)" }}>
+                      {fmt(n.amount)}
+                      {live && <span style={{ fontSize: 11, color: live.remainingAmount > 0 ? "var(--amb)" : "var(--t3)", marginLeft: 8 }}>{fmt(live.remainingAmount)} left</span>}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           {/* Meal Preference + Special Request */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0, borderTop: "1px solid var(--bd)" }}>

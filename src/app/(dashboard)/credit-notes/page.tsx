@@ -142,6 +142,7 @@ export default function CreditNotesPage() {
                     <td>
                       <div style={{ fontWeight: 500, color: "var(--t1)" }}>{n.guestName}</div>
                       <div style={{ fontSize: 11, color: "var(--t3)" }}>{n.guestMobile}</div>
+                      {n.issued && <div style={{ fontSize: 11, color: "var(--acc)", marginTop: 2 }}>Issued after stay: {n.issued.reason}</div>}
                     </td>
                     {n.imported ? (
                       <td style={{ fontSize: 11, color: "var(--t3)", maxWidth: 260 }}>{n.imported.remark || "—"}</td>
