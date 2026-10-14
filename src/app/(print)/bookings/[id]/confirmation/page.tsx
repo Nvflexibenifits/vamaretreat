@@ -47,7 +47,7 @@ const TD_YELLOW: React.CSSProperties = {
 };
 export default function ConfirmationPage() {
   const params = useParams<{ id: string }>();
-  const { bookings, hydrated, disclaimer } = useApp();
+  const { bookings, hydrated, disclaimer, rooms, roomInventory } = useApp();
   const id = params?.id;
   const b = bookings.find((x) => x.id === id);
 
@@ -213,31 +213,14 @@ export default function ConfirmationPage() {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", alignItems: "center", marginBottom: 16 }}>
           {/* Logo + address */}
           <div>
-            <div
-              style={{
-                fontFamily: "Outfit, sans-serif",
-                fontWeight: 800,
-                fontSize: 26,
-                color: "#0f2318",
-                letterSpacing: ".5px",
-                lineHeight: 1,
-              }}
-            >
-              VAMA
-            </div>
-            <div
-              style={{
-                fontFamily: "Outfit, sans-serif",
-                fontWeight: 600,
-                fontSize: 13,
-                color: "#0f2318",
-                letterSpacing: 4,
-                marginTop: 2,
-                marginBottom: 6,
-              }}
-            >
-              RETREATS
-            </div>
+            {/* The brand mark, served from /public; printed at letterhead size */}
+            <img
+              src="/vama-logo.png"
+              alt="Vama Retreats, Nandi Hills"
+              width={290}
+              height={135}
+              style={{ width: 150, height: "auto", display: "block", marginBottom: 6 }}
+            />
             <div style={{ fontSize: 10, color: "#52524a", lineHeight: 1.4 }}>
               Survey Number 27-1, Canterbury Castles Layout,<br />
               Oodanahalli, near Nandi Hills
@@ -647,16 +630,25 @@ export default function ConfirmationPage() {
               <div style={{ fontSize: 10.5, lineHeight: 1.5, color: "#1a1a16", whiteSpace: "pre-wrap" }}>{disclaimer}</div>
             </div>
           )}
+          {/* Guest signature, with the villas the guest is signing for */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 40, paddingTop: 26 }}>
             <div>
               <div style={{ borderTop: "1px solid #1a1a16", paddingTop: 6, fontSize: 11, fontWeight: 700, color: "#1a1a16" }}>Guest Signature</div>
-              <div style={{ fontSize: 10, color: "#52524a", marginTop: 4 }}>Name: {b.guest}</div>
-              <div style={{ fontSize: 10, color: "#52524a", marginTop: 2 }}>Date: ______________</div>
-            </div>
-            <div>
-              <div style={{ borderTop: "1px solid #1a1a16", paddingTop: 6, fontSize: 11, fontWeight: 700, color: "#1a1a16" }}>For Vama Retreats</div>
-              <div style={{ fontSize: 10, color: "#52524a", marginTop: 4 }}>Name: ______________</div>
-              <div style={{ fontSize: 10, color: "#52524a", marginTop: 2 }}>Date: ______________</div>
+              {(() => {
+                // Allocated villas grouped by category, e.g. "1 BHK Villa: V6, V7"
+                const byCat = new Map<string, string[]>();
+                b.allocatedRooms.forEach((id) => {
+                  const inv = roomInventory.find((r) => r.id === id);
+                  const catName = rooms.find((c) => c.id === inv?.cat)?.name ?? inv?.type ?? "Room";
+                  byCat.set(catName, [...(byCat.get(catName) ?? []), inv?.label ?? id]);
+                });
+                if (byCat.size === 0) return null;
+                return [...byCat.entries()].map(([cat, labels]) => (
+                  <div key={cat} style={{ fontSize: 10, color: "#52524a", marginTop: 4 }}>
+                    {cat}: {labels.sort((x, y) => x.localeCompare(y, undefined, { numeric: true })).join(", ")}
+                  </div>
+                ));
+              })()}
             </div>
           </div>
         </div>
