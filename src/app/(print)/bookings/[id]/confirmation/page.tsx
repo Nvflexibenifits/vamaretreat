@@ -359,7 +359,23 @@ export default function ConfirmationPage() {
             <span>Accomodation Charges</span>
           </div>
 
-          <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 4 }}>
+          <table className="acc-table" style={{ width: "100%", borderCollapse: "collapse", marginBottom: 4 }}>
+            {/* Fixed column widths so twelve columns always fit an A4 sheet;
+                the category wraps, the figures never do. */}
+            <colgroup>
+              <col style={{ width: "15%" }} />
+              <col style={{ width: "8%" }} />
+              <col style={{ width: "8%" }} />
+              <col style={{ width: "7%" }} />
+              <col style={{ width: "8%" }} />
+              <col style={{ width: "6%" }} />
+              <col style={{ width: "8%" }} />
+              <col style={{ width: "7%" }} />
+              <col style={{ width: "9%" }} />
+              <col style={{ width: "6%" }} />
+              <col style={{ width: "8%" }} />
+              <col style={{ width: "10%" }} />
+            </colgroup>
             <thead>
               <tr>
                 <th style={TH}>Category</th>
@@ -661,9 +677,46 @@ export default function ConfirmationPage() {
           overflow-y: auto !important;
           height: auto !important;
         }
+        /* The accommodation table has twelve columns: lay it out on fixed
+           widths so it can never grow past the sheet, and let the category
+           name wrap instead of pushing the Total column off the page. */
+        .acc-table {
+          table-layout: fixed;
+          width: 100%;
+        }
+        .acc-table th,
+        .acc-table td {
+          padding-left: 6px !important;
+          padding-right: 6px !important;
+          overflow-wrap: anywhere;
+        }
+        .acc-table td:first-child {
+          white-space: normal !important;
+        }
+        /* Headers may wrap between words, never inside one */
+        .acc-table th {
+          overflow-wrap: normal;
+          word-break: keep-all;
+          letter-spacing: 0 !important;
+        }
         @media print {
           .no-print {
             display: none !important;
+          }
+          .confirmation-sheet table {
+            width: 100% !important;
+            max-width: 100% !important;
+          }
+          .confirmation-sheet th,
+          .confirmation-sheet td {
+            font-size: 10px !important;
+            padding-top: 5px !important;
+            padding-bottom: 5px !important;
+          }
+          .acc-table th,
+          .acc-table td {
+            padding-left: 4px !important;
+            padding-right: 4px !important;
           }
           body {
             background: #fff !important;
@@ -678,6 +731,8 @@ export default function ConfirmationPage() {
             margin: 0;
           }
           .confirmation-sheet {
+            width: 210mm;
+            box-sizing: border-box;
             padding: 12mm 12mm !important;
             max-width: none !important;
             min-height: 297mm;

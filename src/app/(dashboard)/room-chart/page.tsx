@@ -1221,7 +1221,7 @@ export default function RoomChartPage() {
               Blocked
             </div>
             <div className="rc-legend-item">
-              <div className="rc-legend-dot" style={{ background: "var(--grn)", border: "1px solid var(--grn)" }}></div>
+              <div className="rc-legend-dot" style={{ background: "#c9e8d2", border: "1px solid #8fcaa3" }}></div>
               Checked in
             </div>
             <div className="rc-legend-item">

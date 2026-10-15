@@ -391,8 +391,11 @@ input[type=range] { width: 100%; accent-color: var(--acc); height: 4px; cursor: 
 .rc-lock-btn.on { background: var(--t1); color: #fff; }
 .rc-lock-btn:hover { background: var(--t1); color: #fff; }
 .rc-lock-btn:focus-visible { outline: 2px solid var(--acc); }
-.rc-cell-booked.status-checkedin { background: var(--grn); color: #fff; }
-.rc-cell-booked.status-checkedin::before { content: "IN"; font-size: 8px; font-weight: 800; letter-spacing: .3px; margin-right: 4px; opacity: .9; }
+/* Checked in: a light green fill with dark text, set apart from the paler
+   confirmed cell by its tone and the IN tag, and legible at print and on
+   small cells. */
+.rc-cell-booked.status-checkedin { background: #c9e8d2; color: var(--t1); box-shadow: inset 0 0 0 1px #8fcaa3; }
+.rc-cell-booked.status-checkedin::before { content: "IN"; font-size: 8px; font-weight: 800; letter-spacing: .3px; margin-right: 4px; color: var(--grn); }
 .rc-cell-booked.has-conflict { box-shadow: inset 0 0 0 2px var(--red) !important; background: var(--red-bg); color: var(--red); }
 .rc-cell-booked.has-conflict::before { content: "!"; font-weight: 800; margin-right: 4px; }
 .rc-table tr:last-child td { border-bottom: none; }

@@ -1036,8 +1036,8 @@ export default function DashboardPage() {
                   const dm = `${String(dt.getDate()).padStart(2, "0")}/${String(dt.getMonth() + 1).padStart(2, "0")}`;
                   return (
                     <th key={d} colSpan={3} style={{ textAlign: "center", borderLeft: "1px solid var(--bd)" }}>
-                      <div>{wk}</div>
-                      <div style={{ fontSize: 9, color: "var(--t4)", fontWeight: 500, marginTop: 2 }}>{dm}</div>
+                      <div style={{ fontSize: 12, fontWeight: 800, color: "var(--t1)", letterSpacing: ".3px" }}>{wk}</div>
+                      <div style={{ fontSize: 11, color: "var(--t1)", fontWeight: 700, marginTop: 2 }}>{dm}</div>
                     </th>
                   );
                 })}
