@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useParams } from "next/navigation";
 import { useApp } from "@/lib/store";
-import { bookingMealCharges, dayName, fmt, fmtIN, getBookingPricingRows, nightsBetween, pricingSheetLines } from "@/lib/utils";
+import { addDays, bookingMealCharges, dayName, effectiveRoomsOnDate, fmt, fmtIN, getBookingPricingRows, nightsBetween, pricingSheetLines } from "@/lib/utils";
 
 // dd/mm/yy — compact date format matching the booking view page
 function fmtShort(d: string): string {
@@ -651,9 +651,17 @@ export default function ConfirmationPage() {
             <div>
               <div style={{ borderTop: "1px solid #1a1a16", paddingTop: 6, fontSize: 11, fontWeight: 700, color: "#1a1a16" }}>Guest Signature</div>
               {(() => {
-                // Allocated villas grouped by category, e.g. "1 BHK Villa: V6, V7"
+                // The villas the guest actually sleeps in across the stay, with
+                // any room chart moves applied, grouped by category, e.g.
+                // "1 BHK Villa: V6, V7". A dayout holds no night, so it falls
+                // back to the allocation.
+                const slept = new Set<string>();
+                for (let d = b.checkin; d < b.checkout; d = addDays(d, 1)) {
+                  effectiveRoomsOnDate(b, d).forEach((id) => slept.add(id));
+                }
+                const villaIds = slept.size > 0 ? [...slept] : b.allocatedRooms;
                 const byCat = new Map<string, string[]>();
-                b.allocatedRooms.forEach((id) => {
+                villaIds.forEach((id) => {
                   const inv = roomInventory.find((r) => r.id === id);
                   const catName = rooms.find((c) => c.id === inv?.cat)?.name ?? inv?.type ?? "Room";
                   byCat.set(catName, [...(byCat.get(catName) ?? []), inv?.label ?? id]);
