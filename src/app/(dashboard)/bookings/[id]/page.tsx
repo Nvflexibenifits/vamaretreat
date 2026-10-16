@@ -638,7 +638,7 @@ export default function BookingDetailPage() {
                 <label>Mode</label>
                 <select value={refMode} onChange={(e) => setRefMode(e.target.value)}>
                   <option>Bank Transfer</option>
-                  <option>UPI / QR</option>
+                  <option>UPI</option>
                   <option>Cash</option>
                 </select>
               </div>

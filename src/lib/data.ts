@@ -302,7 +302,7 @@ const SEED_SPECS: SeedSpec[] = [
     allocatedRooms: ["PV1"],
     advance: 10000,
     payments: [
-      { date: "2026-04-28", time: "11:45am", type: "Advance", amount: 10000, mode: "UPI / QR", by: "Anagha" },
+      { date: "2026-04-28", time: "11:45am", type: "Advance", amount: 10000, mode: "UPI", by: "Anagha" },
     ],
   },
   {
@@ -365,7 +365,7 @@ const SEED_SPECS: SeedSpec[] = [
     advance: 36462,
     payments: [
       { date: "2026-04-25", time: "10:30am", type: "Advance", amount: 15000, mode: "Cash", by: "Anagha" },
-      { date: "2026-04-28", time: "02:15pm", type: "Balance", amount: 21462, mode: "UPI / QR", by: "Anagha" },
+      { date: "2026-04-28", time: "02:15pm", type: "Balance", amount: 21462, mode: "UPI", by: "Anagha" },
     ],
     extras: [{ name: "BBQ Dinner", amount: 2000, date: "2026-04-29", by: "Anagha" }],
   },
@@ -426,7 +426,7 @@ const SEED_SPECS: SeedSpec[] = [
     allocatedRooms: ["FM1"],
     advance: 5000,
     payments: [
-      { date: "2026-05-04", time: "09:00am", type: "Advance", amount: 5000, mode: "UPI / QR", by: "Karthik" },
+      { date: "2026-05-04", time: "09:00am", type: "Advance", amount: 5000, mode: "UPI", by: "Karthik" },
     ],
   },
   {

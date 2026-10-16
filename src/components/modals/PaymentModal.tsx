@@ -7,7 +7,7 @@ import { fmt } from "@/lib/utils";
 export function PaymentModal() {
   const { modal, closeModal, recordPayment, redeemCreditNote, creditNotes, showNotif, bookings } = useApp();
   const [amount, setAmount] = useState("");
-  const [mode, setMode] = useState("UPI / QR");
+  const [mode, setMode] = useState("UPI");
   const [type, setType] = useState("Balance Payment");
   const [cnCode, setCnCode] = useState("");
 
@@ -74,7 +74,7 @@ export function PaymentModal() {
           <div className="field">
             <label>Payment Mode</label>
             <select value={mode} onChange={(e) => setMode(e.target.value)}>
-              <option>UPI / QR</option>
+              <option>UPI</option>
               <option>Cash</option>
               <option>Bank Transfer</option>
               <option>Credit Note</option>

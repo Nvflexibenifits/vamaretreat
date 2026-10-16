@@ -2143,6 +2143,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                               <select value={p.mode} onChange={(e) => upd({ mode: e.target.value })}>
                       <option>Bank Transfer</option>
                       <option>Cash</option>
+                      <option>UPI</option>
                       <option>Credit Card</option>
                       <option>Credit Note</option>
                               </select>
@@ -2240,6 +2241,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                     >
                       <option>Bank Transfer</option>
                       <option>Cash</option>
+                      <option>UPI</option>
                       <option>Credit Card</option>
                       <option>Credit Note</option>
                     </select>

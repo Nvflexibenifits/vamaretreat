@@ -2737,7 +2737,7 @@ function FrontOfficeBookingModal({
   removeExtra: (bookingId: string, extraId: string) => void;
   showNotif: (msg: string, kind: "success" | "error") => void;
 }) {
-  const PAID_MODES = ["Cash", "UPI / QR", "Bank Transfer", "Card"];
+  const PAID_MODES = ["Cash", "UPI", "Bank Transfer", "Credit Card"];
   const [editingId, setEditingId] = useState<string | null>(null);
   const [category, setCategory] = useState(addOnCategories[0]?.name ?? "");
   const [amount, setAmount] = useState("");

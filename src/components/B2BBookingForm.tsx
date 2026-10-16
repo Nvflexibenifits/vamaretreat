@@ -29,7 +29,7 @@ const ORG_LABEL: Record<B2BType, string> = {
   Institute: "Institute Name",
 };
 
-const PAYMENT_MODES = ["Bank Transfer", "Cash", "UPI", "Card", "Cheque"];
+const PAYMENT_MODES = ["Bank Transfer", "Cash", "UPI", "Credit Card", "Cheque"];
 
 type AddOnRow = {
   uid: string;
