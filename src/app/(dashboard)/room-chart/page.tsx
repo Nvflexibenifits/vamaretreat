@@ -1255,11 +1255,14 @@ export default function RoomChartPage() {
                     <th
                       key={d}
                       className={isToday ? "rc-today-hd" : ""}
-                      style={isWknd ? { color: "var(--acc)", opacity: 0.8 } : undefined}
                     >
+                      {/* Bold, dark date and day so the header reads at a glance;
+                          weekends keep their accent tint, today its own colour. */}
                       <div style={{ lineHeight: 1.2 }}>
-                        <div>{String(dt.getDate()).padStart(2, "0")}/{String(dt.getMonth() + 1).padStart(2, "0")}</div>
-                        <div style={{ fontSize: 9, fontWeight: 500, opacity: 0.7, marginTop: 2 }}>
+                        <div style={{ fontSize: 11, fontWeight: 800, color: isToday ? "var(--acc)" : isWknd ? "var(--acc)" : "var(--t1)" }}>
+                          {String(dt.getDate()).padStart(2, "0")}/{String(dt.getMonth() + 1).padStart(2, "0")}
+                        </div>
+                        <div style={{ fontSize: 10, fontWeight: 700, marginTop: 2, color: isToday ? "var(--acc)" : isWknd ? "var(--acc)" : "var(--t2)" }}>
                           {dt.toLocaleDateString("en-IN", { weekday: "short" })}
                         </div>
                       </div>
