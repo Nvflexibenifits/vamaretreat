@@ -174,7 +174,7 @@ export default function DashboardPage() {
     const dayoutBkgs = bookings.filter(
       (b) =>
         b.checkin === d && b.checkout === d &&
-        (b.status === "Confirmed" || b.status === "Tentative" || b.status === "Completed")
+        (b.status === "Confirmed" || b.status === "Completed")
     );
     const everyone = [...active, ...dayoutBkgs];
     const mealBkgs = everyone.filter(mealOnOf);
@@ -253,9 +253,11 @@ export default function DashboardPage() {
   // ───── Front Office: Check-ins / Stayovers / Check-outs / Dayouts ─────
   const foCheckIns = useMemo(() => {
     if (!foDate) return [];
+    // Only committed stays reach the front office lists: a tentative hold
+    // may never arrive, and the kitchen and housekeeping plan on these.
     return bookings.filter(
       (b) => b.checkin === foDate && b.checkout > b.checkin &&
-        (b.status === "Confirmed" || b.status === "Tentative")
+        b.status === "Confirmed"
     );
   }, [bookings, foDate]);
 
@@ -264,7 +266,7 @@ export default function DashboardPage() {
     if (!foDate) return [];
     return bookings.filter(
       (b) => b.checkin === foDate && b.checkout === foDate &&
-        (b.status === "Confirmed" || b.status === "Tentative" || b.status === "Completed")
+        (b.status === "Confirmed" || b.status === "Completed")
     );
   }, [bookings, foDate]);
 
@@ -272,7 +274,7 @@ export default function DashboardPage() {
     if (!foDate) return [];
     return bookings.filter(
       (b) => b.checkin < foDate && b.checkout > foDate &&
-        (b.status === "Confirmed" || b.status === "Tentative" || b.status === "Completed")
+        (b.status === "Confirmed" || b.status === "Completed")
     );
   }, [bookings, foDate]);
 
@@ -280,7 +282,7 @@ export default function DashboardPage() {
     if (!foDate) return [];
     return bookings.filter(
       (b) => b.checkout === foDate && b.checkout > b.checkin &&
-        (b.status === "Confirmed" || b.status === "Tentative" || b.status === "Completed")
+        (b.status === "Confirmed" || b.status === "Completed")
     );
   }, [bookings, foDate]);
 
