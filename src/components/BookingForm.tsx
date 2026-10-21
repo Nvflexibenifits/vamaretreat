@@ -56,6 +56,8 @@ type FormSeg = {
   infants: string;
   pets: string;
   petRate: string;
+  // Pet package is opt-in; segments loaded from older bookings default to on
+  petMealOn: boolean;
   drivers: string;
   mealRows: MealFormRow[];
 };
@@ -136,6 +138,7 @@ function segsFromBooking(b: Booking, rates: PackageRates): FormSeg[] {
     infants: String(seg.infantsBelow2 ?? b.infantsBelow2 ?? 0),
     pets: String(seg.pets ?? b.pets ?? 0),
     petRate: String(seg.petRate ?? rates.petPerPetPerNight),
+    petMealOn: seg.petMealOn ?? true,
     drivers: String(seg.drivers ?? b.driverCount ?? 0),
     mealRows: mealRowsFromSegment(seg, b),
   }));
@@ -235,6 +238,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     adults: "2", seniors: "0", kidsAbove10: "0", kids6to10: "0",
     kids2to6: "0", infants: "0", pets: "0", drivers: "0",
     petRate: String(packageRates.petPerPetPerNight),
+    petMealOn: false,
     mealRows: [] as MealFormRow[],
   };
 
@@ -621,7 +625,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       return { row: r, rate, pax, total: rate * nights * pax };
     });
     const meal = items.reduce((sum, it) => sum + it.total, 0);
-    const pet = petsN > 0 ? petRate * nights * petsN : 0;
+    const pet = petsN > 0 && seg.petMealOn ? petRate * nights * petsN : 0;
     const drvMeal = 0;
     const base = meal + pet;
     const gst = base * 0.18;
@@ -817,7 +821,8 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
           kids2to6: parseInt(fs?.kids2to6 ?? "0") || 0,
           infantsBelow2: parseInt(fs?.infants ?? "0") || 0,
           pets: mc?.petsN ?? 0,
-          mealOn: (mc?.meal ?? 0) > 0 || (mc?.pet ?? 0) > 0,
+          petMealOn: !!fs?.petMealOn,
+          mealOn: (mc?.meal ?? 0) > 0,
           drivers: mc?.driversN ?? 0,
           driverMealOn: false,
           mealItems: buildMealItems(mc),
@@ -932,7 +937,8 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
           kids2to6: parseInt(fs?.kids2to6 ?? "0") || 0,
           infantsBelow2: parseInt(fs?.infants ?? "0") || 0,
           pets: mc?.petsN ?? 0,
-          mealOn: (mc?.meal ?? 0) > 0 || (mc?.pet ?? 0) > 0,
+          petMealOn: !!fs?.petMealOn,
+          mealOn: (mc?.meal ?? 0) > 0,
           drivers: mc?.driversN ?? 0,
           driverMealOn: false,
           mealItems: buildMealItems(mc),
@@ -1666,9 +1672,23 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                                 </tr>
                               );
                             })}
-                            {segMeal.petsN > 0 && (
+                            {segMeal.petsN > 0 && !seg.petMealOn && (
+                              <tr style={{ cursor: "default", background: "var(--surf2)" }}>
+                                <td style={{ fontSize: 12, color: "var(--t3)", verticalAlign: "middle" }}>Pets</td>
+                                <td colSpan={7} style={{ fontSize: 12, color: "var(--t3)", verticalAlign: "middle" }}>
+                                  Pet Package not added for {segMeal.petsN} {segMeal.petsN === 1 ? "pet" : "pets"}
+                                </td>
+                                <td></td>
+                                <td style={{ textAlign: "right", verticalAlign: "middle", whiteSpace: "nowrap" }}>
+                                  <button type="button" className="btn btn-ghost btn-xs" onClick={() => updateSegField(seg.id, "petMealOn", true)}>
+                                    Add
+                                  </button>
+                                </td>
+                              </tr>
+                            )}
+                            {segMeal.petsN > 0 && seg.petMealOn && (
                               <tr style={{ cursor: "default" }}>
-                                <td style={{ fontSize: 12, color: "var(--t3)", verticalAlign: "middle" }}>Auto (pets)</td>
+                                <td style={{ fontSize: 12, color: "var(--t3)", verticalAlign: "middle" }}>Pets</td>
                                 <td style={{ verticalAlign: "middle" }}><strong>Pet Package</strong></td>
                                 <td style={{ verticalAlign: "middle" }}>
                                   <input
@@ -1685,7 +1705,16 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                                 <td style={{ textAlign: "right", verticalAlign: "middle" }}>18%</td>
                                 <td style={{ textAlign: "right", verticalAlign: "middle" }}>{fmt(segMeal.pet * 0.18)}</td>
                                 <td style={{ textAlign: "right", verticalAlign: "middle", fontWeight: 700 }}>{fmt(segMeal.pet * 1.18)}</td>
-                                <td></td>
+                                <td style={{ verticalAlign: "middle" }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn-ghost btn-xs"
+                                    onClick={() => updateSegField(seg.id, "petMealOn", false)}
+                                    title="Remove pet package"
+                                  >
+                                    Remove
+                                  </button>
+                                </td>
                               </tr>
                             )}
                             <tr style={{ background: "var(--surf2)" }}>
@@ -2143,7 +2172,6 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                               <select value={p.mode} onChange={(e) => upd({ mode: e.target.value })}>
                       <option>Bank Transfer</option>
                       <option>Cash</option>
-                      <option>UPI</option>
                       <option>Credit Card</option>
                       <option>Credit Note</option>
                               </select>
@@ -2241,7 +2269,6 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                     >
                       <option>Bank Transfer</option>
                       <option>Cash</option>
-                      <option>UPI</option>
                       <option>Credit Card</option>
                       <option>Credit Note</option>
                     </select>

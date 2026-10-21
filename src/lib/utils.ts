@@ -404,6 +404,12 @@ const ADD_ON_CATEGORY_HEADS: Record<string, ChargeHead> = {
 // checkout modal as free text) fall back to their name — the form's category
 // labels and auto-generated room-upgrade lines resolve, everything else lands
 // in Other.
+// Whether a segment carries the pet package. Segments saved before the
+// package became optional have no flag and were always charged for pets.
+export function petPackageOn(seg: { pets?: number; petMealOn?: boolean }): boolean {
+  return (seg.pets ?? 0) > 0 && seg.petMealOn !== false;
+}
+
 export function extraHead(e: Extra): ChargeHead {
   if (e.head) return e.head;
   const name = (e.name ?? "").trim().toLowerCase();

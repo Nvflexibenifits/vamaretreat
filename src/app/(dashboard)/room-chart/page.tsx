@@ -3,8 +3,9 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "@/lib/store";
-import { blockOccupancyEnd, compareRoomLabels, findAvailableRoomIds, fmt, fmtIN, roomsHeldOnDate, sortRoomInventory, todayStr, nowTime, extraHead, effectiveRoomsOnDate } from "@/lib/utils";
-import type { BlockGuestCounts, Booking, BulkRoomBlock, BulkRoomBlockRow, RoomMaster, RoomNightUpgrade, Venue, VenueBlock, VenueType, AddOnCategory, Extra, CheckIn } from "@/types";
+import { AddOnChargesPanel } from "@/components/AddOnChargesPanel";
+import { blockOccupancyEnd, compareRoomLabels, findAvailableRoomIds, fmt, fmtIN, roomsHeldOnDate, sortRoomInventory, todayStr, nowTime, effectiveRoomsOnDate } from "@/lib/utils";
+import type { BlockGuestCounts, Booking, BulkRoomBlock, BulkRoomBlockRow, RoomMaster, RoomNightUpgrade, Venue, VenueBlock, VenueType, CheckIn } from "@/types";
 
 const DAYS_WINDOW = 30;
 
@@ -162,10 +163,6 @@ export default function RoomChartPage() {
     currentUser,
     currentRole,
     showNotif,
-    addExtra,
-    updateExtra,
-    removeExtra,
-    addOnCategories,
     updateBooking,
   } = useApp();
 
@@ -2147,13 +2144,9 @@ export default function RoomChartPage() {
             booking={fb}
             today={today}
             currentUser={currentUser}
-            addOnCategories={addOnCategories}
             onClose={() => setFoBookingId(null)}
             onOpen={() => router.push(`/bookings/${fb.id}`)}
             onCheckIn={(value) => updateBooking(fb.id, { checkedIn: value })}
-            addExtra={addExtra}
-            updateExtra={updateExtra}
-            removeExtra={removeExtra}
             showNotif={showNotif}
           />
         );
@@ -2719,82 +2712,25 @@ function FrontOfficeBookingModal({
   booking: b,
   today,
   currentUser,
-  addOnCategories,
   onClose,
   onOpen,
   onCheckIn,
-  addExtra,
-  updateExtra,
-  removeExtra,
   showNotif,
 }: {
   booking: Booking;
   today: string;
   currentUser: string;
-  addOnCategories: AddOnCategory[];
   onClose: () => void;
   onOpen: () => void;
   onCheckIn: (value: CheckIn | null) => void;
-  addExtra: (bookingId: string, extra: Extra, paid?: { mode: string }) => void;
-  updateExtra: (bookingId: string, extraId: string, patch: Partial<Extra>, paid?: { mode: string } | null) => void;
-  removeExtra: (bookingId: string, extraId: string) => void;
   showNotif: (msg: string, kind: "success" | "error") => void;
 }) {
-  const PAID_MODES = ["Cash", "UPI", "Bank Transfer", "Credit Card"];
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [category, setCategory] = useState(addOnCategories[0]?.name ?? "");
-  const [amount, setAmount] = useState("");
-  const [gstPct, setGstPct] = useState("18");
-  const [paid, setPaid] = useState(false);
-  const [payMode, setPayMode] = useState("Cash");
-
-  const canAddOns = b.status === "Confirmed";
   const inStay = b.status === "Confirmed" && today >= b.checkin && today <= b.checkout;
   // The villa the guest actually sleeps in on the night shown, as the chart
   // paints it: chart moves and upgrades applied.
   const night = today < b.checkin ? b.checkin : today >= b.checkout ? addDays(b.checkout, -1) : today;
   const rooms = effectiveRoomsOnDate(b, night);
   const shown = rooms.length > 0 ? rooms : b.allocatedRooms;
-
-  const resetForm = () => {
-    setEditingId(null);
-    setCategory(addOnCategories[0]?.name ?? "");
-    setAmount("");
-    setGstPct("18");
-    setPaid(false);
-    setPayMode("Cash");
-  };
-  const startEdit = (e: Extra) => {
-    setEditingId(e.id ?? null);
-    setCategory(e.name);
-    setAmount(String(e.amount));
-    setGstPct(e.amount > 0 && e.gst ? String(Math.round((e.gst / e.amount) * 10000) / 100) : "0");
-    const receipt = b.payments.find((p) => p.extraId === e.id);
-    setPaid(!!receipt);
-    setPayMode(receipt?.mode ?? "Cash");
-  };
-  const submit = () => {
-    const amt = parseFloat(amount) || 0;
-    if (amt <= 0) {
-      showNotif("Enter the charge amount", "error");
-      return;
-    }
-    const cat = category.trim() || "Add-on Charge";
-    const gst = Math.round(amt * (parseFloat(gstPct) || 0)) / 100;
-    const head = addOnCategories.find((c) => c.name === cat)?.head ?? extraHead({ name: cat, amount: amt, date: "", by: "" });
-    if (editingId) {
-      updateExtra(b.id, editingId, { name: cat, amount: amt, gst, head }, paid ? { mode: payMode } : null);
-      showNotif("Charge updated", "success");
-    } else {
-      addExtra(
-        b.id,
-        { name: cat, amount: amt, gst, head, date: today, by: currentUser, source: "front-office" },
-        paid ? { mode: payMode } : undefined
-      );
-      showNotif(paid ? `${fmt(amt + gst)} charged and received` : `${fmt(amt + gst)} added to the bill`, "success");
-    }
-    resetForm();
-  };
 
   return (
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -2842,105 +2778,9 @@ function FrontOfficeBookingModal({
         </div>
 
         {/* Add-on charges */}
-        {canAddOns ? (
-          <div style={{ marginTop: 14 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 6 }}>Add-on charges</div>
-            {b.extras.length > 0 && (
-              <table className="pricing-tbl" style={{ marginBottom: 10 }}>
-                <thead>
-                  <tr>
-                    <th>Charge</th>
-                    <th style={{ textAlign: "right" }}>Amount</th>
-                    <th>Paid</th>
-                    <th>By</th>
-                    <th style={{ width: 90 }}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {b.extras.map((e, i) => {
-                    const mine = e.source === "front-office" && !!e.id;
-                    const receipt = b.payments.find((p) => p.extraId === e.id);
-                    const isPaid = receipt ? true : (e.totalPaid ?? 0) >= (e.amount || 0) + (e.gst || 0);
-                    return (
-                      <tr key={e.id ?? i}>
-                        <td>{e.name}</td>
-                        <td style={{ textAlign: "right" }}>{fmt((e.amount || 0) + (e.gst || 0))}</td>
-                        <td>
-                          <span className="badge" style={{ fontSize: 10, background: isPaid ? "var(--grn-lt)" : "var(--amb-lt)", color: isPaid ? "var(--grn)" : "var(--amb)" }}>
-                            {isPaid ? `Paid${receipt ? ` · ${receipt.mode}` : ""}` : "Unpaid"}
-                          </span>
-                        </td>
-                        <td style={{ fontSize: 11, color: "var(--t3)" }}>{e.by}</td>
-                        <td style={{ whiteSpace: "nowrap" }}>
-                          {mine ? (
-                            <>
-                              <button type="button" className="btn btn-ghost btn-xs" onClick={() => startEdit(e)}>Edit</button>
-                              <button
-                                type="button"
-                                className="btn btn-ghost btn-xs"
-                                style={{ color: "var(--red)" }}
-                                onClick={() => { removeExtra(b.id, e.id!); if (editingId === e.id) resetForm(); showNotif("Charge removed", "success"); }}
-                              >
-                                Remove
-                              </button>
-                            </>
-                          ) : (
-                            <span style={{ fontSize: 10, color: "var(--t3)" }}>Sales</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
-            <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr .7fr 1fr", gap: 8, alignItems: "end" }}>
-              <div className="field">
-                <label>Category</label>
-                <select value={category} onChange={(e) => setCategory(e.target.value)}>
-                  {addOnCategories.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
-                  {category && !addOnCategories.some((c) => c.name === category) && <option value={category}>{category}</option>}
-                </select>
-              </div>
-              <div className="field">
-                <label>Amount (₹)</label>
-                <input type="number" min={0} placeholder="0" value={amount} onChange={(e) => setAmount(e.target.value)} />
-              </div>
-              <div className="field">
-                <label>GST %</label>
-                <input type="number" min={0} max={28} value={gstPct} onChange={(e) => setGstPct(e.target.value)} />
-              </div>
-              <div className="field">
-                <label>Payment</label>
-                <select value={paid ? "paid" : "unpaid"} onChange={(e) => setPaid(e.target.value === "paid")}>
-                  <option value="unpaid">Unpaid · add to bill</option>
-                  <option value="paid">Paid now</option>
-                </select>
-              </div>
-            </div>
-            {paid && (
-              <div className="field" style={{ marginTop: 8, maxWidth: 220 }}>
-                <label>Received by</label>
-                <select value={payMode} onChange={(e) => setPayMode(e.target.value)}>
-                  {PAID_MODES.map((m) => <option key={m}>{m}</option>)}
-                </select>
-              </div>
-            )}
-            <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center" }}>
-              <button type="button" className="btn btn-primary btn-sm" onClick={submit}>
-                {editingId ? "Save charge" : "Add charge"}
-              </button>
-              {editingId && <button type="button" className="btn btn-ghost btn-sm" onClick={resetForm}>Cancel edit</button>}
-              <span style={{ fontSize: 11, color: "var(--t3)", marginLeft: "auto" }}>
-                Total {fmt((parseFloat(amount) || 0) * (1 + (parseFloat(gstPct) || 0) / 100))}
-              </span>
-            </div>
-          </div>
-        ) : (
-          <div style={{ marginTop: 14, fontSize: 12, color: "var(--t3)" }}>
-            Add-on charges can be added to confirmed bookings only.
-          </div>
-        )}
+        <div style={{ marginTop: 14 }}>
+          <AddOnChargesPanel booking={b} today={today} />
+        </div>
 
         <div className="modal-actions" style={{ marginTop: 16 }}>
           <button className="btn btn-ghost" onClick={onOpen}>Open booking</button>

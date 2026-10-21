@@ -83,11 +83,13 @@ type AppContextValue = {
   addExtras: (bookingId: string, extras: Extra[]) => void;
   // Single add-on charge from the room chart popup; `paid` records the money
   // as a receipt there and then, otherwise the charge raises the balance
-  addExtra: (bookingId: string, extra: Extra, paid?: { mode: string }) => void;
+  addExtra: (bookingId: string, extra: Extra, paid?: { mode: string; date?: string }) => void;
   // Change an add-on by id; `paid` undefined keeps its paid state, null makes
   // it unpaid, { mode } makes it paid
-  updateExtra: (bookingId: string, extraId: string, patch: Partial<Extra>, paid?: { mode: string } | null) => void;
-  removeExtra: (bookingId: string, extraId: string) => void;
+  updateExtra: (bookingId: string, extraId: string, patch: Partial<Extra>, paid?: { mode: string; date?: string } | null) => void;
+  // keepPayment: drop the charge but keep the money received against it as
+  // an ordinary receipt (the guest really paid; only the charge was wrong)
+  removeExtra: (bookingId: string, extraId: string, opts?: { keepPayment?: boolean }) => void;
   // B2B (corporate / school / institute) bookings
   b2bBookings: B2BBooking[];
   createB2BBooking: (b: B2BBooking) => void;
@@ -761,7 +763,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // delta, so whatever the booking's balance was computed against stays true.
   const extraTotal = (e: Extra) => (e.amount || 0) + (e.gst || 0);
 
-  const addExtra = useCallback((bookingId: string, extra: Extra, paid?: { mode: string }) => {
+  const addExtra = useCallback((bookingId: string, extra: Extra, paid?: { mode: string; date?: string }) => {
     setBookings((prev) =>
       prev.map((b) => {
         if (b.id !== bookingId) return b;
@@ -770,7 +772,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const paidAmt = paid ? total : 0;
         const row: Extra = { ...extra, id, totalPaid: paidAmt };
         const payments = paid
-          ? [...b.payments, { date: todayStr(), time: nowTime(), type: "Add-on", amount: total, mode: paid.mode, by: extra.by, extraId: id }]
+          ? [...b.payments, { date: paid.date || todayStr(), time: nowTime(), type: "Add-on", amount: total, mode: paid.mode, by: extra.by, extraId: id }]
           : b.payments;
         const next = {
           extras: [...b.extras, row],
@@ -786,7 +788,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateExtra = useCallback(
-    (bookingId: string, extraId: string, patch: Partial<Extra>, paid?: { mode: string } | null) => {
+    (bookingId: string, extraId: string, patch: Partial<Extra>, paid?: { mode: string; date?: string } | null) => {
       setBookings((prev) =>
         prev.map((b) => {
           if (b.id !== bookingId) return b;
@@ -801,9 +803,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const paidNew = nowPaid ? newTotal : 0;
           let payments = b.payments;
           if (nowPaid && receipt) {
-            payments = payments.map((p) => (p.extraId === extraId ? { ...p, amount: newTotal, ...(paid?.mode ? { mode: paid.mode } : {}) } : p));
+            payments = payments.map((p) => (p.extraId === extraId ? { ...p, amount: newTotal, ...(paid?.mode ? { mode: paid.mode } : {}), ...(paid?.date ? { date: paid.date } : {}) } : p));
           } else if (nowPaid && !receipt) {
-            payments = [...payments, { date: todayStr(), time: nowTime(), type: "Add-on", amount: newTotal, mode: paid?.mode ?? "Cash", by: updated.by, extraId }];
+            payments = [...payments, { date: paid?.date || todayStr(), time: nowTime(), type: "Add-on", amount: newTotal, mode: paid?.mode ?? "Cash", by: updated.by, extraId }];
           } else if (!nowPaid && receipt) {
             payments = payments.filter((p) => p.extraId !== extraId);
           }
@@ -823,7 +825,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     []
   );
 
-  const removeExtra = useCallback((bookingId: string, extraId: string) => {
+  const removeExtra = useCallback((bookingId: string, extraId: string, opts?: { keepPayment?: boolean }) => {
     setBookings((prev) =>
       prev.map((b) => {
         if (b.id !== bookingId) return b;
@@ -831,10 +833,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (!old) return b;
         const total = extraTotal(old);
         const receipt = b.payments.find((p) => p.extraId === extraId);
-        const paidOld = receipt ? receipt.amount : 0;
+        const keep = !!opts?.keepPayment && !!receipt;
+        const paidOld = receipt && !keep ? receipt.amount : 0;
+        const payments = keep
+          ? b.payments.map((p) => {
+              if (p.extraId !== extraId) return p;
+              const { extraId: _drop, ...rest } = p;
+              void _drop;
+              return rest;
+            })
+          : b.payments.filter((p) => p.extraId !== extraId);
         const next = {
           extras: b.extras.filter((e) => e.id !== extraId),
-          payments: b.payments.filter((p) => p.extraId !== extraId),
+          payments,
           grandTotal: b.grandTotal - total,
           advance: b.advance - paidOld,
           balance: Math.round(b.balance - total + paidOld),

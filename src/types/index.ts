@@ -183,6 +183,9 @@ export type BookingSegment = {
   mealOn: boolean;
   drivers: number;
   driverMealOn: boolean;
+  // Pet package is optional: false means pets stay without the package.
+  // Absent on segments saved before this existed, which always charged it.
+  petMealOn?: boolean;
   // Editable per-segment rates (fall back to master package rates when absent)
   mealRate?: number;
   petRate?: number;

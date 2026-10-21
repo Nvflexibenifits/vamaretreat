@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useParams } from "next/navigation";
 import { useApp } from "@/lib/store";
-import { addDays, bookingMealCharges, dayName, effectiveRoomsOnDate, fmt, fmtIN, getBookingPricingRows, nightsBetween, pricingSheetLines } from "@/lib/utils";
+import { addDays, bookingMealCharges, dayName, effectiveRoomsOnDate, fmt, fmtIN, getBookingPricingRows, nightsBetween, petPackageOn, pricingSheetLines } from "@/lib/utils";
 
 // dd/mm/yy — compact date format matching the booking view page
 function fmtShort(d: string): string {
@@ -117,7 +117,7 @@ export default function ConfirmationPage() {
 
   // Same-day booking: no night is sold, so there are no accommodation charges
   const isDayout = !!b.checkin && b.checkin === b.checkout;
-  const showMealTable = b.mealOn || (b.pets || 0) > 0 || (b.driverMealOn ?? false);
+  const showMealTable = b.mealOn || (b.petTotal || 0) > 0 || (b.driverMealOn ?? false);
 
   // Per-segment meal rows (new bookings store rates per segment); legacy
   // bookings without stored rates fall back to booking-level derived rows.
@@ -130,13 +130,13 @@ export default function ConfirmationPage() {
       seg.mealItems.forEach((mi) =>
         rows.push({ key: `${seg.id}-${mi.id}`, label: mi.packageName, dates, rate: mi.rate, nights: segNights, pax: mi.pax, chg: mi.total })
       );
-      if ((seg.pets ?? 0) > 0)
+      if (petPackageOn(seg))
         rows.push({ key: `${seg.id}-pet`, label: "Pet Package", dates, rate: seg.petRate ?? 0, nights: segNights, pax: seg.pets, chg: (seg.petRate ?? 0) * segNights * seg.pets });
       return rows;
     }
     if (seg.mealOn && (seg.mealRate ?? 0) > 0 && seg.adults > 0)
       rows.push({ key: `${seg.id}-meal`, label: "Meal & Activity Package", dates, rate: seg.mealRate ?? 0, nights: segNights, pax: seg.adults, chg: (seg.mealRate ?? 0) * segNights * seg.adults });
-    if ((seg.pets ?? 0) > 0)
+    if (petPackageOn(seg))
       rows.push({ key: `${seg.id}-pet`, label: "Pet Package", dates, rate: seg.petRate ?? 0, nights: segNights, pax: seg.pets, chg: (seg.petRate ?? 0) * segNights * seg.pets });
     if (seg.driverMealOn && (seg.drivers ?? 0) > 0 && (seg.driverMealRate ?? 0) > 0)
       rows.push({ key: `${seg.id}-drv`, label: "Driver / Attendant Meal", dates, rate: seg.driverMealRate ?? 0, nights: segNights, pax: seg.drivers ?? 0, chg: (seg.driverMealRate ?? 0) * segNights * (seg.drivers ?? 0) });
@@ -484,7 +484,7 @@ export default function ConfirmationPage() {
                   <td style={TD_NUM}>{fmt(mealOnlyCharges + mealOnlyGst)}</td>
                 </tr>
               )}
-              {segMealRows.length === 0 && (b.pets || 0) > 0 && (
+              {segMealRows.length === 0 && (b.petTotal || 0) > 0 && (
                 <tr>
                   <td style={TD}>Pet Package</td>
                   <td style={TD_NUM}>{b.pets && b.nights ? fmt(Math.round(petCharges / b.nights / b.pets)) : "—"}</td>

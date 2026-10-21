@@ -4,8 +4,9 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { amountDue, bookingChargesBreakdown, bookingMealCharges, cashReceived, creditNoteRedemptions, excessReceived, fmt, fmtIN, dayName, getBookingPricingRows, nightsBetween, nowTime, pricingSheetLines, pruneNightOverrides, signedBalance, todayStr, tryAssignRooms } from "@/lib/utils";
+import { amountDue, bookingChargesBreakdown, bookingMealCharges, cashReceived, creditNoteRedemptions, excessReceived, fmt, fmtIN, dayName, getBookingPricingRows, nightsBetween, nowTime, petPackageOn, pricingSheetLines, pruneNightOverrides, signedBalance, todayStr, tryAssignRooms } from "@/lib/utils";
 import { StatusBadge } from "@/components/StatusBadge";
+import { AddOnChargesPanel } from "@/components/AddOnChargesPanel";
 import { REFUND_TYPE } from "@/types";
 import type { CancellationDetails, CancellationPolicy, ChargeHead, SpecialDay, WaiveOffLine } from "@/types";
 
@@ -138,6 +139,9 @@ export default function BookingDetailPage() {
   // page from the Revenue Register's View link and gets the same read-only
   // treatment Front Office has.
   const isReadOnly = currentRole === "Front Office" || currentRole === "Finance";
+  // Front office posts add-on charges from this page for stays already over;
+  // sales and admin can correct a double posting the same way.
+  const canManageAddOns = currentRole !== "Finance";
   const b = bookings.find((x) => x.id === id);
   const [showCancelModal, setShowCancelModal] = useState(false);
   // Editable per-booking overrides, seeded from the policy when the modal opens
@@ -330,13 +334,13 @@ export default function BookingDetailPage() {
       seg.mealItems.forEach((mi) =>
         rows.push({ key: `${seg.id}-${mi.id}`, label: mi.packageName, dates, rate: mi.rate, nights: segNights, pax: mi.pax, chg: mi.total })
       );
-      if ((seg.pets ?? 0) > 0)
+      if (petPackageOn(seg))
         rows.push({ key: `${seg.id}-pet`, label: "Pet Package", dates, rate: seg.petRate ?? 0, nights: segNights, pax: seg.pets, chg: (seg.petRate ?? 0) * segNights * seg.pets });
       return rows;
     }
     if (seg.mealOn && (seg.mealRate ?? 0) > 0 && seg.adults > 0)
       rows.push({ key: `${seg.id}-meal`, label: "Meal & Activity Package", dates, rate: seg.mealRate ?? 0, nights: segNights, pax: seg.adults, chg: (seg.mealRate ?? 0) * segNights * seg.adults });
-    if ((seg.pets ?? 0) > 0)
+    if (petPackageOn(seg))
       rows.push({ key: `${seg.id}-pet`, label: "Pet Package", dates, rate: seg.petRate ?? 0, nights: segNights, pax: seg.pets, chg: (seg.petRate ?? 0) * segNights * seg.pets });
     if (seg.driverMealOn && (seg.drivers ?? 0) > 0 && (seg.driverMealRate ?? 0) > 0)
       rows.push({ key: `${seg.id}-drv`, label: "Driver / Attendant Meal", dates, rate: seg.driverMealRate ?? 0, nights: segNights, pax: seg.drivers ?? 0, chg: (seg.driverMealRate ?? 0) * segNights * (seg.drivers ?? 0) });
@@ -1188,7 +1192,7 @@ export default function BookingDetailPage() {
           </div>
 
           {/* Meal / Pet Charges — same 12-col structure as Excel row 19 */}
-          {(b.mealOn || (b.pets||0)>0 || (b.driverMealOn??false)) && (
+          {(b.mealOn || (b.petTotal||0)>0 || (b.driverMealOn??false)) && (
             <>
               <SectionHeader>Meal &amp; Other Charges</SectionHeader>
               <div style={{ overflowX: "auto" }}>
@@ -1248,7 +1252,7 @@ export default function BookingDetailPage() {
                         </tr>
                       );
                     })()}
-                    {segMealRows.length === 0 && (b.pets||0)>0 && (() => {
+                    {segMealRows.length === 0 && (b.petTotal||0)>0 && (() => {
                       const chg = b.petTotal||0; const gst = b.petGst||0;
                       return (
                         <tr style={{ borderBottom: "1px solid var(--bd)" }}>
@@ -1294,50 +1298,13 @@ export default function BookingDetailPage() {
             </>
           )}
 
-          {/* Add-on Charges — itemized extras saved on the booking */}
-          {(b.extras ?? []).length > 0 && (
+          {/* Add-on Charges: posted by the front office here or from the
+              room chart, or entered by sales on the booking form */}
+          {(canManageAddOns || (b.extras ?? []).length > 0) && (
             <>
               <SectionHeader>Add-on Charges</SectionHeader>
-              <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1000 }}>
-                  <thead>
-                    <tr style={{ background: "var(--surf2)", borderBottom: "2px solid var(--bd)" }}>
-                      {["Charge", "", "", "", "Charges", "", "", "", "", "GST %", "GST Amt", "Total"].map((h, i) => (
-                        <th key={i} style={{ padding: "8px 10px", fontSize: 11, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".3px", textAlign: i === 0 ? "left" : "right", whiteSpace: "nowrap" }}>
-                          {h}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(b.extras ?? []).map((e, i) => {
-                      const gst = e.gst ?? 0;
-                      const pct = e.amount > 0 ? Math.round((gst / e.amount) * 100) : 0;
-                      return (
-                        <tr key={i} style={{ borderBottom: "1px solid var(--bd)" }}>
-                          <td style={{ padding: "8px 10px", fontSize: 12, color: "var(--t1)", fontWeight: 500 }}>
-                            {e.name}
-                            <div style={{ fontSize: 10, color: "var(--t3)", fontWeight: 500 }}>{fmtIN(e.date)} · {e.by}</div>
-                          </td>
-                          <td></td><td></td><td></td>
-                          <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right" }}>{fmt(e.amount)}</td>
-                          <td></td><td></td><td></td><td></td>
-                          <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right" }}>{pct}%</td>
-                          <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right" }}>{fmt(gst)}</td>
-                          <td style={{ padding: "8px 10px", fontSize: 12, textAlign: "right", fontWeight: 700 }}>{fmt(e.amount + gst)}</td>
-                        </tr>
-                      );
-                    })}
-                    <tr style={{ background: "var(--surf2)", fontWeight: 700, borderTop: "2px solid var(--bd)" }}>
-                      <td colSpan={4} style={{ padding: "9px 10px", fontSize: 12, color: "var(--t1)" }}>Total Add-on Charges</td>
-                      <td style={{ padding: "9px 10px", fontSize: 12, textAlign: "right" }}>{fmt((b.extras ?? []).reduce((s, e) => s + e.amount, 0))}</td>
-                      <td></td><td></td><td></td><td></td>
-                      <td></td>
-                      <td style={{ padding: "9px 10px", fontSize: 12, textAlign: "right" }}>{fmt((b.extras ?? []).reduce((s, e) => s + (e.gst ?? 0), 0))}</td>
-                      <td style={{ padding: "9px 10px", fontSize: 12, textAlign: "right", color: "var(--t1)" }}>{fmt((b.extras ?? []).reduce((s, e) => s + e.amount + (e.gst ?? 0), 0))}</td>
-                    </tr>
-                  </tbody>
-                </table>
+              <div style={{ padding: "12px 16px 4px" }}>
+                <AddOnChargesPanel booking={b} today={today} heading={false} />
               </div>
             </>
           )}
