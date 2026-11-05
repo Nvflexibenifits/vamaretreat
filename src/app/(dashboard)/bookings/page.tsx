@@ -6,16 +6,25 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { fmt, fmtIN, todayStr } from "@/lib/utils";
+import { fmt, fmtIN, isGroupBooking, todayStr } from "@/lib/utils";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { BookingStatus } from "@/types";
 
-const FILTERS: ("All" | BookingStatus)[] = [
-  "All",
-  "Enquiry",
-  "Tentative",
-  "Confirmed",
-];
+// "Open" is the working list: tentative and confirmed bookings whose
+// check-in is today or later. It is a date condition on top of status,
+// not a status of its own. "All" shows every live booking on any date.
+type ListFilter = "Open" | "All" | BookingStatus;
+const FILTERS: ListFilter[] = ["Open", "Enquiry", "Tentative", "Confirmed", "All"];
+const FILTER_HINT: Record<ListFilter, string> = {
+  Open: "Tentative and confirmed bookings checking in from today onwards",
+  All: "Every booking on any date, except Lost and Completed",
+  Enquiry: "Enquiries on any date",
+  Tentative: "Tentative bookings on any date",
+  Confirmed: "Confirmed bookings on any date",
+  Completed: "",
+  Lost: "",
+  Cancelled: "",
+};
 
 export default function BookingsPage() {
   const { bookings, currentRole } = useApp();
@@ -28,7 +37,7 @@ export default function BookingsPage() {
       </div>
     );
   }
-  const [statusFilter, setStatusFilter] = useState<"All" | BookingStatus>("All");
+  const [statusFilter, setStatusFilter] = useState<ListFilter>("Open");
   const [search, setSearch] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -42,6 +51,7 @@ export default function BookingsPage() {
     () =>
       bookings.filter(
         (b) =>
+          !isGroupBooking(b) &&
           b.checkin === today &&
           (b.status === "Confirmed" || b.status === "Tentative")
       ),
@@ -50,9 +60,16 @@ export default function BookingsPage() {
 
   const data = bookings
     .filter((b) => {
+      // Group bookings share the table but have their own list
+      if (isGroupBooking(b)) return false;
       // Lost and Completed bookings are excluded from this list entirely
       if (b.status === "Lost" || b.status === "Completed") return false;
-      if (statusFilter !== "All" && b.status !== statusFilter) return false;
+      if (statusFilter === "Open") {
+        // Past-dated rows are history, not work in hand. Until today is
+        // known (first client render) nothing qualifies as open.
+        if (!today || b.checkin < today) return false;
+        if (b.status !== "Tentative" && b.status !== "Confirmed") return false;
+      } else if (statusFilter !== "All" && b.status !== statusFilter) return false;
       const s = search.toLowerCase();
       if (
         s &&
@@ -73,13 +90,14 @@ export default function BookingsPage() {
       <div className="pg-hd">
         <div>
           <h2>B2C Bookings</h2>
+          <p>{FILTER_HINT[statusFilter]}</p>
         </div>
         <div className="pg-hd-actions">
           <button
             type="button"
             className="btn btn-ghost btn-sm"
             onClick={() => {
-              setStatusFilter("All");
+              setStatusFilter("Open");
               setSearch("");
               setFrom(today);
               setTo(today);
@@ -124,6 +142,7 @@ export default function BookingsPage() {
             type="button"
             className={`filter-btn${statusFilter === f ? " on" : ""}`}
             onClick={() => setStatusFilter(f)}
+            title={FILTER_HINT[f]}
           >
             {f}
           </button>
@@ -154,8 +173,12 @@ export default function BookingsPage() {
               <tr>
                 <td colSpan={13}>
                   <div className="empty-state">
-                    <h3>No bookings found</h3>
-                    <p>Try adjusting your filters</p>
+                    <h3>{statusFilter === "Open" ? "No open bookings" : "No bookings found"}</h3>
+                    <p>
+                      {statusFilter === "Open"
+                        ? "Nothing tentative or confirmed from today onwards. Pick All to see past bookings and enquiries."
+                        : "Try adjusting your filters"}
+                    </p>
                   </div>
                 </td>
               </tr>

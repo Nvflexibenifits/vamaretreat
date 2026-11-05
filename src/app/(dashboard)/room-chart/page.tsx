@@ -1113,9 +1113,6 @@ export default function RoomChartPage() {
           <button className="btn btn-danger btn-sm" onClick={() => openUnifiedCreate("maintenance")}>
             Maintenance Block
           </button>
-          <button className="btn btn-primary btn-sm" onClick={() => openUnifiedCreate("book")}>
-            Booking
-          </button>
         </div>
       </div>
 
@@ -1330,7 +1327,10 @@ export default function RoomChartPage() {
                             >
                               <div
                                 className={`rc-cell-booked${block.status === "Tentative" ? " status-tentative" : ""}`}
-                                onClick={() => openVenueEdit(block)}
+                                onClick={() => {
+                                  if (block.b2bId) router.push(`/b2b/${block.b2bId}`);
+                                  else openVenueEdit(block);
+                                }}
                                 onMouseEnter={(e) =>
                                   showHover({
                                     kind: "venue",
@@ -2199,6 +2199,13 @@ export default function RoomChartPage() {
                   Checked in · {bulkDetail.checkedIn.by} · {bulkDetail.checkedIn.at}
                 </div>
               )}
+              {bulkDetail.b2bId && (
+                <div style={{ marginTop: 6, fontSize: 12 }}>
+                  B2B booking{" "}
+                  <span style={{ fontWeight: 700, color: "var(--acc)" }}>{bulkDetail.b2bId}</span>
+                  <span style={{ color: "var(--t3)" }}> · rooms, dates and status are changed on the booking</span>
+                </div>
+              )}
             </div>
             <div style={{ marginTop: 10 }}>
               {bulkDetail.rows.map((row) => (
@@ -2229,24 +2236,35 @@ export default function RoomChartPage() {
                   </button>
                 )
               )}
-              <button
-                className="btn btn-ghost"
-                style={{ color: "var(--red)" }}
-                onClick={() => { removeBulkRoomBlock(bulkDetail.id); showNotif("Block removed", "success"); setBulkDetail(null); }}
-              >
-                Delete
-              </button>
-              {bulkDetail.status === "Tentative" && (
+              {bulkDetail.b2bId ? (
                 <button
-                  className="btn btn-ghost"
-                  onClick={() => { updateBulkRoomBlock(bulkDetail.id, { status: "Confirmed" }); showNotif("Block confirmed", "success"); setBulkDetail(null); }}
+                  className="btn btn-primary"
+                  onClick={() => { setBulkDetail(null); router.push(`/b2b/${bulkDetail.b2bId}`); }}
                 >
-                  Confirm
+                  Open Booking
                 </button>
+              ) : (
+                <>
+                  <button
+                    className="btn btn-ghost"
+                    style={{ color: "var(--red)" }}
+                    onClick={() => { removeBulkRoomBlock(bulkDetail.id); showNotif("Block removed", "success"); setBulkDetail(null); }}
+                  >
+                    Delete
+                  </button>
+                  {bulkDetail.status === "Tentative" && (
+                    <button
+                      className="btn btn-ghost"
+                      onClick={() => { updateBulkRoomBlock(bulkDetail.id, { status: "Confirmed" }); showNotif("Block confirmed", "success"); setBulkDetail(null); }}
+                    >
+                      Confirm
+                    </button>
+                  )}
+                  <button className="btn btn-primary" onClick={() => openBulkEdit(bulkDetail)}>
+                    Edit
+                  </button>
+                </>
               )}
-              <button className="btn btn-primary" onClick={() => openBulkEdit(bulkDetail)}>
-                Edit
-              </button>
             </div>
           </div>
         </div>
@@ -2604,6 +2622,9 @@ function VenueHoverCard({
           {guestSummary(block.guests, block.pax)}
         </div>
       )}
+      {block.b2bId && (
+        <div style={{ fontSize: 11, color: "var(--t2)", marginTop: 6 }}>B2B · {block.b2bId}</div>
+      )}
 
       <div
         style={{
@@ -2613,7 +2634,7 @@ function VenueHoverCard({
           textAlign: "right",
         }}
       >
-        Click to edit or delete
+        {block.b2bId ? "Click to open the B2B booking" : "Click to edit or delete"}
       </div>
     </div>
   );
@@ -2672,7 +2693,12 @@ function BulkHoverCard({ block, rect, rooms }: { block: BulkRoomBlock; rect: DOM
           {guestSummary(block.guests, block.pax)}
         </div>
       )}
-      <div style={{ marginTop: 8, fontSize: 10, color: "var(--t3)", textAlign: "right" }}>Click to view / edit / delete</div>
+      {block.b2bId && (
+        <div style={{ fontSize: 11, color: "var(--t2)", marginBottom: 6 }}>B2B · {block.b2bId}</div>
+      )}
+      <div style={{ marginTop: 8, fontSize: 10, color: "var(--t3)", textAlign: "right" }}>
+        {block.b2bId ? "Click to view · managed from the B2B booking" : "Click to view / edit / delete"}
+      </div>
     </div>
   );
 }
@@ -2707,7 +2733,8 @@ function HoverRow({
 // What the front office can do with a booking from the chart: see who is
 // in which villa, check the guest in, and add charges to the bill. Only
 // charges added here can be changed here; the rest of the booking stays as
-// sales saved it.
+// sales saved it. Money is never recorded here: a charge goes on the bill
+// and the receipt is taken on the booking page.
 function FrontOfficeBookingModal({
   booking: b,
   today,
@@ -2745,9 +2772,12 @@ function FrontOfficeBookingModal({
               Villas: <strong>{[...shown].sort(compareRoomLabels).join(", ") || "not allocated"}</strong>
             </div>
           </div>
-          <span className="badge" style={{ background: b.status === "Confirmed" ? "var(--grn-bg)" : "var(--amb-bg)", color: b.status === "Confirmed" ? "var(--grn)" : "var(--amb)" }}>
-            {b.status}
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span className="badge" style={{ background: b.status === "Confirmed" ? "var(--grn-bg)" : "var(--amb-bg)", color: b.status === "Confirmed" ? "var(--grn)" : "var(--amb)" }}>
+              {b.status}
+            </span>
+            <button className="btn btn-ghost btn-sm" onClick={onClose}>Close</button>
+          </div>
         </div>
 
         {/* Check-in */}
@@ -2777,9 +2807,9 @@ function FrontOfficeBookingModal({
           )}
         </div>
 
-        {/* Add-on charges */}
+        {/* Add-on charges, posted to the bill; no paid or unpaid choice here */}
         <div style={{ marginTop: 14 }}>
-          <AddOnChargesPanel booking={b} today={today} />
+          <AddOnChargesPanel booking={b} today={today} payment={false} />
         </div>
 
         <div className="modal-actions" style={{ marginTop: 16 }}>

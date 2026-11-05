@@ -10,7 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { REFUND_TYPE } from "@/types";
+import { DEPOSIT_APPLIED_TYPE, DEPOSIT_MODE, REFUND_TYPE } from "@/types";
 import type {
   AddOnCategory,
   B2BBooking,
@@ -22,6 +22,8 @@ import type {
   CancellationPolicy,
   CreditNote,
   CreditNoteSettings,
+  DepositEntry,
+  DepositSettlement,
   DiscountCaps,
   Extra,
   GstSettings,
@@ -165,6 +167,10 @@ type AppContextValue = {
   recordRefund: (bookingId: string, payout: RefundPayout) => void;
   // Pay back excess received on a live or completed booking
   recordExcessRefund: (bookingId: string, payout: RefundPayout) => void;
+  // Security deposit on a group booking: taken, corrected, and squared off
+  addDeposit: (bookingId: string, entry: DepositEntry) => void;
+  removeDeposit: (bookingId: string, entryId: string) => void;
+  settleDeposit: (bookingId: string, s: Omit<DepositSettlement, "by">) => void;
   updateCreditNoteSettings: (s: CreditNoteSettings) => void;
   updateGstSettings: (s: GstSettings) => void;
   updateDisclaimer: (text: string) => void;
@@ -707,6 +713,59 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
+  // ─── Security deposit (group bookings) ───
+  // The deposit sits beside the bill: taking or correcting one never moves
+  // advance or balance.
+  const addDeposit = useCallback((bookingId: string, entry: DepositEntry) => {
+    setBookings((prev) =>
+      prev.map((b) => {
+        if (b.id !== bookingId) return b;
+        const deposit = { entries: [...(b.deposit?.entries ?? []), entry], settlement: b.deposit?.settlement ?? null };
+        sync(`/api/app/bookings/${bookingId}`, "PATCH", { deposit });
+        return { ...b, deposit };
+      })
+    );
+  }, []);
+
+  const removeDeposit = useCallback((bookingId: string, entryId: string) => {
+    setBookings((prev) =>
+      prev.map((b) => {
+        if (b.id !== bookingId || !b.deposit) return b;
+        const deposit = { ...b.deposit, entries: b.deposit.entries.filter((e) => e.id !== entryId) };
+        sync(`/api/app/bookings/${bookingId}`, "PATCH", { deposit });
+        return { ...b, deposit };
+      })
+    );
+  }, []);
+
+  // Square off the deposit: the part applied to the bill lands as a payment
+  // of mode DEPOSIT_MODE (settles the balance, counts in advance, is not new
+  // cash), the rest is recorded as refunded on the deposit itself.
+  const settleDeposit = useCallback(
+    (bookingId: string, s: Omit<DepositSettlement, "by">) => {
+      setBookings((prev) =>
+        prev.map((b) => {
+          if (b.id !== bookingId) return b;
+          const applied = Math.max(0, Math.round(s.applied));
+          const settlement: DepositSettlement = { ...s, applied, refunded: Math.max(0, Math.round(s.refunded)), by: currentUser };
+          const deposit = { entries: b.deposit?.entries ?? [], settlement };
+          const payments =
+            applied > 0
+              ? [
+                  ...b.payments,
+                  { date: s.date, time: nowTime(), type: DEPOSIT_APPLIED_TYPE, amount: applied, mode: DEPOSIT_MODE, by: currentUser },
+                ]
+              : b.payments;
+          const advance = b.advance + applied;
+          const balance = Math.round(b.balance - applied);
+          sync(`/api/app/bookings/${bookingId}`, "PATCH", { deposit, payments, advance, balance });
+          return { ...b, deposit, payments, advance, balance };
+        })
+      );
+    },
+    [currentUser]
+  );
+
   // Redeem part (or all) of a credit note against a booking. Validates the
   // code and remaining balance, records the transaction, and persists.
   const redeemCreditNote = useCallback(
@@ -1175,11 +1234,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
             opts.upgrade.kind === "paid" &&
             opts.upgrade.extraAmount > 0
           ) {
+            // Finance reads this line as room charges, so that is what it is
+            // called; the narration keeps which villa the guest moved to.
             newExtras.push({
-              name: `Room Upgrade (${opts.date}): ${opts.upgrade.fromCategoryName} → ${opts.upgrade.toCategoryName}`,
+              name: `Room Charges (${opts.date}): ${opts.upgrade.fromCategoryName} → ${opts.upgrade.toCategoryName}`,
               amount: opts.upgrade.extraAmount,
               date: opts.upgrade.upgradeDate,
               by: opts.upgrade.by,
+              head: "room",
             });
             grandTotal += opts.upgrade.extraAmount;
             balance += opts.upgrade.extraAmount;
@@ -1225,10 +1287,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
             removed.upgrade.kind === "paid" &&
             removed.upgrade.extraAmount > 0
           ) {
-            const upgName = `Room Upgrade (${removed.date}): ${removed.upgrade.fromCategoryName} → ${removed.upgrade.toCategoryName}`;
+            // Lines written before the rename still carry the old prefix
+            const upgTail = ` (${removed.date}): ${removed.upgrade.fromCategoryName} → ${removed.upgrade.toCategoryName}`;
             const idx = newExtras.findIndex(
               (e) =>
-                e.name === upgName && e.amount === removed.upgrade!.extraAmount
+                (e.name === `Room Charges${upgTail}` || e.name === `Room Upgrade${upgTail}`) &&
+                e.amount === removed.upgrade!.extraAmount
             );
             if (idx >= 0) {
               newExtras = [
@@ -1301,6 +1365,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       redeemCreditNote,
       recordRefund,
       recordExcessRefund,
+      addDeposit,
+      removeDeposit,
+      settleDeposit,
       addExtras,
       addExtra,
       updateExtra,
@@ -1403,6 +1470,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       redeemCreditNote,
       recordRefund,
       recordExcessRefund,
+      addDeposit,
+      removeDeposit,
+      settleDeposit,
       gstSettings,
       disclaimer,
       cancellationPolicy,

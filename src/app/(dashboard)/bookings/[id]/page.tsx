@@ -4,9 +4,10 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { amountDue, bookingChargesBreakdown, bookingMealCharges, cashReceived, creditNoteRedemptions, excessReceived, fmt, fmtIN, dayName, getBookingPricingRows, nightsBetween, nowTime, petPackageOn, pricingSheetLines, pruneNightOverrides, signedBalance, todayStr, tryAssignRooms } from "@/lib/utils";
+import { amountDue, bookingChargesBreakdown, bookingMealCharges, cashReceived, creditNoteRedemptions, excessReceived, fmt, fmtIN, dayName, getBookingPricingRows, isDepositAppliedPayment, isGroupBooking, nightsBetween, nowTime, petPackageOn, pricingSheetLines, pruneNightOverrides, signedBalance, tdsOfPayments, todayStr, tryAssignRooms } from "@/lib/utils";
 import { StatusBadge } from "@/components/StatusBadge";
 import { AddOnChargesPanel } from "@/components/AddOnChargesPanel";
+import { SecurityDepositPanel } from "@/components/SecurityDepositPanel";
 import { REFUND_TYPE } from "@/types";
 import type { CancellationDetails, CancellationPolicy, ChargeHead, SpecialDay, WaiveOffLine } from "@/types";
 
@@ -223,6 +224,9 @@ export default function BookingDetailPage() {
   if (!b) return null;
 
   const canEdit = !isReadOnly && (b.status === "Enquiry" || b.status === "Tentative" || b.status === "Confirmed" || b.status === "Completed");
+  const isGroup = isGroupBooking(b);
+  // TDS withheld by the payer on a group booking: settles the bill, not cash
+  const tdsTotal = tdsOfPayments(b.payments);
   const showBookTentative = !isReadOnly && b.status === "Enquiry";
   const showConfirm = !isReadOnly && (b.status === "Tentative");
 
@@ -795,13 +799,20 @@ export default function BookingDetailPage() {
         </div>
         {/* Read-only roles can't open the booking list, so don't offer it */}
         {!isReadOnly && (
-          <Link href="/bookings" className="btn btn-sm" style={{ background: "var(--sb)", color: "#fff", border: "none" }}>Booking List</Link>
+          <Link href={isGroup ? "/group-bookings" : "/bookings"} className="btn btn-sm" style={{ background: "var(--sb)", color: "#fff", border: "none" }}>
+            {isGroup ? "Group Bookings" : "Booking List"}
+          </Link>
         )}
       </div>
 
       <div>
         <div className="status-bar">
           <span><StatusBadge status={b.status} /></span>
+          {isGroup && (
+            <span className="badge" style={{ background: "var(--acc-lt)", color: "var(--acc)" }} title="Group booking: several villas for one party">
+              Group
+            </span>
+          )}
           {b.checkedIn && (
             <span className="badge" style={{ background: "var(--grn)", color: "#fff" }} title={`Checked in by ${b.checkedIn.by} at ${b.checkedIn.at}`}>
               Checked in · {b.checkedIn.by}
@@ -1048,10 +1059,13 @@ export default function BookingDetailPage() {
 
           {/* Guest Info — stay dates, nights, and pax live in Accommodation Charges below */}
           <div>
-            <BkgRow label="Guest Name" value={b.guest} />
+            <BkgRow label={isGroup ? "Lead Guest" : "Guest Name"} value={b.guest} />
             <BkgRow label="Mobile No." value={b.mobile} />
             {b.email && <BkgRow label="Email" value={b.email} />}
-            <BkgRow label="Source" value={b.source || "—"} last />
+            <BkgRow label="Source" value={isGroup ? "Group" : b.source || "—"} last={!(isGroup && (b.billing?.company || b.billing?.gstin || b.billing?.address))} />
+            {isGroup && b.billing?.company && <BkgRow label="Billed to" value={b.billing.company} last={!b.billing.gstin && !b.billing.address} />}
+            {isGroup && b.billing?.gstin && <BkgRow label="GSTIN" value={b.billing.gstin} last={!b.billing.address} />}
+            {isGroup && b.billing?.address && <BkgRow label="Billing Address" value={b.billing.address} last />}
           </div>
 
           {/* PAX Count — one row per date range, before charges */}
@@ -1412,16 +1426,26 @@ export default function BookingDetailPage() {
               <span style={{ fontSize: 12, color: "var(--t2)", fontWeight: 600 }}>Amount Received</span>
               <span style={{ fontSize: 14, fontWeight: 700, color: "var(--grn)" }}>{fmt(b.advance)}</span>
             </div>
+            {tdsTotal > 0 && (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 16px", borderBottom: "1px solid var(--bd)" }}>
+                <span style={{ fontSize: 12, color: "var(--t2)", fontWeight: 600 }}>
+                  TDS
+                  <span style={{ color: "var(--t3)", fontWeight: 500 }}> withheld by the payer, settles the bill</span>
+                </span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "var(--t2)" }}>{fmt(tdsTotal)}</span>
+              </div>
+            )}
             {/* How each receipt came in: bank, cash, credit note or card */}
             {(b.payments ?? []).length > 0 && (
               <div style={{ padding: "6px 16px 10px", borderBottom: "1px solid var(--bd)", background: "var(--surf2)" }}>
                 {(b.payments ?? []).map((p, i) => {
                   const isCn = (p.mode || "").toLowerCase().includes("credit note");
+                  const isDeposit = isDepositAppliedPayment(p);
                   const isRefund = p.type === REFUND_TYPE || p.amount < 0;
                   return (
                     <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "4px 0", fontSize: 12 }}>
                       <span style={{ color: "var(--t2)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                        <span className="badge" style={{ fontSize: 10, background: isRefund ? "var(--pur-bg)" : isCn ? "var(--acc-lt)" : "var(--grn-lt)", color: isRefund ? "var(--pur)" : isCn ? "var(--acc)" : "var(--grn)" }}>
+                        <span className="badge" style={{ fontSize: 10, background: isRefund ? "var(--pur-bg)" : isCn || isDeposit ? "var(--acc-lt)" : "var(--grn-lt)", color: isRefund ? "var(--pur)" : isCn || isDeposit ? "var(--acc)" : "var(--grn)" }}>
                           {p.mode || "Bank Transfer"}
                           {isCn && p.creditNoteCode ? ` · ${p.creditNoteCode}` : ""}
                         </span>
@@ -1429,6 +1453,9 @@ export default function BookingDetailPage() {
                         <span style={{ color: "var(--t3)" }}>
                           {fmtIN(p.date)}{p.time ? ` ${p.time}` : ""}{p.by ? ` · by ${p.by}` : ""}{p.reference ? ` · ${p.reference}` : ""}
                         </span>
+                        {(p.tds ?? 0) > 0 && (
+                          <span style={{ color: "var(--t3)" }} title="Withheld by the payer and remitted to the government">+ TDS {fmt(p.tds ?? 0)}</span>
+                        )}
                       </span>
                       <span style={{ fontWeight: 600, color: isRefund ? "var(--pur)" : "var(--t1)", whiteSpace: "nowrap" }}>
                         {p.amount < 0 ? `−${fmt(-p.amount)}` : fmt(p.amount)}
@@ -1438,6 +1465,7 @@ export default function BookingDetailPage() {
                 })}
               </div>
             )}
+            {isGroup && <SecurityDepositPanel booking={b} today={today} />}
             {(() => {
               const due = amountDue(b.balance);
               const excess = excessReceived(b.balance);

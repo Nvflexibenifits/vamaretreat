@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "@/lib/store";
-import { b2bChargesBreakdown, bookingChargesBreakdown, countsAsRevenue, fmt, paymentSplit, pendingPayments, todayStr } from "@/lib/utils";
+import { SummaryCard, SummaryCards } from "@/components/SummaryCard";
+import { b2bChargesBreakdown, bookingChargesBreakdown, countsAsRevenue, depositRetained, extrasBreakdown, fmt, isGroupBooking, otaSplit, paymentSplit, tdsOfPayments, todayStr } from "@/lib/utils";
+import { OTA_PROVIDERS } from "@/types";
 import type { B2BBooking, Booking } from "@/types";
 
 // dd/mm/yy
@@ -68,10 +70,16 @@ function revenueRow(b: Booking) {
   });
   const dedTotal = dedCommission + dedTds + dedSpecial;
 
-  const { bank, cash, crNote } = paymentSplit(b);
+  const { bank, cash, crNote, deposit: depositApplied } = paymentSplit(b);
   // A credit note brings no new money in — it has already been netted
-  // off the charges above, so it must not count as a receipt too.
-  const received = bank + cash;
+  // off the charges above, so it must not count as a receipt too. A
+  // security deposit applied to the bill settles it with money that
+  // arrived earlier as the deposit, so it counts here but not as bank or
+  // cash of its own.
+  const received = bank + cash + depositApplied;
+  // TDS withheld by the payer on a group booking: settles the bill like the
+  // OTA TDS above, never arrives as cash.
+  const payTds = tdsOfPayments(b.payments);
 
   // Recorded refund payouts settle the refund-due balance
   const refundsPaid = isCancelled
@@ -87,28 +95,64 @@ function revenueRow(b: Booking) {
   // Balance settles against net of OTA deductions — the deducted part
   // never arrives, so it must not read as pending.
   let bal: number;
-  if (!isCancelled) bal = Math.round(total - dedTotal - received);
+  if (!isCancelled) bal = Math.round(total - dedTotal - received - payTds);
   else if (isRefundCancel) bal = Math.min(0, Math.round(retained + refundsPaid - received));
-  else bal = Math.max(0, Math.round(total - dedTotal - received));
+  else bal = Math.max(0, Math.round(total - dedTotal - received - payTds));
   // Credit-note cancellation still carrying an unpaid balance — the
   // waive-off hasn't been done yet; shown in red so it stands apart
   // from money actually expected from guests.
   const waivePending = isCancelled && !isRefundCancel && bal >= 1;
   return {
+    key: b.id,
     id: b.id, guest: b.guest, mobile: b.mobile, checkin: b.checkin,
     checkout: b.checkout, statusLabel: b.status,
-    source: b.source === "OTA" && b.otaProvider ? `OTA (${b.otaProvider})` : b.source || "Direct",
+    source: isGroupBooking(b) ? "Group" : b.source === "OTA" ? `OTA · ${otaName(b.otaProvider)}` : b.source || "Direct",
     href: `/bookings/${b.id}`,
     roomNet, mealNet, creditNoteUsed, other, otherByItem, gst5, gst18, gstOther,
-    // TDS is a settlement, not a deduction: the OTA withheld it and remits
-    // it to the government, so it sits beside bank and cash.
-    total, dedCommission, dedSpecial, bank, cash, tds: dedTds, crNote, bal,
+    // TDS is a settlement, not a deduction: the OTA or the paying company
+    // withheld it and remits it to the government, so it sits beside bank
+    // and cash.
+    total, dedCommission, dedSpecial, bank, cash, tds: dedTds + payTds, crNote, bal,
+    // Security deposit the hotel kept (received less refunded). Cash flow,
+    // never part of the charges or the sales total.
+    deposit: depositRetained(b),
     isCancelled, waivePending,
   };
 }
 
+function otaName(id?: string): string {
+  return OTA_PROVIDERS.find((p) => p.id === id)?.name ?? id ?? "OTA";
+}
+
+type RevenueRow = ReturnType<typeof revenueRow>;
+
+// The register rows for one B2C booking. An OTA booking with add-ons gives
+// two: the room (with the meal plan booked through the OTA), settled by the
+// OTA net of its deductions, and the add-ons the guest bought from the hotel
+// and paid the hotel for, which are Direct revenue. The restaurant is not
+// the OTA's, so its takings never sit in the OTA receivable.
+function revenueRows(b: Booking): RevenueRow[] {
+  const split = otaSplit(b);
+  if (!split) return [revenueRow(b)];
+  const addOnTotal = split.addOnNet + split.addOnGst;
+  const ota = revenueRow({ ...b, extras: [], grandTotal: b.grandTotal - addOnTotal });
+  const direct: RevenueRow = {
+    ...ota,
+    ...extrasBreakdown(b.extras ?? []),
+    key: `${b.id}-direct`,
+    source: "Direct · add-ons",
+    total: addOnTotal,
+    dedCommission: 0, dedSpecial: 0, tds: 0, crNote: 0, deposit: 0,
+    bank: split.direct.bank, cash: split.direct.cash, bal: split.direct.bal,
+  };
+  return [
+    { ...ota, key: `${b.id}-ota`, source: `${ota.source} · room`, bank: split.ota.bank, cash: split.ota.cash, bal: split.ota.bal },
+    direct,
+  ];
+}
+
 // One Revenue Register row for a confirmed B2B booking. Pure, like revenueRow.
-function b2bRevenueRow(b: B2BBooking) {
+function b2bRevenueRow(b: B2BBooking): RevenueRow {
   const { roomNet, mealNet, other, otherByItem, gst5, gst18, gstOther } =
     b2bChargesBreakdown(b);
   let bank = 0, cash = 0, tds = 0;
@@ -122,10 +166,11 @@ function b2bRevenueRow(b: B2BBooking) {
   const received = bank + cash;
   const total = b.grandTotal;
   return {
+    key: b.id,
     id: b.id, guest: b.orgName, mobile: b.contactNumber, checkin: b.checkin,
-    checkout: b.checkout, statusLabel: b.status, source: "B2B", href: `/b2b/${b.id}`,
+    checkout: b.checkout, statusLabel: b.status, source: `B2B · ${b.type}`, href: `/b2b/${b.id}`,
     roomNet, mealNet, creditNoteUsed: 0, other, otherByItem, gst5, gst18, gstOther,
-    total, dedCommission: 0, dedSpecial: 0, bank, cash, tds, crNote: 0,
+    total, dedCommission: 0, dedSpecial: 0, bank, cash, tds, crNote: 0, deposit: 0,
     // TDS settles the bill like a payment; only the cash is less.
     bal: Math.round(total - received - tds), isCancelled: false, waivePending: false,
   };
@@ -281,7 +326,7 @@ export default function RevenuePage() {
         return true;
       })
       .sort((a, b) => a.checkin.localeCompare(b.checkin))
-      .map(revenueRow);
+      .flatMap(revenueRows);
   }, [bookings, search, rangeFrom, rangeTo]);
 
   // Confirmed B2B bookings bill entirely through add-on lines, which report
@@ -326,9 +371,10 @@ export default function RevenuePage() {
           cash: t.cash + r.cash,
           tds: t.tds + r.tds,
           crNote: t.crNote + r.crNote,
+          deposit: t.deposit + r.deposit,
           bal: t.bal + r.bal,
         }),
-        { roomNet: 0, mealNet: 0, creditNoteUsed: 0, other: 0, gst5: 0, gst18: 0, gstOther: 0, total: 0, dedCommission: 0, dedSpecial: 0, bank: 0, cash: 0, tds: 0, crNote: 0, bal: 0 }
+        { roomNet: 0, mealNet: 0, creditNoteUsed: 0, other: 0, gst5: 0, gst18: 0, gstOther: 0, total: 0, dedCommission: 0, dedSpecial: 0, bank: 0, cash: 0, tds: 0, crNote: 0, deposit: 0, bal: 0 }
       ),
     [allRows]
   );
@@ -355,8 +401,11 @@ export default function RevenuePage() {
     const rest = [...totalsByItem.keys()]
       .filter((label) => !ordered.includes(label))
       .sort((a, b) => a.localeCompare(b));
+    // The column reads "Venue", not "Venue Charges": the group header
+    // already says Charges once for every column under it.
     return [...ordered, ...rest].map((label) => ({
       label,
+      title: label.replace(/\s*charges$/i, ""),
       total: totalsByItem.get(label) ?? 0,
     }));
   }, [allRows, addOnCategories]);
@@ -371,13 +420,6 @@ export default function RevenuePage() {
   // rolled add-ons into the grand total without itemising them, so their
   // money still shows somewhere rather than vanishing from the table.
   const showOtherCol = totalsOtherResidual >= 1;
-
-  // Pending payments (global, unaffected by filters): Confirmed and Completed
-  // bookings, B2C and B2B, same rule as the home page card.
-  const pendingTotal = useMemo(
-    () => pendingPayments(bookings, b2bBookings).reduce((s, r) => s + r.balance, 0),
-    [bookings, b2bBookings]
-  );
 
   // Waive-offs pending (global) — credit-note cancellations still carrying
   // an unpaid balance that has to be written off. Mirrors the red balance
@@ -406,7 +448,7 @@ export default function RevenuePage() {
   // table's own row maths so the card always agrees with the purple cells.
   const refundsDue = useMemo(() => {
     const negative = (bal: number) => (bal < 0 ? -bal : 0);
-    const b2c = bookings.filter(countsAsRevenue).reduce((sum, b) => sum + negative(revenueRow(b).bal), 0);
+    const b2c = bookings.filter(countsAsRevenue).reduce((sum, b) => sum + revenueRows(b).reduce((s2, r) => s2 + negative(r.bal), 0), 0);
     const b2b = b2bBookings.filter((b) => b.status === "Confirmed").reduce((sum, b) => sum + negative(b2bRevenueRow(b).bal), 0);
     return b2c + b2b;
   }, [bookings, b2bBookings]);
@@ -428,9 +470,9 @@ export default function RevenuePage() {
   const exportExcel = () => {
     const headers = [
       "SL No.", "Check-in", "Check-out", "Guest Name", "Mobile", "Booking ID", "Status", "Source",
-      "Room Charges", "Meal Charges", ...addOnCols.map((c) => c.label), ...(showOtherCol ? ["Other Charges"] : []), "GST 5%", "GST 18%", "Total Charges", "Credit Note Used",
+      "Room", "Meal", ...addOnCols.map((c) => c.title), ...(showOtherCol ? ["Other"] : []), "GST 5%", "GST 18%", "Total", "Credit Note",
       "Commission", "Special Discount",
-      "Received - Bank", "Received - Cash", "TDS", "Balance",
+      "Bank", "Cash", "TDS", "Security Deposit", "Balance",
     ];
     const lines = allRows.map((r, i) => [
       i + 1, fmtShort(r.checkin), fmtShort(r.checkout), r.guest, r.mobile, r.id, r.statusLabel, r.source,
@@ -439,7 +481,7 @@ export default function RevenuePage() {
       ...(showOtherCol ? [Math.round(otherResidual(r))] : []),
       Math.round(r.gst5), Math.round(r.gst18), Math.round(r.total), Math.round(r.creditNoteUsed),
       Math.round(r.dedCommission), Math.round(r.dedSpecial),
-      Math.round(r.bank), Math.round(r.cash), Math.round(r.tds), Math.round(r.bal),
+      Math.round(r.bank), Math.round(r.cash), Math.round(r.tds), Math.round(r.deposit), Math.round(r.bal),
     ]);
     lines.push([
       "", "", "", "", "", "Total", "", "",
@@ -448,7 +490,7 @@ export default function RevenuePage() {
       ...(showOtherCol ? [Math.round(totalsOtherResidual)] : []),
       Math.round(totals.gst5), Math.round(totals.gst18), Math.round(totals.total), Math.round(totals.creditNoteUsed),
       Math.round(totals.dedCommission), Math.round(totals.dedSpecial),
-      Math.round(totals.bank), Math.round(totals.cash), Math.round(totals.tds), Math.round(totals.bal),
+      Math.round(totals.bank), Math.round(totals.cash), Math.round(totals.tds), Math.round(totals.deposit), Math.round(totals.bal),
     ]);
     const csv = [headers, ...lines]
       .map((cols) => cols.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
@@ -465,8 +507,9 @@ export default function RevenuePage() {
   const numTd: React.CSSProperties = { textAlign: "right", whiteSpace: "nowrap", fontSize: 12 };
   // Room, Meal, per-item add-ons, Other, GST 5%, GST 18%, Total, Cr Note used
   const chargesCols = 6 + addOnCols.length + (showOtherCol ? 1 : 0);
-  // booking info + charges + deductions + payments + bal + actions
-  const allCols = 5 + chargesCols + 3 + 2 + 2;
+  // Bank, Cash, TDS, Deposit
+  const paymentCols = 4;
+  const allCols = 5 + chargesCols + paymentCols + 2 + 2;
 
   return (
     <div className="view">
@@ -518,55 +561,27 @@ export default function RevenuePage() {
         </div>
       </div>
 
-      {/* Summary cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 14, marginBottom: 18 }}>
-        <div style={{ background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r4)", padding: "14px 18px" }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>
-            Total Charges ({rangeLabel})
-          </div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: "var(--sb)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>
-            {fmt(totals.roomNet + totals.mealNet + totals.other)}
-          </div>
-          <div style={{ fontSize: 10, color: "var(--t3)", marginTop: 2 }}>Excluding GST</div>
-        </div>
-        <div style={{ background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r4)", padding: "14px 18px" }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>
-            Received ({rangeLabel})
-          </div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: "var(--grn)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>
-            {fmt(totals.bank + totals.cash)}
-          </div>
-        </div>
-        <div style={{ background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r4)", padding: "14px 18px" }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>
-            Pending Payments (Overall)
-          </div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: "var(--amb)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>
-            {fmt(pendingTotal)}
-          </div>
-        </div>
-        <div style={{ background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r4)", padding: "14px 18px" }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>
-            Refunds Due (Overall)
-          </div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: refundsDue > 0 ? "var(--pur)" : "var(--t2)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>
-            {fmt(refundsDue)}
-          </div>
-        </div>
-        <div style={{ background: "var(--surf2)", border: "1px solid var(--bd)", borderRadius: "var(--r4)", padding: "14px 18px" }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>
-            Waive-off Pending (Overall)
-          </div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: waivePendingTotals.sum > 0 ? "var(--red)" : "var(--t2)", fontFamily: "var(--font-outfit), Outfit, sans-serif" }}>
-            {fmt(waivePendingTotals.sum)}
-          </div>
-          <div style={{ fontSize: 10, color: "var(--t3)", marginTop: 2 }}>
-            {waivePendingTotals.count === 0
-              ? "Nothing to settle"
-              : `${waivePendingTotals.count} booking${waivePendingTotals.count === 1 ? "" : "s"} to settle`}
-          </div>
-        </div>
-      </div>
+      {/* Summary cards: what was sold in the period and the GST on it, then
+          the two overall balances the hotel still has to settle. Money
+          received and money pending live on their own reports. */}
+      <SummaryCards>
+        <SummaryCard label={`Sales (${rangeLabel})`} value={fmt(totals.roomNet + totals.mealNet + totals.other)} note="Excluding GST" />
+        <SummaryCard label={`Total incl. GST (${rangeLabel})`} value={fmt(totals.total)} note="Net of credit notes and waive-offs" />
+        <SummaryCard label={`GST 5% (${rangeLabel})`} value={fmt(totals.gst5)} color="var(--t2)" note="Collected on room charges" />
+        <SummaryCard label={`GST 18% (${rangeLabel})`} value={fmt(totals.gst18)} color="var(--t2)" note="Collected on meals and services" />
+        <SummaryCard
+          label="Refunds Due (Overall)"
+          value={refundsDue > 0 ? `−${fmt(refundsDue)}` : fmt(0)}
+          color={refundsDue > 0 ? "var(--pur)" : "var(--t2)"}
+          note="Owed back to guests"
+        />
+        <SummaryCard
+          label="Waive-off Pending (Overall)"
+          value={fmt(waivePendingTotals.sum)}
+          color={waivePendingTotals.sum > 0 ? "var(--red)" : "var(--t2)"}
+          note={waivePendingTotals.count === 0 ? "Nothing to settle" : `${waivePendingTotals.count} booking${waivePendingTotals.count === 1 ? "" : "s"} to settle`}
+        />
+      </SummaryCards>
 
       {/* Revenue Table */}
       <div className="tbl-wrap">
@@ -588,7 +603,7 @@ export default function RevenuePage() {
                 <th colSpan={5} style={groupHdStyle}>Booking Info</th>
                 <th colSpan={chargesCols} style={{ ...groupHdStyle, ...sectionBorder }}>Charges</th>
                 <th colSpan={2} style={{ ...groupHdStyle, ...sectionBorder }}>Deductions</th>
-                <th colSpan={3} style={{ ...groupHdStyle, ...sectionBorder }}>Payments Received</th>
+                <th colSpan={paymentCols} style={{ ...groupHdStyle, ...sectionBorder }}>Payments Received</th>
                 <th style={{ ...groupHdStyle, ...sectionBorder, textAlign: "right" }}>Bal</th>
                 <th style={{ ...groupHdStyle, ...sectionBorder }}></th>
               </tr>
@@ -601,7 +616,7 @@ export default function RevenuePage() {
                 <th style={{ textAlign: "right", ...sectionBorder }}>Room</th>
                 <th style={{ textAlign: "right" }}>Meal</th>
                 {addOnCols.map((c) => (
-                  <th key={c.label} style={{ textAlign: "right", whiteSpace: "nowrap" }}>{c.label}</th>
+                  <th key={c.label} style={{ textAlign: "right", whiteSpace: "nowrap" }}>{c.title}</th>
                 ))}
                 {showOtherCol && <th style={{ textAlign: "right" }}>Other</th>}
                 <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>GST 5%</th>
@@ -615,6 +630,7 @@ export default function RevenuePage() {
                 <th style={{ textAlign: "right", ...sectionBorder }}>Bank</th>
                 <th style={{ textAlign: "right" }}>Cash</th>
                 <th style={{ textAlign: "right", whiteSpace: "nowrap" }} title="Withheld by the client or OTA and remitted to the government. Settles the bill, not cash received.">TDS</th>
+                <th style={{ textAlign: "right", whiteSpace: "nowrap" }} title="Security deposit kept on a group booking: received less refunded. Cash flow, not sales.">Deposit</th>
                 <th style={{ textAlign: "right", ...sectionBorder }}>₹</th>
                 <th style={{ textAlign: "center", width: 60, ...sectionBorder }}></th>
               </tr>
@@ -631,7 +647,7 @@ export default function RevenuePage() {
               ) : (
                 <>
                   {allRows.map((r, i) => (
-                    <tr key={r.id}>
+                    <tr key={r.key}>
                       <td style={{ color: "var(--t3)", fontSize: 12 }}>{i + 1}</td>
                       <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{fmtShort(r.checkin)}</td>
                       <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{fmtShort(r.checkout)}</td>
@@ -649,6 +665,7 @@ export default function RevenuePage() {
                         {r.isCancelled && (
                           <span className="badge bd-lost" style={{ marginLeft: 5, fontSize: 8 }}>Cancelled</span>
                         )}
+                        <div style={{ fontSize: 10, color: "var(--t3)", whiteSpace: "nowrap" }}>{r.source}</div>
                       </td>
                       <td style={{ ...numTd, ...sectionBorder }}>{nfmt(r.roomNet)}</td>
                       <td style={numTd}>{nfmt(r.mealNet)}</td>
@@ -671,6 +688,7 @@ export default function RevenuePage() {
                       <td style={{ ...numTd, ...sectionBorder }}>{nfmt(r.bank)}</td>
                       <td style={numTd}>{nfmt(r.cash)}</td>
                       <td style={{ ...numTd, color: r.tds > 0 ? "var(--t1)" : "var(--t3)" }}>{nfmt(r.tds)}</td>
+                      <td style={{ ...numTd, color: r.deposit > 0 ? "var(--acc)" : "var(--t3)" }}>{nfmt(r.deposit)}</td>
                       <td
                         style={{
                           ...numTd,
@@ -725,6 +743,7 @@ export default function RevenuePage() {
                     <td style={{ ...numTd, ...sectionBorder, fontWeight: 700 }}>{nfmt(totals.bank)}</td>
                     <td style={{ ...numTd, fontWeight: 700 }}>{nfmt(totals.cash)}</td>
                     <td style={{ ...numTd, fontWeight: 700 }}>{nfmt(totals.tds)}</td>
+                    <td style={{ ...numTd, fontWeight: 700, color: "var(--acc)" }}>{nfmt(totals.deposit)}</td>
                     <td style={{ ...numTd, ...sectionBorder, fontWeight: 800, color: totals.bal > 0 ? "var(--amb)" : totals.bal < 0 ? "var(--pur)" : "var(--grn)" }}>
                       {totals.bal === 0 ? "0" : totals.bal > 0 ? nfmt(totals.bal) : `−${nfmt(-totals.bal)}`}
                     </td>

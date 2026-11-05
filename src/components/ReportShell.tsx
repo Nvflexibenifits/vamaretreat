@@ -10,6 +10,7 @@ export function ReportShell({
   subtitle,
   group,
   summary,
+  cards,
   filters,
   children,
 }: {
@@ -17,6 +18,8 @@ export function ReportShell({
   subtitle: string;
   group: "finance" | "data";
   summary?: ReactNode;
+  // Headline figures shown above the filter bar
+  cards?: ReactNode;
   filters: ReactNode;
   children: ReactNode;
 }) {
@@ -38,6 +41,7 @@ export function ReportShell({
         </div>
         {summary && <div className="report-summary">{summary}</div>}
       </div>
+      {cards}
       {filters}
       {!hydrated ? (
         <div className="tbl-wrap" style={{ padding: 24, color: "var(--t3)", fontSize: 13 }}>Loading…</div>

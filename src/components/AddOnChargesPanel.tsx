@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useApp } from "@/lib/store";
-import { extraHead, fmt, fmtIN } from "@/lib/utils";
+import { extraHead, extraLabel, fmt, fmtIN } from "@/lib/utils";
 import type { Booking, Extra } from "@/types";
 
 const PAID_MODES = ["Cash", "Bank Transfer", "Credit Card"];
@@ -15,14 +15,21 @@ const PAID_MODES = ["Cash", "Bank Transfer", "Credit Card"];
 // Charges can be added to a confirmed or completed booking. Rows can still be
 // corrected or removed on a cancelled booking, since a double posting may
 // only surface after the guest has left with a credit note.
+//
+// With `payment` off the panel only posts charges to the bill: no paid or
+// unpaid choice, no receipt. The room chart uses this, since the front office
+// is not the one recording money; a receipt already linked to a row is left
+// exactly as it is when the row is edited there.
 export function AddOnChargesPanel({
   booking: b,
   today,
   heading = true,
+  payment = true,
 }: {
   booking: Booking;
   today: string;
   heading?: boolean;
+  payment?: boolean;
 }) {
   const { currentRole, currentUser, addOnCategories, addExtra, updateExtra, removeExtra, showNotif } = useApp();
 
@@ -71,16 +78,17 @@ export function AddOnChargesPanel({
     const gst = Math.round(amt * (parseFloat(gstPct) || 0)) / 100;
     const head = addOnCategories.find((c) => c.name === cat)?.head ?? extraHead({ name: cat, amount: amt, date: "", by: "" });
     const on = date || today;
+    const receiptNow = payment && paid;
     if (editingId) {
-      updateExtra(b.id, editingId, { name: cat, amount: amt, gst, head, date: on }, paid ? { mode: payMode, date: on } : null);
+      updateExtra(b.id, editingId, { name: cat, amount: amt, gst, head, date: on }, payment ? (receiptNow ? { mode: payMode, date: on } : null) : undefined);
       showNotif("Charge updated", "success");
     } else {
       addExtra(
         b.id,
         { name: cat, amount: amt, gst, head, date: on, by: currentUser, source: "front-office" },
-        paid ? { mode: payMode, date: on } : undefined
+        receiptNow ? { mode: payMode, date: on } : undefined
       );
-      showNotif(paid ? `${fmt(amt + gst)} charged and received` : `${fmt(amt + gst)} added to the bill`, "success");
+      showNotif(receiptNow ? `${fmt(amt + gst)} charged and received` : `${fmt(amt + gst)} added to the bill`, "success");
     }
     resetForm();
   };
@@ -131,7 +139,7 @@ export function AddOnChargesPanel({
               return (
                 <tr key={e.id ?? i}>
                   <td>
-                    {e.name}
+                    {extraLabel(e)}
                     <div style={{ fontSize: 10, color: "var(--t3)" }}>{fmtIN(e.date)}</div>
                   </td>
                   <td style={{ textAlign: "right" }}>{fmt(e.amount || 0)}</td>
@@ -187,7 +195,7 @@ export function AddOnChargesPanel({
 
       {canAdd || (editingId && canEditRows) ? (
         <>
-          <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr .7fr 1fr 1fr", gap: 8, alignItems: "end" }}>
+          <div style={{ display: "grid", gridTemplateColumns: payment ? "1.4fr 1fr .7fr 1fr 1fr" : "1.4fr 1fr .7fr 1fr", gap: 8, alignItems: "end" }}>
             <div className="field">
               <label>Category</label>
               <select value={category} onChange={(e) => setCategory(e.target.value)}>
@@ -207,15 +215,17 @@ export function AddOnChargesPanel({
               <label>Date</label>
               <input type="date" value={date} max={today} onChange={(e) => setDate(e.target.value)} />
             </div>
-            <div className="field">
-              <label>Payment</label>
-              <select value={paid ? "paid" : "unpaid"} onChange={(e) => setPaid(e.target.value === "paid")}>
-                <option value="unpaid">Unpaid · add to bill</option>
-                <option value="paid">Paid</option>
-              </select>
-            </div>
+            {payment && (
+              <div className="field">
+                <label>Payment</label>
+                <select value={paid ? "paid" : "unpaid"} onChange={(e) => setPaid(e.target.value === "paid")}>
+                  <option value="unpaid">Unpaid · add to bill</option>
+                  <option value="paid">Paid</option>
+                </select>
+              </div>
+            )}
           </div>
-          {paid && (
+          {payment && paid && (
             <div className="field" style={{ marginTop: 8, maxWidth: 220 }}>
               <label>Received by</label>
               <select value={payMode} onChange={(e) => setPayMode(e.target.value)}>

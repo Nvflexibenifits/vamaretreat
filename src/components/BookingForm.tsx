@@ -19,8 +19,11 @@ import {
   tryAssignRooms,
   signedBalance,
   pruneNightOverrides,
+  tdsOfPayments,
+  isDepositAppliedPayment,
+  extraLabel,
 } from "@/lib/utils";
-import type { Booking, BookingSegment, BookingStatus, ChargeHead, Deduction, DeductionType, Extra, PackageRates, Payment, PricingRow, PricingRowType, SegmentMealItem, SegmentRoom, OtaProvider } from "@/types";
+import type { Booking, BookingKind, BookingSegment, BookingStatus, ChargeHead, Deduction, DeductionType, DepositEntry, Extra, PackageRates, Payment, PricingRow, PricingRowType, SegmentMealItem, SegmentRoom, OtaProvider } from "@/types";
 import { OTA_PROVIDERS, REFUND_TYPE } from "@/types";
 import { COUNTRY_CODES } from "@/lib/data";
 
@@ -189,10 +192,20 @@ const cellInputStyle: React.CSSProperties = {
 export type BookingFormProps = {
   mode: "create" | "edit";
   initial?: Booking;
+  // "group" opens the same form for a group booking: billing block, TDS on
+  // receipts and a security deposit. Defaults to the booking's own kind.
+  kind?: BookingKind;
 };
 
-export function BookingForm({ mode, initial }: BookingFormProps) {
+// Modes a security deposit can arrive by
+const DEPOSIT_MODES = ["Bank Transfer", "Cash", "Credit Card", "Cheque"];
+
+export function BookingForm({ mode, initial, kind: kindProp }: BookingFormProps) {
   const router = useRouter();
+  const kind: BookingKind = kindProp ?? initial?.kind ?? "b2c";
+  const isGroup = kind === "group";
+  // Where this form's list lives and where Cancel goes back to
+  const listHref = isGroup ? "/group-bookings" : "/bookings";
   const {
     currentRole,
     currentUser,
@@ -233,6 +246,10 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   );
   const [otaProvider, setOtaProvider] = useState<OtaProvider | "">(initial?.otaProvider ?? "");
   const [notes, setNotes] = useState(initial?.notes ?? "");
+  // Group bookings: who the bill is made out to (all optional)
+  const [billCompany, setBillCompany] = useState(initial?.billing?.company ?? "");
+  const [billGstin, setBillGstin] = useState(initial?.billing?.gstin ?? "");
+  const [billAddress, setBillAddress] = useState(initial?.billing?.address ?? "");
 
   const defaultSegGuests = {
     adults: "2", seniors: "0", kidsAbove10: "0", kids6to10: "0",
@@ -278,7 +295,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       uid: newUid(),
       // The saved row, so its id, origin and paid amount survive a re-save
       ref: e,
-      category: e.name,
+      category: extraLabel(e),
       amount: String(e.amount),
       gstPct: e.amount > 0 && e.gst ? String(Math.round((e.gst / e.amount) * 10000) / 100) : "0",
       date: e.date,
@@ -315,11 +332,21 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     }))
   );
 
-  type PaymentRow = { uid: string; date: string; amount: string; mode: string; cnCode: string };
+  type PaymentRow = { uid: string; date: string; amount: string; mode: string; cnCode: string; tds: string };
   const todayDate = typeof window !== "undefined" ? new Date().toISOString().split("T")[0] : "";
   const [newPaymentRows, setNewPaymentRows] = useState<PaymentRow[]>([
-    { uid: newUid(), date: todayDate, amount: "", mode: "Bank Transfer", cnCode: "" },
+    { uid: newUid(), date: todayDate, amount: "", mode: "Bank Transfer", cnCode: "", tds: "" },
   ]);
+
+  // Security deposit (group bookings). Entries already taken stay editable
+  // until the deposit is settled; new rows are added here.
+  type DepositRow = { uid: string; date: string; amount: string; mode: string };
+  const depositSettled = !!initial?.deposit?.settlement;
+  const [existingDeposits, setExistingDeposits] = useState<DepositEntry[]>(initial?.deposit?.entries ?? []);
+  const [newDepositRows, setNewDepositRows] = useState<DepositRow[]>([]);
+  const depositTotal =
+    existingDeposits.reduce((s, e) => s + e.amount, 0) +
+    newDepositRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
 
   const checkin = formSegs.length > 0
     ? [...formSegs.map((s) => s.checkin).filter(Boolean)].sort()[0] ?? ""
@@ -657,6 +684,11 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   const createAdvance = newPaymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
   // Cumulative payments: previously recorded (edit mode) plus rows entered in this form
   const totalReceived = existingAdvance + createAdvance;
+  // TDS the payer withheld (group bookings billed to a company). Settles the
+  // bill beside the money received but never arrives as cash.
+  const totalTds =
+    tdsOfPayments(existingPayments) +
+    newPaymentRows.reduce((s, r) => s + Math.max(0, parseFloat(r.tds) || 0), 0);
 
   const addOnTotals = addOnRows.map(r => {
     const amt = parseFloat(r.amount) || 0;
@@ -719,7 +751,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   // What the hotel actually expects to receive (gross minus OTA deductions)
   const netPayable = Math.max(0, grandTotal - totalDeductions);
   // Signed: negative means the guest has paid more than the bill.
-  const balance = signedBalance(netPayable, totalReceived);
+  const balance = signedBalance(netPayable, totalReceived + totalTds);
 
   // ─── Validation ───
   const validate = (): boolean => {
@@ -799,6 +831,15 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
         if (!result.ok) showNotif(result.error, "error");
       });
   };
+
+  // ─── Group booking extras: billing block and deposit entries ───
+  const builtBilling = { company: billCompany.trim(), gstin: billGstin.trim().toUpperCase(), address: billAddress.trim() };
+  const builtDepositEntries: DepositEntry[] = [
+    ...existingDeposits.filter((e) => e.amount > 0),
+    ...newDepositRows
+      .filter((r) => r.date && (parseFloat(r.amount) || 0) > 0)
+      .map((r) => ({ id: `dep-${newUid()}`, date: r.date, amount: parseFloat(r.amount) || 0, mode: r.mode, by: currentUser })),
+  ];
 
   // ─── Build / patch ───
   const buildNewBooking = (
@@ -885,7 +926,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       allocatedRooms,
 
       payments: newPaymentRows
-        .filter((p) => p.date && (parseFloat(p.amount) || 0) > 0)
+        .filter((p) => p.date && ((parseFloat(p.amount) || 0) > 0 || (parseFloat(p.tds) || 0) > 0))
         .map((p) => ({
           date: p.date,
           time: nowTime(),
@@ -894,9 +935,11 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
           mode: p.mode,
           by: currentUser,
           ...(p.mode === "Credit Note" && p.cnCode.trim() ? { creditNoteCode: p.cnCode.trim() } : {}),
+          ...((parseFloat(p.tds) || 0) > 0 ? { tds: parseFloat(p.tds) || 0 } : {}),
         })),
       extras: builtExtras,
       deductions: builtDeductions,
+      ...(isGroup && { kind: "group" as const, billing: builtBilling, deposit: { entries: builtDepositEntries, settlement: null } }),
     };
   };
 
@@ -906,7 +949,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
   ): Partial<Booking> => {
     const validSegments = computedSegments.filter((s) => s.rooms.length > 0 || s.checkin === s.checkout);
     const validNewPayments = newPaymentRows
-      .filter((p) => p.date && (parseFloat(p.amount) || 0) > 0)
+      .filter((p) => p.date && ((parseFloat(p.amount) || 0) > 0 || (parseFloat(p.tds) || 0) > 0))
       .map((p) => ({
         date: p.date,
         time: new Date().toTimeString().slice(0, 5),
@@ -915,6 +958,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
         mode: p.mode,
         by: currentUser,
         ...(p.mode === "Credit Note" && p.cnCode.trim() ? { creditNoteCode: p.cnCode.trim() } : {}),
+        ...((parseFloat(p.tds) || 0) > 0 ? { tds: parseFloat(p.tds) || 0 } : {}),
       }));
     const paymentsEdited = JSON.stringify(existingPayments) !== JSON.stringify(initial?.payments ?? []);
     const allPayments = validNewPayments.length > 0 || paymentsEdited
@@ -993,14 +1037,19 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       deductions: builtDeductions,
 
       ...(allPayments !== undefined && { payments: allPayments }),
+      // TDS settles the bill alongside the money received
       ...(newAdvance !== undefined && {
         advance: newAdvance,
-        balance: signedBalance(netPayable, newAdvance),
+        balance: signedBalance(netPayable, newAdvance + totalTds),
       }),
       ...(newAdvance === undefined && {
-        balance: signedBalance(netPayable, existingAdvance),
+        balance: signedBalance(netPayable, existingAdvance + totalTds),
       }),
       allocatedRooms,
+      ...(isGroup && {
+        billing: builtBilling,
+        deposit: { entries: builtDepositEntries, settlement: initial?.deposit?.settlement ?? null },
+      }),
     };
   };
 
@@ -1017,9 +1066,10 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
       showNotif("Payment entered — use Confirm Booking", "error");
       return;
     }
-    // B2C-<fiscal year>-<sequence>, e.g. B2C-2627-001. Sequence is the highest
-    // existing number for the prefix + 1, so deletions never cause ID reuse.
-    const idPrefix = `B2C-${fiscalYearCode()}-`;
+    // B2C-<fiscal year>-<sequence>, e.g. B2C-2627-001 (GRP- for a group
+    // booking). Sequence is the highest existing number for the prefix + 1,
+    // so deletions never cause ID reuse.
+    const idPrefix = `${isGroup ? "GRP" : "B2C"}-${fiscalYearCode()}-`;
     const maxSeq = bookings
       .filter((b) => b.id.startsWith(idPrefix))
       .reduce((m, b) => Math.max(m, parseInt(b.id.slice(idPrefix.length), 10) || 0), 0);
@@ -1126,7 +1176,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
 
   const onCancel = () => {
     if (initial) router.push(`/bookings/${initial.id}`);
-    else router.push("/bookings");
+    else router.push(listHref);
   };
 
   const confirmDisabled = createAdvance <= 0;
@@ -1137,14 +1187,18 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
     <div className="view">
       <div className="pg-hd">
         <div>
-          <h2>{isEdit ? `Edit Booking — ${initial!.id}` : "New Booking"}</h2>
+          <h2>
+            {isEdit
+              ? `Edit ${isGroup ? "Group " : ""}Booking — ${initial!.id}`
+              : isGroup ? "New Group Booking" : "New Booking"}
+          </h2>
         </div>
         {isEdit ? (
           <Link href={`/bookings/${initial!.id}`} className="btn btn-ghost btn-sm">
             View Booking
           </Link>
         ) : (
-          <Link href="/bookings" className="btn btn-ghost btn-sm">
+          <Link href={listHref} className="btn btn-ghost btn-sm">
             All Bookings
           </Link>
         )}
@@ -1158,7 +1212,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
           </div>
           <div className="fg">
             <div className={`field${errors.name ? " error" : ""}`}>
-              <label>Guest Name *</label>
+              <label>{isGroup ? "Lead Guest Name *" : "Guest Name *"}</label>
               <input
                 type="text"
                 value={name}
@@ -1224,13 +1278,15 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                 placeholder="email@example.com"
               />
             </div>
-            <div className="field">
-              <label>Booking Source</label>
-              <select value={source} onChange={(e) => setSource(e.target.value as "Direct" | "OTA")}>
-                <option value="Direct">Direct</option>
-                <option value="OTA">OTA</option>
-              </select>
-            </div>
+            {!isGroup && (
+              <div className="field">
+                <label>Booking Source</label>
+                <select value={source} onChange={(e) => setSource(e.target.value as "Direct" | "OTA")}>
+                  <option value="Direct">Direct</option>
+                  <option value="OTA">OTA</option>
+                </select>
+              </div>
+            )}
             {source === "OTA" && (
               <div className={`field${errors.otaProvider ? " error" : ""}`}>
                 <label>OTA Provider *</label>
@@ -1259,6 +1315,28 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
               placeholder="Meal preference, occasion, special requirements..."
             />
           </div>
+          {isGroup && (
+            <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--bd)" }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                Billing Details
+                <span style={{ fontWeight: 500, textTransform: "none", letterSpacing: 0, marginLeft: 8 }}>when a company pays for the group</span>
+              </div>
+              <div className="fg">
+                <div className="field">
+                  <label>Company Name</label>
+                  <input type="text" value={billCompany} onChange={(e) => setBillCompany(e.target.value)} placeholder="e.g. Infosys Ltd" />
+                </div>
+                <div className="field">
+                  <label>GSTIN</label>
+                  <input type="text" value={billGstin} onChange={(e) => setBillGstin(e.target.value)} placeholder="15-character GST number" maxLength={15} />
+                </div>
+                <div className="field" style={{ gridColumn: "span 2" }}>
+                  <label>Billing Address</label>
+                  <input type="text" value={billAddress} onChange={(e) => setBillAddress(e.target.value)} placeholder="Address on the invoice" />
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -2145,6 +2223,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                     <th>Date</th>
                     <th>Mode</th>
                     <th style={{ textAlign: "right" }}>Amount (₹)</th>
+                    {isGroup && <th style={{ textAlign: "right" }} title="Withheld by the payer and remitted to the government. Settles the bill but is not cash received.">TDS (₹)</th>}
                     <th style={{ textAlign: "right" }}>Cumulative (₹)</th>
                     {!paymentsLocked && <th style={{ width: 32 }}></th>}
                   </tr>
@@ -2155,7 +2234,10 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                     return existingPayments.map((p, i) => {
                       running += p.amount;
                       const isRefund = p.type === REFUND_TYPE || p.amount < 0;
-                      const editable = !paymentsLocked && !p.creditNoteCode && !isRefund;
+                      // Deposit applied at settlement is written by Settle
+                      // Deposit on the booking page, never edited here
+                      const isDeposit = isDepositAppliedPayment(p);
+                      const editable = !paymentsLocked && !p.creditNoteCode && !isRefund && !isDeposit;
                       const upd = (patch: Partial<Payment>) =>
                         setExistingPayments((prev) => prev.map((x, j) => (j === i ? { ...x, ...patch } : x)));
                       return (
@@ -2178,6 +2260,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                             ) : (
                               <>
                                 {isRefund && <span className="badge" style={{ fontSize: 10, background: "var(--pur-bg)", color: "var(--pur)", marginRight: 6 }}>Refund</span>}
+                                {isDeposit && <span className="badge" style={{ fontSize: 10, background: "var(--acc-lt)", color: "var(--acc)", marginRight: 6 }}>Deposit applied</span>}
                                 {p.mode}
                                 {p.creditNoteCode ? (
                                   <span style={{ fontSize: 11, color: "var(--t3)", marginLeft: 6 }}>{p.creditNoteCode}</span>
@@ -2201,6 +2284,27 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                               fmt(p.amount)
                             )}
                           </td>
+                          {isGroup && (
+                            <td style={{ textAlign: "right", color: "var(--t3)" }}>
+                              {editable ? (
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={(p.tds ?? 0) === 0 ? "" : p.tds}
+                                  placeholder="0"
+                                  onChange={(e) => {
+                                    const v = Math.max(0, parseFloat(e.target.value) || 0);
+                                    upd({ tds: v > 0 ? v : undefined });
+                                  }}
+                                  style={{ textAlign: "right" }}
+                                />
+                              ) : (p.tds ?? 0) > 0 ? (
+                                fmt(p.tds ?? 0)
+                              ) : (
+                                "—"
+                              )}
+                            </td>
+                          )}
                           <td style={{ textAlign: "right", fontWeight: 700 }}>{fmt(running)}</td>
                           {!paymentsLocked && (
                             <td>
@@ -2233,6 +2337,7 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
               <tr>
                 <th>Date</th>
                 <th>Amount (₹)</th>
+                {isGroup && <th title="Withheld by the payer and remitted to the government. Settles the bill but is not cash received.">TDS (₹)</th>}
                 <th>Mode</th>
                 <th style={{ width: 32 }}></th>
               </tr>
@@ -2260,6 +2365,23 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
                       )}
                     />
                   </td>
+                  {isGroup && (
+                    <td>
+                      {row.mode === "Credit Note" ? (
+                        <span style={{ color: "var(--t3)" }}>—</span>
+                      ) : (
+                        <input
+                          type="number"
+                          min={0}
+                          placeholder="0"
+                          value={row.tds}
+                          onChange={(e) => setNewPaymentRows((prev) =>
+                            prev.map((r) => r.uid === row.uid ? { ...r, tds: e.target.value } : r)
+                          )}
+                        />
+                      )}
+                    </td>
+                  )}
                   <td>
                     <select
                       value={row.mode}
@@ -2340,11 +2462,136 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
             className="btn btn-ghost btn-xs"
             onClick={() => setNewPaymentRows((prev) => [
               ...prev,
-              { uid: newUid(), date: todayDate, amount: "", mode: "Bank Transfer", cnCode: "" },
+              { uid: newUid(), date: todayDate, amount: "", mode: "Bank Transfer", cnCode: "", tds: "" },
             ])}
           >
             + Add Row
           </button>
+
+          {isGroup && (
+            <div style={{ marginTop: 18, paddingTop: 14, borderTop: "1px solid var(--bd)" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 4 }}>
+                Security Deposit
+              </div>
+              <div style={{ fontSize: 11, color: "var(--t3)", marginBottom: 10 }}>
+                Held apart from the bill and never counted as a receipt or as revenue. It is squared off from the booking page after the stay: any unpaid balance is taken from it and the rest refunded.
+              </div>
+              {depositSettled ? (
+                <div style={{ fontSize: 12, color: "var(--t2)", marginBottom: 10 }}>
+                  Settled on {fmtIN(initial!.deposit!.settlement!.date)} by {initial!.deposit!.settlement!.by}: {fmt(initial!.deposit!.settlement!.applied)} applied to the bill, {fmt(initial!.deposit!.settlement!.refunded)} refunded. Deposit entries can no longer be changed here.
+                </div>
+              ) : null}
+              {(existingDeposits.length > 0 || newDepositRows.length > 0) && (
+                <table className="pricing-tbl" style={{ marginBottom: 8 }}>
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Amount (₹)</th>
+                      <th>Mode</th>
+                      <th style={{ width: 32 }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {existingDeposits.map((d, i) => {
+                      const upd = (patch: Partial<DepositEntry>) =>
+                        setExistingDeposits((prev) => prev.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+                      return (
+                        <tr key={d.id}>
+                          <td>
+                            {depositSettled ? fmtIN(d.date) : (
+                              <input type="date" value={d.date} onChange={(e) => upd({ date: e.target.value })} />
+                            )}
+                          </td>
+                          <td>
+                            {depositSettled ? fmt(d.amount) : (
+                              <input
+                                type="number"
+                                min={0}
+                                placeholder="0"
+                                value={d.amount === 0 ? "" : d.amount}
+                                onChange={(e) => upd({ amount: parseFloat(e.target.value) || 0 })}
+                              />
+                            )}
+                          </td>
+                          <td>
+                            {depositSettled ? d.mode : (
+                              <select value={d.mode} onChange={(e) => upd({ mode: e.target.value })}>
+                                {DEPOSIT_MODES.map((m) => <option key={m}>{m}</option>)}
+                              </select>
+                            )}
+                          </td>
+                          <td style={{ textAlign: "center" }}>
+                            {!depositSettled && (
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-xs"
+                                style={{ color: "var(--red)" }}
+                                onClick={() => setExistingDeposits((prev) => prev.filter((_, j) => j !== i))}
+                              >
+                                ×
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {newDepositRows.map((row) => (
+                      <tr key={row.uid}>
+                        <td>
+                          <input
+                            type="date"
+                            value={row.date}
+                            onChange={(e) => setNewDepositRows((prev) => prev.map((r) => r.uid === row.uid ? { ...r, date: e.target.value } : r))}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="number"
+                            min={0}
+                            placeholder="0"
+                            value={row.amount}
+                            onChange={(e) => setNewDepositRows((prev) => prev.map((r) => r.uid === row.uid ? { ...r, amount: e.target.value } : r))}
+                          />
+                        </td>
+                        <td>
+                          <select
+                            value={row.mode}
+                            onChange={(e) => setNewDepositRows((prev) => prev.map((r) => r.uid === row.uid ? { ...r, mode: e.target.value } : r))}
+                          >
+                            {DEPOSIT_MODES.map((m) => <option key={m}>{m}</option>)}
+                          </select>
+                        </td>
+                        <td style={{ textAlign: "center" }}>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-xs"
+                            style={{ color: "var(--red)" }}
+                            onClick={() => setNewDepositRows((prev) => prev.filter((r) => r.uid !== row.uid))}
+                          >
+                            ×
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {!depositSettled && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-xs"
+                  onClick={() => setNewDepositRows((prev) => [...prev, { uid: newUid(), date: todayDate, amount: "", mode: "Bank Transfer" }])}
+                >
+                  + Add Deposit
+                </button>
+              )}
+              <div className="detail-row" style={{ marginTop: 10 }}>
+                <span className="detail-key" style={{ fontWeight: 600 }}>Security Deposit {depositSettled ? "Received" : "Held"}</span>
+                <span className="detail-val" style={{ fontWeight: 700, fontSize: 14, color: "var(--t2)" }}>{fmt(depositTotal)}</span>
+              </div>
+            </div>
+          )}
+
           <div
             className="detail-row"
             style={{
@@ -2359,6 +2606,15 @@ export function BookingForm({ mode, initial }: BookingFormProps) {
               {fmt(totalReceived)}
             </span>
           </div>
+          {totalTds > 0 && (
+            <div className="detail-row" style={{ marginTop: 8, padding: "6px 12px" }}>
+              <span className="detail-key" style={{ fontWeight: 600 }}>
+                TDS
+                <span style={{ fontSize: 11, color: "var(--t3)", fontWeight: 500, marginLeft: 8 }}>withheld by the payer, settles the bill</span>
+              </span>
+              <span className="detail-val" style={{ fontWeight: 700, fontSize: 14, color: "var(--t2)" }}>{fmt(totalTds)}</span>
+            </div>
+          )}
           <div
             className="detail-row"
             style={{

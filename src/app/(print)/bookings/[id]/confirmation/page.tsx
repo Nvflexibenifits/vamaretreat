@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useParams } from "next/navigation";
 import { useApp } from "@/lib/store";
-import { addDays, bookingMealCharges, dayName, effectiveRoomsOnDate, fmt, fmtIN, getBookingPricingRows, nightsBetween, petPackageOn, pricingSheetLines } from "@/lib/utils";
+import { addDays, bookingMealCharges, dayName, effectiveRoomsOnDate, extraLabel, fmt, fmtIN, getBookingPricingRows, nightsBetween, petPackageOn, pricingSheetLines } from "@/lib/utils";
 
 // dd/mm/yy — compact date format matching the booking view page
 function fmtShort(d: string): string {
@@ -265,9 +265,11 @@ export default function ConfirmationPage() {
             marginBottom: 14,
           }}
         >
-          <GuestRow label="Guest Name" value={b.guest} />
+          <GuestRow label={b.kind === "group" ? "Lead Guest" : "Guest Name"} value={b.guest} />
           <GuestRow label="Mobile No." value={b.mobile} />
-          <GuestRow label="Source" value={b.source || "—"} last />
+          <GuestRow label="Source" value={b.kind === "group" ? "Group" : b.source || "—"} last={!(b.kind === "group" && (b.billing?.company || b.billing?.gstin))} />
+          {b.kind === "group" && b.billing?.company && <GuestRow label="Billed to" value={b.billing.company} last={!b.billing.gstin} />}
+          {b.kind === "group" && b.billing?.gstin && <GuestRow label="GSTIN" value={b.billing.gstin} last />}
         </div>
 
         {/* PAX Count — one row per date range */}
@@ -537,7 +539,7 @@ export default function ConfirmationPage() {
                 const pct = e.amount > 0 ? Math.round((gst / e.amount) * 100) : 0;
                 return (
                   <tr key={i}>
-                    <td style={TD}>{e.name}</td>
+                    <td style={TD}>{extraLabel(e)}</td>
                     <td style={TD_NUM}>{fmt(e.amount)}</td>
                     <td style={TD_NUM}>{pct}%</td>
                     <td style={TD_NUM}>{fmt(gst)}</td>

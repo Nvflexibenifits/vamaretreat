@@ -3,23 +3,53 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { fmt, fmtIN, statusBadgeClass } from "@/lib/utils";
+import { b2bStatusNow, fmt, fmtIN, statusBadgeClass, todayStr } from "@/lib/utils";
 import type { B2BStatus, B2BType } from "@/types";
 
 const TYPE_FILTERS: ("All" | B2BType)[] = ["All", "Corporate", "School", "Institute"];
-const STATUS_FILTERS: ("All" | B2BStatus)[] = ["All", "Enquiry", "Tentative", "Confirmed"];
+// "Open" is the working list: tentative and confirmed bookings whose
+// check-in is today or later, the same rule as the B2C list. Lost and
+// Completed have their own reports under B2B, so even "All" leaves them out.
+type ListFilter = "Open" | "All" | B2BStatus;
+const STATUS_FILTERS: ListFilter[] = ["Open", "Enquiry", "Tentative", "Confirmed", "All"];
+const FILTER_HINT: Record<ListFilter, string> = {
+  Open: "Tentative and confirmed bookings checking in from today onwards",
+  All: "Every booking on any date, except Lost and Completed",
+  Enquiry: "Enquiries on any date, except ones whose check-in has passed",
+  Tentative: "Tentative bookings on any date, except ones whose check-in has passed",
+  Confirmed: "Confirmed bookings on any date, except ones whose dates have passed",
+  Completed: "",
+  Lost: "",
+};
 
 export default function B2BBookingsPage() {
-  const { b2bBookings, currentRole } = useApp();
+  const { b2bBookings, bulkRoomBlocks, venueBlocks, currentRole } = useApp();
+
+  // "3 villas · 1 venue" from the chart blocks a booking holds
+  const holdSummary = (roomBlockId?: string | null, venueBlockIds?: string[]): string => {
+    const blk = roomBlockId ? bulkRoomBlocks.find((x) => x.id === roomBlockId) : undefined;
+    const villas = blk ? blk.rows.reduce((s, r) => s + r.roomIds.length, 0) : 0;
+    const venueCount = (venueBlockIds ?? []).filter((id) => venueBlocks.some((vb) => vb.id === id)).length;
+    const parts: string[] = [];
+    if (villas > 0) parts.push(`${villas} villa${villas === 1 ? "" : "s"}`);
+    if (venueCount > 0) parts.push(`${venueCount} venue${venueCount === 1 ? "" : "s"}`);
+    return parts.join(" · ");
+  };
   const [typeFilter, setTypeFilter] = useState<"All" | B2BType>("All");
-  const [statusFilter, setStatusFilter] = useState<"All" | B2BStatus>("All");
+  const [statusFilter, setStatusFilter] = useState<ListFilter>("Open");
   const [search, setSearch] = useState("");
+  const [today] = useState(() => todayStr());
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return [...b2bBookings]
+    return b2bBookings
+      .map((b) => ({ ...b, statusNow: b2bStatusNow(b, today) }))
       .filter((b) => typeFilter === "All" || b.type === typeFilter)
-      .filter((b) => statusFilter === "All" || b.status === statusFilter)
+      .filter((b) => {
+        if (b.statusNow === "Lost" || b.statusNow === "Completed") return false;
+        if (statusFilter === "Open") return b.checkin >= today && (b.statusNow === "Tentative" || b.statusNow === "Confirmed");
+        return statusFilter === "All" || b.statusNow === statusFilter;
+      })
       .filter(
         (b) =>
           !q ||
@@ -27,8 +57,9 @@ export default function B2BBookingsPage() {
           b.orgName.toLowerCase().includes(q) ||
           b.contactPerson.toLowerCase().includes(q)
       )
-      .sort((a, b) => b.checkin.localeCompare(a.checkin) || b.id.localeCompare(a.id));
-  }, [b2bBookings, typeFilter, statusFilter, search]);
+      // Earliest check-in first: the next event is what the team works on
+      .sort((a, b) => a.checkin.localeCompare(b.checkin) || a.id.localeCompare(b.id));
+  }, [b2bBookings, typeFilter, statusFilter, search, today]);
 
   const totals = rows.reduce(
     (t, b) => ({
@@ -57,7 +88,7 @@ export default function B2BBookingsPage() {
       <div className="pg-hd">
         <div>
           <h2>B2B Bookings</h2>
-          <p>Corporate, school and institute bookings</p>
+          <p>{FILTER_HINT[statusFilter]}</p>
         </div>
         <Link href="/b2b/new" className="btn btn-primary btn-sm">
           New B2B Booking
@@ -71,7 +102,7 @@ export default function B2BBookingsPage() {
             className={`btn btn-sm${typeFilter === t ? " btn-primary" : " btn-ghost"}`}
             onClick={() => setTypeFilter(t)}
           >
-            {t}
+            {t === "All" ? "All types" : t}
           </button>
         ))}
         <span style={{ width: 1, height: 20, background: "var(--bd)", margin: "0 4px" }} />
@@ -80,6 +111,7 @@ export default function B2BBookingsPage() {
             key={st}
             className={`btn btn-sm${statusFilter === st ? " btn-primary" : " btn-ghost"}`}
             onClick={() => setStatusFilter(st)}
+            title={FILTER_HINT[st]}
           >
             {st}
           </button>
@@ -128,8 +160,12 @@ export default function B2BBookingsPage() {
               <tr>
                 <td colSpan={11}>
                   <div className="empty-state">
-                    <h3>No B2B bookings</h3>
-                    <p>Create one with the New B2B Booking button</p>
+                    <h3>{statusFilter === "Open" ? "No open B2B bookings" : "No B2B bookings"}</h3>
+                    <p>
+                      {statusFilter === "Open"
+                        ? "Nothing tentative or confirmed from today onwards. Pick All to see enquiries, or the B2B reports for lost and completed."
+                        : "Create one with the New B2B Booking button"}
+                    </p>
                   </div>
                 </td>
               </tr>
@@ -161,6 +197,9 @@ export default function B2BBookingsPage() {
                       {b.bookingType === "Dayout"
                         ? `${fmtIN(b.checkin)} · Dayout`
                         : `${fmtIN(b.checkin)} → ${fmtIN(b.checkout)}`}
+                      {holdSummary(b.roomBlockId, b.venueBlockIds) && (
+                        <div style={{ fontSize: 11, color: "var(--t3)" }}>{holdSummary(b.roomBlockId, b.venueBlockIds)}</div>
+                      )}
                     </td>
                     <td style={{ textAlign: "center" }}>{b.pax || "—"}</td>
                     <td style={{ textAlign: "right", fontWeight: 600 }}>{fmt(b.grandTotal)}</td>
@@ -176,7 +215,7 @@ export default function B2BBookingsPage() {
                       {b.balance >= 1 ? fmt(b.balance) : b.balance <= -1 ? `Excess ${fmt(-b.balance)}` : "Nil"}
                     </td>
                     <td>
-                      <span className={`badge ${statusBadgeClass(b.status)}`}>{b.status}</span>
+                      <span className={`badge ${statusBadgeClass(b.statusNow)}`}>{b.statusNow}</span>
                     </td>
                     <td style={{ textAlign: "center" }}>
                       <Link href={`/b2b/${b.id}`} className="btn btn-ghost btn-xs">

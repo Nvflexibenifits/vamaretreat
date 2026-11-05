@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { use } from "react";
+import { use, useState } from "react";
 import { B2BBookingForm } from "@/components/B2BBookingForm";
 import { useApp } from "@/lib/store";
-import { fmt, fmtIN, statusBadgeClass, tdsOfPayments } from "@/lib/utils";
+import { b2bStatusNow, compareRoomLabels, fmt, fmtIN, statusBadgeClass, tdsOfPayments, todayStr } from "@/lib/utils";
 import type { B2BBooking } from "@/types";
 
 export default function EditB2BBookingPage({
@@ -13,7 +13,13 @@ export default function EditB2BBookingPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  const { b2bBookings, hydrated, currentRole } = useApp();
+  const {
+    b2bBookings, hydrated, currentRole, updateB2BBooking,
+    bulkRoomBlocks, venueBlocks, removeBulkRoomBlock, removeVenueBlock, showNotif,
+  } = useApp();
+  const [today] = useState(() => todayStr());
+  const [lostOpen, setLostOpen] = useState(false);
+  const [lostReason, setLostReason] = useState("");
   const booking = b2bBookings.find((b) => b.id === id);
   // Finance opens this from the Revenue Register's View link — it may look,
   // never edit, so it gets a read-only summary instead of the form.
@@ -43,15 +49,66 @@ export default function EditB2BBookingPage({
     );
   }
 
+  const statusNow = b2bStatusNow(booking, today);
+  // Lost is explicit when staff give up on an enquiry; a lapsed one is read
+  // as lost without any write. Either way the chart holds are released.
+  const canMarkLost = !readOnly && (statusNow === "Enquiry" || statusNow === "Tentative");
+  const statusNote =
+    statusNow === "Lost"
+      ? booking.status === "Lost"
+        ? booking.lostReason ? ` · ${booking.lostReason}` : ""
+        : " · check-in date passed"
+      : "";
+  const markLost = () => {
+    if (booking.roomBlockId && bulkRoomBlocks.some((x) => x.id === booking.roomBlockId)) {
+      removeBulkRoomBlock(booking.roomBlockId);
+    }
+    (booking.venueBlockIds ?? []).forEach((vid) => {
+      if (venueBlocks.some((v) => v.id === vid)) removeVenueBlock(vid);
+    });
+    updateB2BBooking(booking.id, {
+      status: "Lost",
+      lostReason: lostReason.trim(),
+      roomBlockId: null,
+      venueBlockIds: [],
+    });
+    setLostOpen(false);
+    showNotif(`${booking.id} marked lost`, "success");
+  };
+
   return (
     <div className="view">
       <div className="pg-hd">
         <div>
           <h2>{booking.orgName}</h2>
           <p>
-            {booking.id} · {booking.type} · {booking.status}
+            {booking.id} · {booking.type} · {statusNow}{statusNote}
           </p>
         </div>
+        {canMarkLost && (
+          <div className="pg-hd-actions">
+            {lostOpen ? (
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <input
+                  value={lostReason}
+                  onChange={(e) => setLostReason(e.target.value)}
+                  placeholder="Reason (optional)"
+                  style={{ height: 32, padding: "0 10px", fontSize: 13, border: "1px solid var(--bd)", borderRadius: "var(--r2)", background: "var(--surf)", width: 220 }}
+                />
+                <button className="btn btn-danger btn-sm" onClick={markLost}>Confirm Lost</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => setLostOpen(false)}>Keep</button>
+              </div>
+            ) : (
+              <button
+                className="btn btn-danger btn-sm"
+                onClick={() => setLostOpen(true)}
+                title="Mark this enquiry as lost. Rooms and venues held on the chart are released."
+              >
+                Mark Lost
+              </button>
+            )}
+          </div>
+        )}
       </div>
       {readOnly ? (
         <B2BReadOnly booking={booking} />
@@ -73,8 +130,25 @@ function Row({ label, value }: { label: string; value: string }) {
 }
 
 function B2BReadOnly({ booking: b }: { booking: B2BBooking }) {
+  const { bulkRoomBlocks, venueBlocks, rooms, roomInventory, venues } = useApp();
   const orgLabel =
     b.type === "School" ? "School Name" : b.type === "Institute" ? "Institute Name" : "Company Name";
+  // Villas and venues the booking holds on the chart right now
+  const roomBlock = b.roomBlockId ? bulkRoomBlocks.find((x) => x.id === b.roomBlockId) : undefined;
+  const heldRows = (roomBlock?.rows ?? []).map((row) => ({
+    name: rooms.find((r) => r.id === row.catId)?.name ?? row.catName,
+    villas: row.roomIds
+      .map((id) => roomInventory.find((r) => r.id === id)?.label ?? id)
+      .sort(compareRoomLabels)
+      .join(", "),
+  }));
+  const heldVenues = (b.venueBlockIds ?? [])
+    .map((id) => venueBlocks.find((vb) => vb.id === id))
+    .filter((vb): vb is NonNullable<typeof vb> => !!vb)
+    .map((vb) => venues.find((v) => v.id === vb.venueId)?.name ?? vb.venueId);
+  const askedRooms = (b.roomRows ?? []).map(
+    (r) => `${r.count} ${rooms.find((x) => x.id === r.catId)?.name ?? r.catId}`
+  );
   const extrasNet = (b.extras ?? []).reduce((s, e) => s + e.amount, 0);
   const extrasGst = (b.extras ?? []).reduce((s, e) => s + (e.gst ?? 0), 0);
 
@@ -112,6 +186,19 @@ function B2BReadOnly({ booking: b }: { booking: B2BBooking }) {
           />
           {b.bookingType === "Overnight" && <Row label="Check-out" value={fmtIN(b.checkout)} />}
           <Row label="Pax Count" value={String(b.pax || 0)} />
+          {heldRows.length > 0 ? (
+            heldRows.map((r) => <Row key={r.name} label={r.name} value={r.villas} />)
+          ) : (
+            <Row
+              label="Rooms"
+              value={
+                askedRooms.length > 0
+                  ? `${askedRooms.join(", ")} · not held (${b.status})`
+                  : "None"
+              }
+            />
+          )}
+          <Row label="Venues" value={heldVenues.length > 0 ? heldVenues.join(", ") : "None"} />
         </div>
       </div>
 

@@ -86,6 +86,53 @@ export type CheckIn = { at: string; by: string };
 // settle through the one payments list.
 export const REFUND_TYPE = "Refund";
 
+// ─────── Group bookings ───────
+// A group booking is a B2C-shaped booking (villas, pax, meals, pricing sheet,
+// room chart) for one party taking several villas, often billed to a company.
+// It lives in the same table as B2C; `kind` tells the two apart. Absent means
+// B2C, so nothing saved before group bookings existed changes meaning.
+export type BookingKind = "b2c" | "group";
+
+// Who the group's bill is made out to, when a company pays
+export type BillingDetails = {
+  company: string;
+  gstin: string;
+  address: string;
+};
+
+// Security deposit taken from a group. Cash flow, never sales: it is held
+// apart from the bill until it is settled after the stay.
+export type DepositEntry = {
+  id: string;
+  date: string;
+  amount: number;
+  mode: string;
+  by: string;
+};
+
+// How the deposit was squared off: the unpaid balance (if any) is taken from
+// it and lands on the bill as a payment of mode DEPOSIT_MODE, the rest is
+// handed back.
+export type DepositSettlement = {
+  date: string;
+  by: string;
+  applied: number;
+  refunded: number;
+  refundMode: string;
+  reference?: string;
+};
+
+export type SecurityDeposit = {
+  entries: DepositEntry[];
+  // null clears: the API merges patches
+  settlement?: DepositSettlement | null;
+};
+
+// Payment row written when a deposit is applied to the bill at settlement.
+// Not cash: the money already arrived as the deposit.
+export const DEPOSIT_APPLIED_TYPE = "Deposit Applied";
+export const DEPOSIT_MODE = "Security Deposit";
+
 // Revenue head an amount reports under in the Revenue Register.
 export type ChargeHead = "room" | "meal" | "other";
 
@@ -359,6 +406,11 @@ export type Booking = {
   waiveOff?: WaiveOff;
 
   nightOverrides?: RoomNightOverride[];
+
+  // Group bookings only (absent on B2C)
+  kind?: BookingKind;
+  billing?: BillingDetails;
+  deposit?: SecurityDeposit;
 };
 
 export type WaiveOffLine = {
@@ -483,7 +535,10 @@ export type B2BType = "Corporate" | "School" | "Institute";
 
 export type B2BBookingType = "Dayout" | "Overnight";
 
-export type B2BStatus = "Enquiry" | "Tentative" | "Confirmed";
+// Lost and Completed are also read as-of-today from the dates (see
+// b2bStatusNow in utils): a lapsed enquiry is lost, a confirmed booking whose
+// dates have passed is completed. A stored Lost comes from Mark Lost.
+export type B2BStatus = "Enquiry" | "Tentative" | "Confirmed" | "Completed" | "Lost";
 
 export type B2BBooking = {
   id: string;
@@ -513,9 +568,22 @@ export type B2BBooking = {
   balance: number;
 
   status: B2BStatus;
+  lostReason?: string;
+
+  // Rooms and venues asked for on the form. Held on the room chart as a bulk
+  // room block and venue blocks while the booking is Tentative or Confirmed;
+  // an Enquiry holds nothing. The block ids link the two ways.
+  roomRows?: B2BRoomRequest[];
+  venueIds?: string[];
+  roomBlockId?: string | null;
+  venueBlockIds?: string[];
+
   createdBy: string;
   createdAt: string;
 };
+
+// One room-category line on a B2B booking: how many villas of a category
+export type B2BRoomRequest = { catId: string; count: number };
 
 // Guest counts on a room-chart block, using the same buckets as a booking so
 // the two screens ask for the same thing. `pax` on the block stays as the
@@ -549,6 +617,10 @@ export type BulkRoomBlock = {
   createdAt: string;
   // Set when the group has been checked in at the front office (null clears)
   checkedIn?: CheckIn | null;
+  // B2B booking this block belongs to. Such a block is edited, confirmed and
+  // removed only through that booking; the chart can still check it in and
+  // move its villas.
+  b2bId?: string;
 };
 
 export type VenueBlock = {
@@ -565,4 +637,6 @@ export type VenueBlock = {
   reason?: string;
   createdBy: string;
   createdAt: string;
+  // B2B booking this block belongs to; managed from that booking, not the chart
+  b2bId?: string;
 };

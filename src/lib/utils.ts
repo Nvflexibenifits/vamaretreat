@@ -1,6 +1,8 @@
 import type {
   B2BBooking,
+  B2BStatus,
   Booking,
+  BookingKind,
   BookingSegment,
   BookingStatus,
   BulkRoomBlock,
@@ -16,7 +18,9 @@ import type {
   RoomMaster,
   RoomNightOverride,
   SegmentRoom,
+  VenueBlock,
 } from "@/types";
+import { DEPOSIT_MODE } from "@/types";
 import { ROOM_INVENTORY, ROOMS, SEED_GST_SETTINGS } from "@/lib/data";
 
 export const fmt = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
@@ -66,6 +70,20 @@ export function fiscalYearCode(now: Date = new Date()): string {
 export function getTimeOfDay(now: Date = new Date()): "morning" | "afternoon" | "evening" {
   const h = now.getHours();
   return h < 12 ? "morning" : h < 17 ? "afternoon" : "evening";
+}
+
+// B2B status as of today. B2C bookings get Lost and Completed written back
+// by the store's sweeps; B2B rows are read instead, so nothing in the past is
+// rewritten: an enquiry or tentative whose check-in has passed is lost, a
+// confirmed booking whose check-out has passed is completed.
+export function b2bStatusNow(
+  b: Pick<B2BBooking, "status" | "checkin" | "checkout">,
+  today: string
+): B2BStatus {
+  if (b.status === "Lost" || b.status === "Completed") return b.status;
+  if ((b.status === "Enquiry" || b.status === "Tentative") && b.checkin < today) return "Lost";
+  if (b.status === "Confirmed" && b.checkout < today) return "Completed";
+  return b.status;
 }
 
 export function statusBadgeClass(s: BookingStatus): string {
@@ -415,8 +433,17 @@ export function extraHead(e: Extra): ChargeHead {
   const name = (e.name ?? "").trim().toLowerCase();
   const byCategory = ADD_ON_CATEGORY_HEADS[name];
   if (byCategory) return byCategory;
-  if (name.startsWith("room upgrade")) return "room";
+  if (name.startsWith("room upgrade") || name.startsWith("room charges")) return "room";
   return "other";
+}
+
+// What an add-on line is called on screen and on paper. A paid room upgrade
+// used to be written as "Room Upgrade (date): from → to"; finance wants it
+// read as room charges, so lines saved under the old prefix show the new one
+// without the stored row changing.
+export function extraLabel(e: Extra): string {
+  const name = (e.name ?? "").trim();
+  return name.replace(/^Room Upgrade\b/i, "Room Charges");
 }
 
 export type BookingChargesBreakdown = {
@@ -723,17 +750,162 @@ export function isCreditNotePayment(p: Payment): boolean {
 // bring no new money in, so callers that want cash actually received must use
 // bank + cash only. Legacy bookings may carry an advance without itemized
 // payments; that advance is treated as bank money.
-export function paymentSplit(b: Booking): { bank: number; cash: number; crNote: number } {
-  let bank = 0, cash = 0, crNote = 0;
+export function paymentSplit(b: Booking): { bank: number; cash: number; crNote: number; deposit: number } {
+  let bank = 0, cash = 0, crNote = 0, deposit = 0;
   (b.payments ?? []).forEach((p) => {
     if (isTdsPayment(p)) return;
     const m = (p.mode || "").toLowerCase();
-    if (m.includes("cash")) cash += p.amount;
+    if (isDepositAppliedPayment(p)) deposit += p.amount;
+    else if (m.includes("cash")) cash += p.amount;
     else if (m.includes("credit note")) crNote += p.amount;
     else bank += p.amount;
   });
-  if (bank + cash + crNote === 0 && b.advance > 0) bank = b.advance;
-  return { bank, cash, crNote };
+  if (bank + cash + crNote + deposit === 0 && b.advance > 0) bank = b.advance;
+  return { bank, cash, crNote, deposit };
+}
+
+// ─────── OTA ADD-ON SEGREGATION ───────
+// An OTA sells the room, with whatever meal plan was booked through it, and
+// settles that part net of its commission and TDS. Anything the guest adds at
+// the hotel (a meal, an upgrade, a service) is bought from the hotel and paid
+// to the hotel: Direct revenue with its own receipts, never an OTA
+// receivable. The split is read from the booking as stored: the add-ons are
+// the itemised extras, and their receipts are the payments linked to them.
+
+export function isAddOnPayment(p: Payment): boolean {
+  return !!p.extraId || p.type === "Add-on";
+}
+
+function addOnGross(e: Extra): number {
+  return e.amount + (e.gst ?? 0);
+}
+
+// Which side of an OTA booking a receipt settles. Linked add-on receipts are
+// direct. Older bookings recorded the guest's add-on payment without a link,
+// so when nothing is linked a receipt for exactly one add-on, or for all of
+// them, is read as that payment. Everything else is the OTA's payout.
+export function otaReceiptSide(b: Booking, p: Payment): "direct" | "ota" {
+  if (b.source !== "OTA") return "direct";
+  if (isAddOnPayment(p)) return "direct";
+  const extras = b.extras ?? [];
+  if (extras.length === 0 || (b.payments ?? []).some(isAddOnPayment)) return "ota";
+  const amt = Math.round(p.amount);
+  if (amt <= 0) return "ota";
+  const whole = Math.round(extras.reduce((s, e) => s + addOnGross(e), 0));
+  return amt === whole || extras.some((e) => Math.round(addOnGross(e)) === amt) ? "direct" : "ota";
+}
+
+export type OtaSide = { bank: number; cash: number; payable: number; bal: number };
+export type OtaSplit = { addOnNet: number; addOnGst: number; direct: OtaSide; ota: OtaSide };
+
+// The two halves of a live OTA booking that has add-ons, or null when the
+// booking is not OTA, has nothing added on, or is cancelled (a cancellation
+// settles through refunds and waive-offs as one booking).
+export function otaSplit(b: Booking): OtaSplit | null {
+  if (b.source !== "OTA" || b.status === "Cancelled") return null;
+  const extras = b.extras ?? [];
+  const addOnNet = extras.reduce((s, e) => s + e.amount, 0);
+  const addOnGst = extras.reduce((s, e) => s + (e.gst ?? 0), 0);
+  const addOnTotal = addOnNet + addOnGst;
+  if (addOnTotal < 1) return null;
+  const dedTotal = (b.deductions ?? []).reduce((s, d) => s + d.amount + d.gst, 0);
+  const payTds = tdsOfPayments(b.payments);
+  // What the OTA owes: the booking less the add-ons, its deductions, and
+  // anything already netted off the bill
+  const otaPayable = Math.max(
+    0,
+    b.grandTotal - addOnTotal - dedTotal - creditNoteRedeemed(b) - (b.waiveOff?.totalGross ?? 0) - payTds
+  );
+  const direct = { bank: 0, cash: 0 };
+  const ota = { bank: 0, cash: 0 };
+  const take = (side: { bank: number; cash: number }, p: Payment) => {
+    if ((p.mode || "").toLowerCase().includes("cash")) side.cash += p.amount;
+    else side.bank += p.amount;
+  };
+  const pays = (b.payments ?? []).filter((p) => !isTdsPayment(p) && !isCreditNotePayment(p) && !isDepositAppliedPayment(p));
+  pays.forEach((p) => take(otaReceiptSide(b, p) === "direct" ? direct : ota, p));
+  // Legacy bookings carry an advance without itemised payments: OTA money
+  if (pays.length === 0 && b.advance > 0) ota.bank = b.advance;
+  // Money is money: the OTA pays out no more than it owes and the guest pays
+  // no more than the add-ons cost, so whatever lands beyond one side's need
+  // settles the other (a pay-at-hotel OTA guest pays the room at the desk).
+  // Only what the other side still needs moves over.
+  const shift = (from: { bank: number; cash: number }, to: { bank: number; cash: number }, amount: number) => {
+    const fromBank = Math.min(amount, from.bank);
+    const fromCash = amount - fromBank;
+    from.bank -= fromBank;
+    from.cash -= fromCash;
+    to.bank += fromBank;
+    to.cash += fromCash;
+  };
+  const otaOver = Math.min(ota.bank + ota.cash - otaPayable, addOnTotal - direct.bank - direct.cash);
+  if (otaOver > 0) shift(ota, direct, otaOver);
+  const directOver = Math.min(direct.bank + direct.cash - addOnTotal, otaPayable - ota.bank - ota.cash);
+  if (directOver > 0) shift(direct, ota, directOver);
+  return {
+    addOnNet,
+    addOnGst,
+    direct: { ...direct, payable: addOnTotal, bal: Math.round(addOnTotal - direct.bank - direct.cash) },
+    ota: { ...ota, payable: otaPayable, bal: Math.round(otaPayable - ota.bank - ota.cash) },
+  };
+}
+
+// Charge-side view of a booking's add-ons alone, in the register's shape, so
+// the Direct half of an OTA booking reports under the same columns.
+export function extrasBreakdown(extras: Extra[]): BookingChargesBreakdown {
+  const out: BookingChargesBreakdown = { roomNet: 0, mealNet: 0, creditNoteUsed: 0, other: 0, otherByItem: {}, gst5: 0, gst18: 0, gstOther: 0 };
+  extras.forEach((e) => {
+    const gst = e.gst ?? 0;
+    const pct = e.amount > 0 && gst > 0 ? Math.round((gst / e.amount) * 100) : 0;
+    const head = extraHead(e);
+    if (head === "room") out.roomNet += e.amount;
+    else if (head === "meal") out.mealNet += e.amount;
+    else {
+      const label = (e.name ?? "").trim() || "Add-on Charge";
+      out.otherByItem[label] = (out.otherByItem[label] ?? 0) + e.amount;
+      out.other += e.amount;
+    }
+    if (gst === 0) return;
+    if (pct === 5) out.gst5 += gst;
+    else if (pct === 18) out.gst18 += gst;
+    else out.gstOther += gst;
+  });
+  return out;
+}
+
+// ─────── GROUP BOOKINGS ───────
+export function isGroupBooking(b: { kind?: BookingKind }): boolean {
+  return b.kind === "group";
+}
+
+// Security deposit applied to the bill at settlement. The money came in
+// earlier as the deposit, so this is a settlement, not a fresh receipt.
+export function isDepositAppliedPayment(p: Payment): boolean {
+  return (p.mode || "").trim().toLowerCase() === DEPOSIT_MODE.toLowerCase();
+}
+
+export function depositReceived(b: Booking): number {
+  return (b.deposit?.entries ?? []).reduce((s, e) => s + e.amount, 0);
+}
+
+export function depositApplied(b: Booking): number {
+  return b.deposit?.settlement?.applied ?? 0;
+}
+
+export function depositRefunded(b: Booking): number {
+  return b.deposit?.settlement?.refunded ?? 0;
+}
+
+// Deposit money the hotel is still holding: received, less what was applied
+// to the bill and what went back to the guest.
+export function depositHeld(b: Booking): number {
+  return Math.round(depositReceived(b) - depositApplied(b) - depositRefunded(b));
+}
+
+// Deposit money the hotel kept: what came in less what went back. Before
+// settlement this is the amount held; after it, the part applied to the bill.
+export function depositRetained(b: Booking): number {
+  return Math.round(depositReceived(b) - depositRefunded(b));
 }
 
 // TDS entries on a booking: the client withheld this and remitted it to the
@@ -822,6 +994,28 @@ export function blockOccupancyEnd(checkin: string, checkout: string): string {
   const d = new Date(checkin);
   d.setDate(d.getDate() + 1);
   return d.toISOString().split("T")[0];
+}
+
+// The venue block already holding `venueId` for any part of [checkin,
+// checkout), ignoring the blocks in `ignoreIds` (a booking's own holds when
+// it is re-saved). A same-day range is a dayout and holds that one date.
+export function findVenueConflict(
+  venueBlocks: VenueBlock[],
+  venueId: string,
+  checkin: string,
+  checkout: string,
+  ignoreIds: string[] = []
+): VenueBlock | null {
+  const end = blockOccupancyEnd(checkin, checkout);
+  return (
+    venueBlocks.find(
+      (vb) =>
+        !ignoreIds.includes(vb.id) &&
+        vb.venueId === venueId &&
+        vb.checkin < end &&
+        checkin < blockOccupancyEnd(vb.checkin, vb.checkout)
+    ) || null
+  );
 }
 
 // Physical rooms a booking actually sleeps in on a given date: the rooms it

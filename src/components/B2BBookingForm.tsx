@@ -1,15 +1,31 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { addDays, cashOfPayments, extraHead, fmt, fmtIN, nowTime, todayStr, signedBalance, tdsOfPayments } from "@/lib/utils";
+import {
+  addDays,
+  blockOccupancyEnd,
+  cashOfPayments,
+  compareRoomLabels,
+  extraHead,
+  findAvailableRoomIds,
+  findVenueConflict,
+  fmt,
+  fmtIN,
+  nowTime,
+  todayStr,
+  signedBalance,
+  tdsOfPayments,
+} from "@/lib/utils";
 import { REFUND_TYPE } from "@/types";
 import type {
   B2BBooking,
   B2BBookingType,
+  B2BRoomRequest,
   B2BStatus,
   B2BType,
+  BulkRoomBlockRow,
   ChargeHead,
   Extra,
   Payment,
@@ -42,12 +58,19 @@ type AddOnRow = {
 
 type PaymentRow = { uid: string; date: string; amount: string; tds: string; mode: string; kind?: "refund" };
 
+// Rooms and venues asked for on the form. Villas are picked on save from
+// what is free for the stay, exactly as the room chart's booking modal did.
+type RoomReqRow = { uid: string; catId: string; count: string };
+type VenueReqRow = { uid: string; venueId: string };
+
 type FieldErrors = Partial<
   Record<"orgName" | "contactPerson" | "contactNumber" | "checkin" | "checkout", boolean>
 >;
 
 let uidCounter = 0;
 const newUid = () => `b2b-${Date.now().toString(36)}-${uidCounter++}`;
+// Ids for the chart blocks a booking holds, in the chart's own format
+const blockUid = () => Math.random().toString(36).slice(2, 9);
 
 export function B2BBookingForm({
   mode,
@@ -62,6 +85,19 @@ export function B2BBookingForm({
     createB2BBooking,
     updateB2BBooking,
     addOnCategories,
+    bookings,
+    rooms,
+    roomInventory,
+    bulkRoomBlocks,
+    addBulkRoomBlock,
+    updateBulkRoomBlock,
+    removeBulkRoomBlock,
+    venues,
+    venueTypes,
+    venueBlocks,
+    addVenueBlock,
+    updateVenueBlock,
+    removeVenueBlock,
     showNotif,
     currentUser,
   } = useApp();
@@ -89,6 +125,14 @@ export function B2BBookingForm({
     initial?.checkout ?? (todayDate ? addDays(todayDate, 1) : "")
   );
   const [pax, setPax] = useState(initial ? String(initial.pax || "") : "");
+
+  // ─── Section 2: rooms and venues held on the chart ───
+  const [roomRows, setRoomRows] = useState<RoomReqRow[]>(() =>
+    (initial?.roomRows ?? []).map((r) => ({ uid: newUid(), catId: r.catId, count: String(r.count) }))
+  );
+  const [venueRows, setVenueRows] = useState<VenueReqRow[]>(() =>
+    (initial?.venueIds ?? []).map((venueId) => ({ uid: newUid(), venueId }))
+  );
 
   // ─── Section 3: add-on charges ───
   const [addOnRows, setAddOnRows] = useState<AddOnRow[]>(() =>
@@ -166,6 +210,79 @@ export function B2BBookingForm({
   // Signed: negative means the organisation has settled more than the bill.
   const balance = signedBalance(grandTotal, totalReceived + totalTds);
 
+  // ─── Rooms and venues: availability for the stay on the form ───
+  // A dayout holds its single date; an overnight stay holds [checkin, checkout).
+  const effCheckout = bookingType === "Dayout" ? checkin : checkout;
+  const holdDatesValid =
+    !!checkin && (bookingType === "Dayout" || (!!checkout && checkout > checkin));
+  const holdEnd = holdDatesValid ? blockOccupancyEnd(checkin, effCheckout) : "";
+
+  // The blocks this booking already holds. Ignored when checking availability
+  // so a re-save does not clash with its own villas or venues.
+  const linkedRoomBlock = initial?.roomBlockId
+    ? bulkRoomBlocks.find((b) => b.id === initial.roomBlockId) ?? null
+    : null;
+  const linkedVenueBlockIds = useMemo(() => initial?.venueBlockIds ?? [], [initial]);
+  const linkedVenueBlocks = venueBlocks.filter((vb) => linkedVenueBlockIds.includes(vb.id));
+
+  const availableByCat = useMemo(() => {
+    const out: Record<string, string[]> = {};
+    if (!holdDatesValid) return out;
+    rooms.forEach((r) => {
+      out[r.id] = findAvailableRoomIds(
+        r.id, checkin, holdEnd, bookings, roomInventory,
+        undefined, bulkRoomBlocks, linkedRoomBlock?.id
+      );
+    });
+    return out;
+  }, [holdDatesValid, checkin, holdEnd, rooms, bookings, roomInventory, bulkRoomBlocks, linkedRoomBlock]);
+
+  // Villas the booking holds today, per category, so a re-save keeps them
+  const heldByCat: Record<string, string[]> = {};
+  (linkedRoomBlock?.rows ?? []).forEach((row) => {
+    heldByCat[row.catId] = [...(heldByCat[row.catId] ?? []), ...row.roomIds];
+  });
+
+  const roomLabel = (id: string) => roomInventory.find((r) => r.id === id)?.label ?? id;
+  const catName = (catId: string) => rooms.find((r) => r.id === catId)?.name ?? catId;
+
+  // Free villas for a category, the ones already held first, or null when
+  // there are not enough for the stay.
+  const pickRooms = (catId: string, count: number): string[] | null => {
+    const free = availableByCat[catId] ?? [];
+    if (free.length < count) return null;
+    const held = (heldByCat[catId] ?? []).filter((id) => free.includes(id));
+    const rest = free.filter((id) => !held.includes(id));
+    return [...held, ...rest].slice(0, count);
+  };
+
+  const allVenueTypes = useMemo(() => {
+    const out = [...venueTypes];
+    venues.forEach((v) => {
+      if (!out.includes(v.type)) out.push(v.type);
+    });
+    return out;
+  }, [venueTypes, venues]);
+  const venueById = useMemo(() => Object.fromEntries(venues.map((v) => [v.id, v])), [venues]);
+  const activeVenues = venues.filter((v) => v.active);
+
+  const venueConflict = (venueId: string) =>
+    holdDatesValid && venueId
+      ? findVenueConflict(venueBlocks, venueId, checkin, effCheckout, linkedVenueBlockIds)
+      : null;
+
+  // Requests merged per category so two rows of one category never pick the
+  // same villas twice
+  const roomRequests: B2BRoomRequest[] = [];
+  roomRows.forEach((r) => {
+    const count = parseInt(r.count) || 0;
+    if (!r.catId || count <= 0) return;
+    const existing = roomRequests.find((x) => x.catId === r.catId);
+    if (existing) existing.count += count;
+    else roomRequests.push({ catId: r.catId, count });
+  });
+  const wantedVenueIds = [...new Set(venueRows.map((v) => v.venueId).filter(Boolean))];
+
   // ─── Validation ───
   const validate = (): boolean => {
     const errs: FieldErrors = {};
@@ -194,8 +311,118 @@ export function B2BBookingForm({
       return;
     }
 
-    // A dayout blocks a single date, so checkout mirrors check-in
-    const effCheckout = bookingType === "Dayout" ? checkin : checkout;
+    // Rooms and venues are held only once the booking is Tentative or
+    // Confirmed. Check them first so nothing is written when the stay does not
+    // fit on the chart.
+    const holds = intent !== "Enquiry";
+    const roomBlockRows: BulkRoomBlockRow[] = [];
+    if (holds) {
+      if ((roomRequests.length > 0 || wantedVenueIds.length > 0) && !holdDatesValid) {
+        showNotif("Pick valid dates for the rooms and venues", "error");
+        return;
+      }
+      for (const req of roomRequests) {
+        const picked = pickRooms(req.catId, req.count);
+        if (!picked) {
+          showNotif(
+            `Only ${(availableByCat[req.catId] ?? []).length} ${catName(req.catId)} available for the selected dates`,
+            "error"
+          );
+          return;
+        }
+        roomBlockRows.push({ catId: req.catId, catName: catName(req.catId), roomIds: picked });
+      }
+      for (const vid of wantedVenueIds) {
+        const conflict = venueConflict(vid);
+        if (conflict) {
+          showNotif(
+            `${venueById[vid]?.name ?? "Venue"} already booked (${fmtIN(conflict.checkin)} to ${fmtIN(conflict.checkout)})`,
+            "error"
+          );
+          return;
+        }
+      }
+    }
+
+    // B2B-<type code>-<2-digit year>-<sequence>, sequence per type per year.
+    // Highest existing number for the prefix + 1, so deletions never reuse IDs.
+    const yy = String(new Date().getFullYear() % 100).padStart(2, "0");
+    const idPrefix = `B2B-${TYPE_CODE[type]}-${yy}-`;
+    const maxSeq = b2bBookings
+      .filter((b) => b.id.startsWith(idPrefix))
+      .reduce((m, b) => Math.max(m, parseInt(b.id.slice(idPrefix.length), 10) || 0), 0);
+    const bookingId = isEdit ? initial!.id : idPrefix + String(maxSeq + 1).padStart(3, "0");
+
+    // Write the chart holds: one bulk room block and one block per venue,
+    // each carrying the booking's name, dates, pax, status and amount due.
+    const blockStatus: "Tentative" | "Confirmed" = intent === "Confirmed" ? "Confirmed" : "Tentative";
+    const holdName = orgName.trim();
+    const paxNum = parseInt(pax) || 0;
+
+    let roomBlockId: string | null = null;
+    if (holds && roomBlockRows.length > 0) {
+      const base = {
+        label: holdName,
+        guestName: contactPerson.trim(),
+        checkin,
+        checkout: effCheckout,
+        pax: paxNum,
+        amount: grandTotal,
+        status: blockStatus,
+        rows: roomBlockRows,
+        b2bId: bookingId,
+      };
+      if (linkedRoomBlock) {
+        updateBulkRoomBlock(linkedRoomBlock.id, base);
+        roomBlockId = linkedRoomBlock.id;
+      } else {
+        roomBlockId = "brb-" + blockUid();
+        addBulkRoomBlock({ id: roomBlockId, ...base, createdBy: currentUser, createdAt: new Date().toISOString() });
+      }
+    } else if (linkedRoomBlock) {
+      removeBulkRoomBlock(linkedRoomBlock.id);
+    }
+
+    const venueBlockIds: string[] = [];
+    const keptVenueBlocks = new Set<string>();
+    if (holds) {
+      wantedVenueIds.forEach((venueId, i) => {
+        // The amount lives on the room block, or on the first venue block
+        // when the booking holds no villas, so hover cards never repeat it
+        const amount = roomBlockRows.length === 0 && i === 0 ? grandTotal : 0;
+        const base = {
+          venueId, checkin, checkout: effCheckout, name: holdName,
+          pax: paxNum, amount, status: blockStatus, b2bId: bookingId,
+        };
+        const existing = linkedVenueBlocks.find((vb) => vb.venueId === venueId && !keptVenueBlocks.has(vb.id));
+        if (existing) {
+          updateVenueBlock(existing.id, base);
+          keptVenueBlocks.add(existing.id);
+          venueBlockIds.push(existing.id);
+        } else {
+          const id = "vb-" + blockUid();
+          addVenueBlock({ id, ...base, createdBy: currentUser, createdAt: todayStr() });
+          venueBlockIds.push(id);
+        }
+      });
+    }
+    linkedVenueBlocks
+      .filter((vb) => !keptVenueBlocks.has(vb.id))
+      .forEach((vb) => removeVenueBlock(vb.id));
+
+    const heldVillas = roomBlockRows.flatMap((r) => r.roomIds);
+    const holdNote = holds
+      ? [
+          heldVillas.length > 0
+            ? heldVillas.length <= 6
+              ? `${[...heldVillas].map(roomLabel).sort(compareRoomLabels).join(", ")} held`
+              : `${heldVillas.length} villas held`
+            : "",
+          venueBlockIds.length > 0 ? `${venueBlockIds.length} venue${venueBlockIds.length > 1 ? "s" : ""} held` : "",
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : "";
 
     const builtPayments: Payment[] = newPaymentRows
       .map((r) => {
@@ -236,47 +463,43 @@ export function B2BBookingForm({
       bookingType,
       checkin,
       checkout: effCheckout,
-      pax: parseInt(pax) || 0,
+      pax: paxNum,
       extras: builtExtras,
       grandTotal,
       payments,
       advance,
       balance: signedBalance(grandTotal, advance + tds),
       status: intent,
+      lostReason: "",
+      roomRows: roomRequests,
+      venueIds: wantedVenueIds,
+      roomBlockId,
+      venueBlockIds,
     };
 
     if (isEdit) {
-      updateB2BBooking(initial!.id, common);
-      showNotif(`${initial!.id} updated`, "success");
-      router.push(`/b2b/${initial!.id}`);
+      updateB2BBooking(bookingId, common);
+      showNotif(`${bookingId} updated${holdNote ? ` · ${holdNote}` : ""}`, "success");
+      router.push(`/b2b/${bookingId}`);
       return;
     }
 
-    // B2B-<type code>-<2-digit year>-<sequence>, sequence per type per year.
-    // Highest existing number for the prefix + 1, so deletions never reuse IDs.
-    const yy = String(new Date().getFullYear() % 100).padStart(2, "0");
-    const idPrefix = `B2B-${TYPE_CODE[type]}-${yy}-`;
-    const maxSeq = b2bBookings
-      .filter((b) => b.id.startsWith(idPrefix))
-      .reduce((m, b) => Math.max(m, parseInt(b.id.slice(idPrefix.length), 10) || 0), 0);
-    const id = idPrefix + String(maxSeq + 1).padStart(3, "0");
-
     const booking: B2BBooking = {
-      id,
+      id: bookingId,
       ...common,
       createdBy: currentUser,
       createdAt: new Date().toISOString(),
     };
     createB2BBooking(booking);
     showNotif(
-      intent === "Confirmed"
-        ? `${id} confirmed`
+      (intent === "Confirmed"
+        ? `${bookingId} confirmed`
         : intent === "Tentative"
-        ? `${id} saved as tentative`
-        : `${id} saved as enquiry`,
+        ? `${bookingId} saved as tentative`
+        : `${bookingId} saved as enquiry`) + (holdNote ? ` · ${holdNote}` : ""),
       "success"
     );
-    router.push(`/b2b/${id}`);
+    router.push(`/b2b/${bookingId}`);
   };
 
   const cellInputStyle: React.CSSProperties = {
@@ -467,6 +690,203 @@ export function B2BBookingForm({
                 placeholder="0"
               />
             </div>
+          </div>
+
+          {/* Rooms and venues, held on the room chart for these dates */}
+          <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--bd)" }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: "var(--t3)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.04em",
+                }}
+              >
+                Rooms and Venues
+              </div>
+              <span style={{ fontSize: 11, color: "var(--t3)" }}>
+                Held on the room chart once the booking is Tentative or Confirmed. An Enquiry holds nothing.
+              </span>
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: "var(--t1)" }}>Rooms</span>
+              {!holdDatesValid && roomRows.length > 0 && (
+                <span style={{ fontSize: 11, color: "var(--amb)", marginLeft: 10 }}>Pick valid dates to see availability</span>
+              )}
+              <button
+                type="button"
+                className="btn btn-ghost btn-xs"
+                style={{ marginLeft: "auto" }}
+                onClick={() => setRoomRows((prev) => [...prev, { uid: newUid(), catId: "", count: "1" }])}
+              >
+                + Add Category
+              </button>
+            </div>
+            {roomRows.length === 0 ? (
+              <div style={{ fontSize: 12, color: "var(--t3)", marginBottom: 14 }}>
+                No rooms. Click Add Category to hold villas for this booking.
+              </div>
+            ) : (
+              <table className="pricing-tbl" style={{ marginBottom: 14 }}>
+                <thead>
+                  <tr>
+                    <th>Room Category</th>
+                    <th style={{ width: 100, textAlign: "center" }}>Available</th>
+                    <th style={{ width: 120, textAlign: "center" }}>Rooms Needed</th>
+                    <th>Villas</th>
+                    <th style={{ width: 60 }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {roomRows.map((row) => {
+                    const avail = row.catId && holdDatesValid ? (availableByCat[row.catId] ?? []).length : null;
+                    const held = row.catId ? [...(heldByCat[row.catId] ?? [])].map(roomLabel).sort(compareRoomLabels) : [];
+                    const needed = parseInt(row.count) || 0;
+                    return (
+                      <tr key={row.uid} style={{ cursor: "default" }}>
+                        <td style={{ verticalAlign: "middle" }}>
+                          <select
+                            value={row.catId}
+                            onChange={(e) =>
+                              setRoomRows((prev) =>
+                                prev.map((r) => (r.uid === row.uid ? { ...r, catId: e.target.value } : r))
+                              )
+                            }
+                            style={selectStyle}
+                          >
+                            <option value="">— Category —</option>
+                            {rooms.map((r) => (
+                              <option key={r.id} value={r.id}>{r.name}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td style={{ textAlign: "center", verticalAlign: "middle", fontSize: 13 }}>
+                          {avail === null ? (
+                            "—"
+                          ) : (
+                            <span
+                              style={{
+                                color: avail === 0 ? "var(--red)" : avail <= 2 ? "var(--amb)" : "var(--grn)",
+                                fontWeight: 600,
+                              }}
+                            >
+                              {avail}
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ verticalAlign: "middle" }}>
+                          <input
+                            type="number"
+                            min={1}
+                            value={row.count}
+                            onChange={(e) =>
+                              setRoomRows((prev) =>
+                                prev.map((r) => (r.uid === row.uid ? { ...r, count: e.target.value } : r))
+                              )
+                            }
+                            style={{ ...cellInputStyle, textAlign: "center" }}
+                          />
+                        </td>
+                        <td style={{ verticalAlign: "middle", fontSize: 12, color: avail !== null && needed > avail ? "var(--red)" : "var(--t3)" }}>
+                          {avail !== null && needed > avail
+                            ? `Only ${avail} available for these dates`
+                            : held.length > 0
+                            ? `Holding ${held.join(", ")}`
+                            : "Picked from free villas on save"}
+                        </td>
+                        <td style={{ verticalAlign: "middle" }}>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-xs"
+                            onClick={() => setRoomRows((prev) => prev.filter((r) => r.uid !== row.uid))}
+                            title="Remove row"
+                          >
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+
+            <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: "var(--t1)" }}>Venues</span>
+              <button
+                type="button"
+                className="btn btn-ghost btn-xs"
+                style={{ marginLeft: "auto" }}
+                onClick={() => {
+                  if (activeVenues.length === 0) {
+                    showNotif("No venues defined. Add venues in Master Setup first.", "error");
+                    return;
+                  }
+                  setVenueRows((prev) => [...prev, { uid: newUid(), venueId: "" }]);
+                }}
+              >
+                + Add Venue
+              </button>
+            </div>
+            {venueRows.length === 0 ? (
+              <div style={{ fontSize: 12, color: "var(--t3)" }}>No venues. Click Add Venue to hold a lawn, hall or other venue.</div>
+            ) : (
+              venueRows.map((row, idx) => {
+                const conflict = venueConflict(row.venueId);
+                return (
+                  <div key={row.uid} style={{ marginBottom: idx === venueRows.length - 1 ? 0 : 8 }}>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <select
+                        value={row.venueId}
+                        onChange={(e) =>
+                          setVenueRows((prev) =>
+                            prev.map((r) => (r.uid === row.uid ? { ...r, venueId: e.target.value } : r))
+                          )
+                        }
+                        style={{ ...selectStyle, maxWidth: 360 }}
+                      >
+                        <option value="">— Select venue —</option>
+                        {allVenueTypes.map((vt) => {
+                          const items = activeVenues.filter((v) => v.type === vt);
+                          if (items.length === 0) return null;
+                          return (
+                            <optgroup key={vt} label={vt}>
+                              {items.map((v) => (
+                                <option
+                                  key={v.id}
+                                  value={v.id}
+                                  disabled={v.id !== row.venueId && venueRows.some((r) => r.venueId === v.id)}
+                                >
+                                  {v.name}
+                                </option>
+                              ))}
+                            </optgroup>
+                          );
+                        })}
+                      </select>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-xs"
+                        onClick={() => setVenueRows((prev) => prev.filter((r) => r.uid !== row.uid))}
+                        title="Remove row"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    {conflict && (
+                      <div style={{ fontSize: 11, color: "var(--red)", marginTop: 4 }}>
+                        Already booked {fmtIN(conflict.checkin)}
+                        {conflict.checkout > conflict.checkin ? ` to ${fmtIN(conflict.checkout)}` : ""}
+                        {conflict.status === "Maintenance" ? " for maintenance" : ` by ${conflict.name}`}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
       </div>
