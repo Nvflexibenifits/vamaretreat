@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useParams } from "next/navigation";
 import { useApp } from "@/lib/store";
-import { addDays, bookingMealCharges, dayName, effectiveRoomsOnDate, extraLabel, fmt, fmtIN, getBookingPricingRows, nightsBetween, petPackageOn, pricingSheetLines } from "@/lib/utils";
+import { addDays, bookingMealCharges, dayName, effectiveRoomsOnDate, extraLabel, fmt, fmtIN, getBookingPricingRows, nightsBetween, petPackageOn, pricingSheetLines, tdsOfPayments } from "@/lib/utils";
 
 // dd/mm/yy — compact date format matching the booking view page
 function fmtShort(d: string): string {
@@ -114,6 +114,9 @@ export default function ConfirmationPage() {
 
   const grandTotal = totalRoomAmt + totalMealPet + extrasTotal;
   const grandRaw = totalRoomBaseCharges + totalMealPetCharges + extrasBasic;
+  // TDS the payer withheld on a receipt settles the bill without arriving as
+  // money, so the sheet must show it between what was received and the balance
+  const tdsTotal = tdsOfPayments(b.payments);
 
   // Same-day booking: no night is sold, so there are no accommodation charges
   const isDayout = !!b.checkin && b.checkin === b.checkout;
@@ -592,6 +595,15 @@ export default function ConfirmationPage() {
               </td>
               <td style={TD_YELLOW}>{fmt(b.advance)}</td>
             </tr>
+            {tdsTotal > 0 && (
+              <tr>
+                <td style={TD} colSpan={11}>
+                  <strong>TDS Deducted</strong>
+                  <span style={{ color: "#6b6557" }}> — withheld by the payer and remitted to the government, adjusted against the bill</span>
+                </td>
+                <td style={TD_YELLOW}>{fmt(tdsTotal)}</td>
+              </tr>
+            )}
             <tr>
               <td style={TD} colSpan={11}>
                 <strong>{b.balance <= -1 ? "Excess Received" : "Balance Amount"}</strong>
