@@ -7,6 +7,7 @@ import { useApp } from "@/lib/store";
 import { amountDue, bookingChargesBreakdown, bookingMealCharges, cashReceived, creditNoteRedemptions, excessReceived, fmt, fmtIN, dayName, getBookingPricingRows, isDepositAppliedPayment, isGroupBooking, nightsBetween, nowTime, petPackageOn, pricingSheetLines, pruneNightOverrides, signedBalance, tdsOfPayments, todayStr, tryAssignRooms } from "@/lib/utils";
 import { StatusBadge } from "@/components/StatusBadge";
 import { AddOnChargesPanel } from "@/components/AddOnChargesPanel";
+import { PctAmtToggle, type CancelBy } from "@/components/PctAmtToggle";
 import { SecurityDepositPanel } from "@/components/SecurityDepositPanel";
 import { REFUND_TYPE } from "@/types";
 import type { CancellationDetails, CancellationPolicy, ChargeHead, SpecialDay, WaiveOffLine } from "@/types";
@@ -145,9 +146,12 @@ export default function BookingDetailPage() {
   const canManageAddOns = currentRole !== "Finance";
   const b = bookings.find((x) => x.id === id);
   const [showCancelModal, setShowCancelModal] = useState(false);
-  // Editable per-booking overrides, seeded from the policy when the modal opens
+  // Editable per-booking overrides, seeded from the policy when the modal
+  // opens. Each holds a percentage or a rupee amount, as its "by" says.
   const [cancelRefundPct, setCancelRefundPct] = useState("0");
   const [cancelCnPct, setCancelCnPct] = useState("0");
+  const [cancelRefundBy, setCancelRefundBy] = useState<CancelBy>("pct");
+  const [cancelCnBy, setCancelCnBy] = useState<CancelBy>("pct");
   const [today] = useState(() => todayStr());
 
   // Record Refund modal (cancelled bookings with a cash refund due)
@@ -366,12 +370,28 @@ export default function BookingDetailPage() {
     return m;
   })();
 
-  const refundPctNum = Math.max(0, Math.min(100, parseFloat(cancelRefundPct) || 0));
-  const cnPctNum = Math.max(0, Math.min(100, parseFloat(cancelCnPct) || 0));
-  const cancelRefundAmt = cancelCalc ? Math.round(cancelCalc.paid * refundPctNum / 100) : 0;
-  const cancelCnAmt = cancelCalc ? Math.round(cancelCalc.paid * cnPctNum / 100) : 0;
-  const cancelPctOver = refundPctNum + cnPctNum > 100;
-  const cancelRetained = cancelCalc ? Math.max(0, cancelCalc.paid - cancelRefundAmt - cancelCnAmt) : 0;
+  const cancelPaid = cancelCalc?.paid ?? 0;
+  const cancelFigure = (input: string, by: CancelBy) => {
+    const n = Math.max(0, parseFloat(input) || 0);
+    return by === "amt" ? Math.round(n) : Math.round(cancelPaid * Math.min(100, n) / 100);
+  };
+  const cancelRefundAmt = cancelFigure(cancelRefundPct, cancelRefundBy);
+  const cancelCnAmt = cancelFigure(cancelCnPct, cancelCnBy);
+  // Together they cannot give back more than came in
+  const cancelPctOver = cancelRefundAmt + cancelCnAmt > cancelPaid;
+  const cancelRetained = Math.max(0, cancelPaid - cancelRefundAmt - cancelCnAmt);
+  // The share of the paid amount each figure works out to, kept on the
+  // booking whichever way it was entered
+  const cancelPctOf = (amt: number) => (cancelPaid > 0 ? Math.round((amt / cancelPaid) * 10000) / 100 : 0);
+  // Switching between % and amount keeps the figure, re-expressed
+  const switchRefundBy = (by: CancelBy) => {
+    if (by !== cancelRefundBy) setCancelRefundPct(String(by === "amt" ? cancelRefundAmt : cancelPctOf(cancelRefundAmt)));
+    setCancelRefundBy(by);
+  };
+  const switchCnBy = (by: CancelBy) => {
+    if (by !== cancelCnBy) setCancelCnPct(String(by === "amt" ? cancelCnAmt : cancelPctOf(cancelCnAmt)));
+    setCancelCnBy(by);
+  };
   const cancelCnCode = cancelCnAmt > 0
     ? `${creditNoteSettings.prefix}-${String(creditNoteSettings.nextNumber).padStart(4, "0")}`
     : undefined;
@@ -379,7 +399,7 @@ export default function BookingDetailPage() {
   const onConfirmCancel = () => {
     if (!cancelCalc) return;
     if (cancelPctOver) {
-      showNotif("Refund % + Credit Note % cannot exceed 100%", "error");
+      showNotif(`Refund and credit note together cannot exceed ${fmt(cancelPaid)}`, "error");
       return;
     }
     const details: CancellationDetails = {
@@ -389,8 +409,8 @@ export default function BookingDetailPage() {
       cancellationCharge: cancelRetained,
       refundAmount: cancelRefundAmt,
       creditNoteAmount: cancelCnAmt,
-      refundPct: parseFloat(cancelRefundPct) || 0,
-      creditNotePct: parseFloat(cancelCnPct) || 0,
+      refundPct: cancelPctOf(cancelRefundAmt),
+      creditNotePct: cancelPctOf(cancelCnAmt),
       resolution: cancelRefundAmt > 0 ? "refund" : cancelCnAmt > 0 ? "credit-note" : "refund",
       creditNoteCode: cancelCnCode,
       processedBy: currentUser,
@@ -732,19 +752,19 @@ export default function BookingDetailPage() {
               )}
             </div>
 
-            {/* Refund / Credit Note — % editable for this booking */}
+            {/* Refund / Credit Note, as a % of the paid amount or a rupee figure, for this booking only */}
             <div style={{ border: "1px solid var(--bd)", borderRadius: "var(--r2)", overflow: "hidden", marginBottom: 8 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderBottom: "1px solid var(--bd)", background: "var(--grn-lt)" }}>
                 <span style={{ fontSize: 12, fontWeight: 600, color: "var(--t2)", width: 88 }}>Refund</span>
                 <input
                   type="number"
                   min={0}
-                  max={100}
+                  max={cancelRefundBy === "amt" ? undefined : 100}
                   value={cancelRefundPct}
                   onChange={(e) => setCancelRefundPct(e.target.value)}
-                  style={CANCEL_PCT_INPUT}
+                  style={{ ...CANCEL_PCT_INPUT, width: cancelRefundBy === "amt" ? 104 : 64 }}
                 />
-                <span style={{ fontSize: 12, color: "var(--t3)" }}>%</span>
+                <PctAmtToggle value={cancelRefundBy} onChange={switchRefundBy} />
                 <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 700, color: "var(--grn)" }}>{fmt(cancelRefundAmt)}</span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", background: "var(--acc-lt)" }}>
@@ -752,12 +772,12 @@ export default function BookingDetailPage() {
                 <input
                   type="number"
                   min={0}
-                  max={100}
+                  max={cancelCnBy === "amt" ? undefined : 100}
                   value={cancelCnPct}
                   onChange={(e) => setCancelCnPct(e.target.value)}
-                  style={CANCEL_PCT_INPUT}
+                  style={{ ...CANCEL_PCT_INPUT, width: cancelCnBy === "amt" ? 104 : 64 }}
                 />
-                <span style={{ fontSize: 12, color: "var(--t3)" }}>%</span>
+                <PctAmtToggle value={cancelCnBy} onChange={switchCnBy} />
                 {cancelCnCode && (
                   <span style={{ fontSize: 11, fontWeight: 700, color: "var(--acc)", background: "var(--surf)", border: "1px solid var(--bd)", borderRadius: "var(--r1)", padding: "2px 6px" }}>
                     {cancelCnCode}
@@ -769,11 +789,11 @@ export default function BookingDetailPage() {
 
             {cancelPctOver ? (
               <p style={{ fontSize: 11, color: "var(--red)", fontWeight: 600, marginBottom: 14 }}>
-                Refund % + Credit Note % cannot exceed 100%.
+                Refund and credit note together cannot exceed the {fmt(cancelPaid)} paid.
               </p>
             ) : (
               <p style={{ fontSize: 11, color: "var(--t3)", marginBottom: 14 }}>
-                Prefilled from policy: {cancelCalc.policyLabel}. Edit the % above to override for this booking only.
+                Prefilled from policy: {cancelCalc.policyLabel}. Change the % above, or switch to a rupee amount, to override for this booking only.
                 {cancelRetained > 0 && (
                   <> Retained as cancellation charge: <strong style={{ color: "var(--t1)" }}>{fmt(cancelRetained)}</strong>.</>
                 )}
@@ -906,6 +926,8 @@ export default function BookingDetailPage() {
                     setCancelRefundPct(String(cancelCalc.refundPct ?? 0));
                     setCancelCnPct(String(cancelCalc.creditNotePct ?? 0));
                   }
+                  setCancelRefundBy("pct");
+                  setCancelCnBy("pct");
                   setShowCancelModal(true);
                 }}
               >

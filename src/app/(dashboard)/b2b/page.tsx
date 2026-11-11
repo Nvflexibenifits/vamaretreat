@@ -9,17 +9,19 @@ import type { B2BStatus, B2BType } from "@/types";
 const TYPE_FILTERS: ("All" | B2BType)[] = ["All", "Corporate", "School", "Institute"];
 // "Open" is the working list: tentative and confirmed bookings whose
 // check-in is today or later, the same rule as the B2C list. Lost and
-// Completed have their own reports under B2B, so even "All" leaves them out.
+// Completed have their own reports under B2B, so even "All" leaves them out;
+// Cancelled bookings sit behind their own chip.
 type ListFilter = "Open" | "All" | B2BStatus;
-const STATUS_FILTERS: ListFilter[] = ["Open", "Enquiry", "Tentative", "Confirmed", "All"];
+const STATUS_FILTERS: ListFilter[] = ["Open", "Enquiry", "Tentative", "Confirmed", "Cancelled", "All"];
 const FILTER_HINT: Record<ListFilter, string> = {
   Open: "Tentative and confirmed bookings checking in from today onwards",
-  All: "Every booking on any date, except Lost and Completed",
+  All: "Every booking on any date, except Lost, Completed and Cancelled",
   Enquiry: "Enquiries on any date, except ones whose check-in has passed",
   Tentative: "Tentative bookings on any date, except ones whose check-in has passed",
   Confirmed: "Confirmed bookings on any date, except ones whose dates have passed",
   Completed: "",
   Lost: "",
+  Cancelled: "Confirmed bookings that were called off, with the refund or credit note given",
 };
 
 export default function B2BBookingsPage() {
@@ -47,6 +49,7 @@ export default function B2BBookingsPage() {
       .filter((b) => typeFilter === "All" || b.type === typeFilter)
       .filter((b) => {
         if (b.statusNow === "Lost" || b.statusNow === "Completed") return false;
+        if (b.statusNow === "Cancelled") return statusFilter === "Cancelled";
         if (statusFilter === "Open") return b.checkin >= today && (b.statusNow === "Tentative" || b.statusNow === "Confirmed");
         return statusFilter === "All" || b.statusNow === statusFilter;
       })

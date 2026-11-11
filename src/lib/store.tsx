@@ -96,6 +96,7 @@ type AppContextValue = {
   b2bBookings: B2BBooking[];
   createB2BBooking: (b: B2BBooking) => void;
   updateB2BBooking: (id: string, patch: Partial<B2BBooking>) => void;
+  cancelB2BBooking: (booking: B2BBooking, details: CancellationDetails) => void;
   removeB2BBooking: (id: string) => void;
   markLost: (bookingId: string, reason: string, notes: string) => void;
   recordPayment: (
@@ -931,6 +932,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
     sync(`/api/app/b2b-bookings/${id}`, "DELETE", {});
   }, []);
 
+  // A confirmed B2B booking called off. The page has already released the
+  // chart holds; the booking keeps what it retained, owes nothing more, and
+  // any credit note goes to the organisation under the same series as B2C.
+  const cancelB2BBooking = useCallback((booking: B2BBooking, details: CancellationDetails) => {
+    const patch: Partial<B2BBooking> = {
+      status: "Cancelled", cancellationDetails: details, balance: 0, roomBlockId: null, venueBlockIds: [],
+    };
+    setB2BBookings((prev) => prev.map((b) => (b.id === booking.id ? { ...b, ...patch } : b)));
+    sync(`/api/app/b2b-bookings/${booking.id}`, "PATCH", patch);
+    if (details.creditNoteAmount > 0 && details.creditNoteCode) {
+      const cn: CreditNote = {
+        code: details.creditNoteCode,
+        guestName: booking.orgName,
+        guestMobile: booking.contactNumber,
+        originalBookingId: booking.id,
+        cancellationDate: details.cancellationDate,
+        totalAmount: details.creditNoteAmount,
+        usedAmount: 0,
+        remainingAmount: details.creditNoteAmount,
+        status: "Available",
+        transactions: [],
+      };
+      setCreditNotes((prev) => [...prev, cn]);
+      sync("/api/app/credit-notes", "POST", cn);
+      setCreditNoteSettings((prev) => {
+        const next = { ...prev, nextNumber: prev.nextNumber + 1 };
+        sync("/api/app/settings", "PUT", { creditNoteSettings: next });
+        return next;
+      });
+    }
+  }, []);
+
   // ─── Master setup setters ───
   const updateRooms = useCallback((next: RoomMaster[]) => {
     setRooms(next);
@@ -1361,6 +1394,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       createBooking,
       updateBooking,
       cancelBooking,
+      cancelB2BBooking,
       issueCreditNote,
       redeemCreditNote,
       recordRefund,
@@ -1466,6 +1500,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       creditNoteSettings,
       creditNotes,
       cancelBooking,
+      cancelB2BBooking,
       issueCreditNote,
       redeemCreditNote,
       recordRefund,

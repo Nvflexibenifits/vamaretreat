@@ -12,7 +12,11 @@ import {
 } from "@/lib/reports";
 
 type Kind = "lost" | "completed";
-type Row = { id: string; segment: string; checkin: string; checkout: string; pax: PaxBreakdown; total: number; href: string };
+type Row = {
+  id: string; segment: string; checkin: string; checkout: string; pax: PaxBreakdown; total: number; href: string;
+  // B2B only: the organisation and who to call, in place of the guest counts
+  org?: string; contact?: string; phone?: string;
+};
 
 const NO_PAX: PaxBreakdown = { adults: 0, seniors: 0, under10: 0, over10: 0, pets: 0 };
 
@@ -32,12 +36,12 @@ const COPY: Record<Line, Record<Kind, { title: string; subtitle: string; empty: 
   b2b: {
     lost: {
       title: "B2B Enquiries Lost",
-      subtitle: "Enquiries and tentative bookings that were lost, including any whose check-in passed without confirmation. Date range applies to check-in.",
+      subtitle: "Enquiries and tentative bookings that were lost, including any whose check-in passed without confirmation, with the company and who to call. Date range applies to check-in.",
       empty: "No lost enquiries in this range",
     },
     completed: {
       title: "B2B Bookings Completed",
-      subtitle: "Confirmed bookings whose dates have passed. Date range applies to check-in.",
+      subtitle: "Confirmed bookings whose dates have passed, with the company and who to call. Date range applies to check-in.",
       empty: "No completed bookings in this range",
     },
   },
@@ -57,7 +61,9 @@ const COPY: Record<Line, Record<Kind, { title: string; subtitle: string; empty: 
 
 // Marketing's view of what did not convert and what did: which segment, when,
 // and how many adults, seniors, kids and pets. No money, no guest details;
-// the View link opens the booking when someone needs more.
+// the View link opens the booking when someone needs more. The B2B lists
+// carry the company and contact instead, since that is what a follow-up
+// call needs and the export has no View link.
 export function PaxReport({ line, kind }: { line: Line; kind: Kind }) {
   const { bookings, b2bBookings } = useApp();
   const [today] = useState(() => todayStr());
@@ -85,7 +91,10 @@ export function PaxReport({ line, kind }: { line: Line; kind: Kind }) {
         if (b2bStatusNow(b, today) !== want) return;
         const seg = b2bSegment(b);
         if (!matchesSegment(filter, seg) || !inRange(filter, b.checkin)) return;
-        out.push({ id: b.id, segment: b.type, checkin: b.checkin, checkout: b.checkout, pax: NO_PAX, total: b.pax || 0, href: `/b2b/${b.id}` });
+        out.push({
+          id: b.id, segment: b.type, checkin: b.checkin, checkout: b.checkout, pax: NO_PAX, total: b.pax || 0,
+          org: b.orgName, contact: b.contactPerson, phone: b.contactNumber, href: `/b2b/${b.id}`,
+        });
       });
     }
     // Latest check-in first: the recent past is what a campaign targets
@@ -100,7 +109,8 @@ export function PaxReport({ line, kind }: { line: Line; kind: Kind }) {
     { ...NO_PAX, total: 0 }
   );
 
-  // Group rows carry the same guest breakdown as B2C; only B2B has one pax number
+  // Group rows carry the same guest breakdown as B2C; B2B lists the company
+  // and contact instead of counts
   const paxCols = line !== "b2b";
   const exportCsv = () =>
     paxCols
@@ -114,12 +124,12 @@ export function PaxReport({ line, kind }: { line: Line; kind: Kind }) {
         )
       : downloadCsv(
           csvName(`b2b_${kind}`, filter),
-          ["Booking ID", "Segment", "Check-in", "Check-out", "Pax"],
-          [...rows.map((r) => [r.id, r.segment, fmtIN(r.checkin), fmtIN(r.checkout), r.total]), ["Total", "", "", "", totals.total]]
+          ["Booking ID", "Segment", "Company", "Contact name", "Contact number", "Check-in"],
+          rows.map((r) => [r.id, r.segment, r.org ?? "", r.contact ?? "", r.phone ?? "", fmtIN(r.checkin)])
         );
 
   const num: React.CSSProperties = { textAlign: "right", whiteSpace: "nowrap" };
-  const cols = paxCols ? 10 : 6;
+  const cols = paxCols ? 10 : 7;
   const word = kind === "lost" ? "lost" : "completed";
   return (
     <ReportShell
@@ -135,10 +145,7 @@ export function PaxReport({ line, kind }: { line: Line; kind: Kind }) {
             <span>Pets <b>{totals.pets}</b></span>
           </>
         ) : (
-          <>
-            <span><b>{rows.length}</b> {word}</span>
-            <span>Pax <b>{totals.total}</b></span>
-          </>
+          <span><b>{rows.length}</b> {word}</span>
         )
       }
       filters={
@@ -153,12 +160,12 @@ export function PaxReport({ line, kind }: { line: Line; kind: Kind }) {
         />
       }
     >
-      <table style={{ minWidth: paxCols ? 900 : 620 }}>
+      <table style={{ minWidth: paxCols ? 900 : 760 }}>
         <thead>
           <tr>
-            <th>Booking ID</th><th>Segment</th><th>Check-in</th><th>Check-out</th>
             {paxCols ? (
               <>
+                <th>Booking ID</th><th>Segment</th><th>Check-in</th><th>Check-out</th>
                 <th style={num}>Adults</th>
                 <th style={num}>Senior citizens</th>
                 <th style={num} title="Kids 6 to 10, 2 to 6, and infants under 2">Kids under 10</th>
@@ -166,7 +173,9 @@ export function PaxReport({ line, kind }: { line: Line; kind: Kind }) {
                 <th style={num}>Pets</th>
               </>
             ) : (
-              <th style={num}>Pax</th>
+              <>
+                <th>Booking ID</th><th>Segment</th><th>Company</th><th>Contact name</th><th>Contact number</th><th>Check-in</th>
+              </>
             )}
             <th></th>
           </tr>
@@ -178,10 +187,10 @@ export function PaxReport({ line, kind }: { line: Line; kind: Kind }) {
                 <tr key={r.id}>
                   <td style={{ fontSize: 11, fontWeight: 700, color: "var(--t3)", whiteSpace: "nowrap" }}>{r.id}</td>
                   <td style={{ fontSize: 11, whiteSpace: "nowrap" }}>{r.segment}</td>
-                  <td style={{ whiteSpace: "nowrap" }}>{fmtIN(r.checkin)}</td>
-                  <td style={{ whiteSpace: "nowrap" }}>{r.checkout === r.checkin ? "Dayout" : fmtIN(r.checkout)}</td>
                   {paxCols ? (
                     <>
+                      <td style={{ whiteSpace: "nowrap" }}>{fmtIN(r.checkin)}</td>
+                      <td style={{ whiteSpace: "nowrap" }}>{r.checkout === r.checkin ? "Dayout" : fmtIN(r.checkout)}</td>
                       <td style={num}>{r.pax.adults}</td>
                       <td style={num}>{r.pax.seniors || "—"}</td>
                       <td style={num}>{r.pax.under10 || "—"}</td>
@@ -189,26 +198,27 @@ export function PaxReport({ line, kind }: { line: Line; kind: Kind }) {
                       <td style={num}>{r.pax.pets || "—"}</td>
                     </>
                   ) : (
-                    <td style={num}>{r.total || "—"}</td>
+                    <>
+                      <td style={{ fontWeight: 500 }}>{r.org || "—"}</td>
+                      <td>{r.contact || "—"}</td>
+                      <td style={{ whiteSpace: "nowrap" }}>{r.phone || "—"}</td>
+                      <td style={{ whiteSpace: "nowrap" }}>{fmtIN(r.checkin)}{r.checkout === r.checkin ? " · Dayout" : ""}</td>
+                    </>
                   )}
                   <td><Link href={r.href} className="btn btn-ghost btn-xs">View</Link></td>
                 </tr>
               ))}
-              <tr style={{ background: "var(--surf2)", fontWeight: 700 }}>
-                <td colSpan={4} style={{ textAlign: "right", fontSize: 12, color: "var(--t2)" }}>Total</td>
-                {paxCols ? (
-                  <>
-                    <td style={num}>{totals.adults}</td>
-                    <td style={num}>{totals.seniors}</td>
-                    <td style={num}>{totals.under10}</td>
-                    <td style={num}>{totals.over10}</td>
-                    <td style={num}>{totals.pets}</td>
-                  </>
-                ) : (
-                  <td style={num}>{totals.total}</td>
-                )}
-                <td></td>
-              </tr>
+              {paxCols && (
+                <tr style={{ background: "var(--surf2)", fontWeight: 700 }}>
+                  <td colSpan={4} style={{ textAlign: "right", fontSize: 12, color: "var(--t2)" }}>Total</td>
+                  <td style={num}>{totals.adults}</td>
+                  <td style={num}>{totals.seniors}</td>
+                  <td style={num}>{totals.under10}</td>
+                  <td style={num}>{totals.over10}</td>
+                  <td style={num}>{totals.pets}</td>
+                  <td></td>
+                </tr>
+              )}
             </>
           )}
         </tbody>

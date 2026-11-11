@@ -16,7 +16,8 @@ type Receipt = {
 };
 
 // Every receipt recorded on any booking, by payment date, with the mode it
-// came in by so the bank and cash can be reconciled. Refunds show as
+// came in by and a total per mode, so the bank statement and the cash drawer
+// can each be matched to the report. Refunds show as
 // negative rows and TDS beside the amount. Security deposits on group
 // bookings are listed too: the money came in (or went back) through the
 // bank, even though it is never sales. A deposit applied to the bill carries
@@ -77,6 +78,17 @@ export default function PaymentsReceivedReport() {
   // it stays out of the received total.
   const total = rows.filter((r) => r.mode !== DEPOSIT_MODE).reduce((s, r) => s + r.amount, 0);
   const tdsTotal = rows.reduce((s, r) => s + r.tds, 0);
+  // What came in by each mode, with the same exclusion as the total
+  const byMode = useMemo(() => {
+    const m = new Map<string, { amount: number; count: number }>();
+    rows.forEach((r) => {
+      if (r.mode === DEPOSIT_MODE) return;
+      const cur = m.get(r.mode) ?? { amount: 0, count: 0 };
+      m.set(r.mode, { amount: cur.amount + r.amount, count: cur.count + 1 });
+    });
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [rows]);
+  const signed = (v: number) => (v < 0 ? `−${fmt(-v)}` : fmt(v));
   const rangeLabel =
     filter.from && filter.to && filter.from === filter.to
       ? (filter.from === today ? "today" : fmtIN(filter.from))
@@ -90,6 +102,7 @@ export default function PaymentsReceivedReport() {
       ["Date", "Booking ID", "Guest / Organisation", "Segment", "Note", "Mode", "Amount", "TDS"],
       [
         ...rows.map((r) => [fmtIN(r.date), r.id, r.name, r.seg.label, r.note, r.mode, Math.round(r.amount), Math.round(r.tds)]),
+        ...byMode.map(([m, v]) => ["Total by mode", "", "", "", "", m, Math.round(v.amount), ""]),
         ["Total", "", "", "", "", "", Math.round(total), Math.round(tdsTotal)],
       ]
     );
@@ -99,12 +112,15 @@ export default function PaymentsReceivedReport() {
   return (
     <ReportShell
       title="Payments Received"
-      subtitle="Every receipt by payment date, with the mode it came in by. Refunds show as negative amounts. TDS is settlement, not cash."
+      subtitle="Every receipt by payment date, with the mode it came in by and the total per mode. Refunds show as negative amounts. TDS is settlement, not cash."
       group="finance"
       summary={<><span><b>{rows.length}</b> receipts</span></>}
       cards={
         <SummaryCards>
           <SummaryCard label={`Received (${rangeLabel})`} value={fmt(total)} color="var(--grn)" note={mode ? `${mode} only` : "All modes"} />
+          {!mode && byMode.map(([m, v]) => (
+            <SummaryCard key={m} label={m} value={signed(v.amount)} color="var(--t1)" note={`${v.count} receipt${v.count === 1 ? "" : "s"}`} />
+          ))}
           {tdsTotal > 0 && <SummaryCard label={`TDS (${rangeLabel})`} value={fmt(tdsTotal)} color="var(--t2)" note="Withheld by the payer, settles the bill" />}
         </SummaryCards>
       }
@@ -150,9 +166,17 @@ export default function PaymentsReceivedReport() {
                   </td>
                   <td style={{ fontSize: 11, whiteSpace: "nowrap" }}>{r.seg.label}</td>
                   <td style={{ fontSize: 11, whiteSpace: "nowrap" }}>{r.mode}</td>
-                  <td style={{ ...num, fontWeight: 600, color: r.amount < 0 ? "var(--pur)" : "var(--t1)" }}>{r.amount < 0 ? `−${fmt(-r.amount)}` : fmt(r.amount)}</td>
+                  <td style={{ ...num, fontWeight: 600, color: r.amount < 0 ? "var(--pur)" : "var(--t1)" }}>{signed(r.amount)}</td>
                   <td style={{ ...num, color: "var(--t3)" }}>{r.tds > 0 ? fmt(r.tds) : "—"}</td>
                   <td><Link href={r.href} className="btn btn-ghost btn-xs">View</Link></td>
+                </tr>
+              ))}
+              {byMode.map(([m, v]) => (
+                <tr key={m} style={{ background: "var(--surf2)" }}>
+                  <td colSpan={4} style={{ textAlign: "right", fontSize: 12, color: "var(--t2)" }}>Total by mode</td>
+                  <td style={{ fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}>{m}</td>
+                  <td style={{ ...num, fontWeight: 700 }}>{signed(v.amount)}</td>
+                  <td colSpan={2}></td>
                 </tr>
               ))}
               <tr style={{ background: "var(--surf2)", fontWeight: 800 }}>

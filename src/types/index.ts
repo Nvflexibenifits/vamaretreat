@@ -538,7 +538,9 @@ export type B2BBookingType = "Dayout" | "Overnight";
 // Lost and Completed are also read as-of-today from the dates (see
 // b2bStatusNow in utils): a lapsed enquiry is lost, a confirmed booking whose
 // dates have passed is completed. A stored Lost comes from Mark Lost.
-export type B2BStatus = "Enquiry" | "Tentative" | "Confirmed" | "Completed" | "Lost";
+// Cancelled is a confirmed booking called off, with its refund or credit
+// note; Lost is an enquiry that never got that far.
+export type B2BStatus = "Enquiry" | "Tentative" | "Confirmed" | "Completed" | "Lost" | "Cancelled";
 
 export type B2BBooking = {
   id: string;
@@ -569,6 +571,9 @@ export type B2BBooking = {
 
   status: B2BStatus;
   lostReason?: string;
+  // Set when status is Cancelled: what was refunded, kept, or issued as a
+  // credit note to the organisation. Same shape as a B2C cancellation.
+  cancellationDetails?: CancellationDetails;
 
   // Rooms and venues asked for on the form. Held on the room chart as a bulk
   // room block and venue blocks while the booking is Tentative or Confirmed;

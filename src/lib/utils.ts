@@ -80,7 +80,7 @@ export function b2bStatusNow(
   b: Pick<B2BBooking, "status" | "checkin" | "checkout">,
   today: string
 ): B2BStatus {
-  if (b.status === "Lost" || b.status === "Completed") return b.status;
+  if (b.status === "Lost" || b.status === "Completed" || b.status === "Cancelled") return b.status;
   if ((b.status === "Enquiry" || b.status === "Tentative") && b.checkin < today) return "Lost";
   if (b.status === "Confirmed" && b.checkout < today) return "Completed";
   return b.status;

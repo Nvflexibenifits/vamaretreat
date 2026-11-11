@@ -12,8 +12,11 @@ function statusStyle(status: CreditNote["status"]): React.CSSProperties {
   return { background: "var(--bd)", color: "var(--t2)" };
 }
 
+// A note issued on a B2B cancellation opens the B2B booking
+const bookingHref = (id: string) => (id.startsWith("B2B-") ? `/b2b/${id}` : `/bookings/${id}`);
+
 export default function CreditNotesPage() {
-  const { creditNotes, bookings, currentRole } = useApp();
+  const { creditNotes, bookings, b2bBookings, currentRole } = useApp();
   // Notes issued by a cancellation here, or loaded from the pre-system
   // register. Same store, same redemption; only the origin differs.
   const [tab, setTab] = useState<"system" | "older">("system");
@@ -28,13 +31,14 @@ export default function CreditNotesPage() {
       .filter((n) => !q || n.code.toLowerCase().includes(q) || n.guestName.toLowerCase().includes(q) || n.guestMobile.includes(q))
       .sort((a, b) => (tab === "older" ? a.code.localeCompare(b.code, undefined, { numeric: true }) : b.cancellationDate.localeCompare(a.cancellationDate)))
       .map((n) => {
-        // Advance actually received on the cancelled source booking
-        const b = bookings.find((x) => x.id === n.originalBookingId);
+        // Advance actually received on the cancelled source booking, which
+        // may be a B2B booking (notes issued to an organisation)
+        const b = bookings.find((x) => x.id === n.originalBookingId) ?? b2bBookings.find((x) => x.id === n.originalBookingId);
         let advance = (b?.payments ?? []).reduce((s, p) => s + p.amount, 0);
         if (advance === 0 && (b?.advance ?? 0) > 0) advance = b!.advance;
         return { n, advance };
       });
-  }, [creditNotes, bookings, tab, search]);
+  }, [creditNotes, bookings, b2bBookings, tab, search]);
 
   const totals = useMemo(
     () =>
@@ -149,7 +153,7 @@ export default function CreditNotesPage() {
                     ) : (
                       <td style={{ whiteSpace: "nowrap" }}>
                         <Link
-                          href={`/bookings/${n.originalBookingId}`}
+                          href={bookingHref(n.originalBookingId)}
                           style={{ fontSize: 11, fontFamily: "var(--font-outfit), Outfit, sans-serif", color: "var(--acc)", fontWeight: 700, textDecoration: "none" }}
                         >
                           {n.originalBookingId}
@@ -184,7 +188,7 @@ export default function CreditNotesPage() {
                       {n.imported ? (
                         <span style={{ fontSize: 10, color: "var(--t3)" }}>Imported</span>
                       ) : (
-                        <Link href={`/bookings/${n.originalBookingId}`} className="btn btn-ghost btn-xs">
+                        <Link href={bookingHref(n.originalBookingId)} className="btn btn-ghost btn-xs">
                           View
                         </Link>
                       )}

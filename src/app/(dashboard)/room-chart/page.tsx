@@ -1113,6 +1113,9 @@ export default function RoomChartPage() {
           <button className="btn btn-danger btn-sm" onClick={() => openUnifiedCreate("maintenance")}>
             Maintenance Block
           </button>
+          <button className="btn btn-primary btn-sm" onClick={() => openUnifiedCreate("book")}>
+            Booking
+          </button>
         </div>
       </div>
 
@@ -2733,8 +2736,8 @@ function HoverRow({
 // What the front office can do with a booking from the chart: see who is
 // in which villa, check the guest in, and add charges to the bill. Only
 // charges added here can be changed here; the rest of the booking stays as
-// sales saved it. Money is never recorded here: a charge goes on the bill
-// and the receipt is taken on the booking page.
+// sales saved it. A charge posted here is paid on the spot, so its receipt
+// is recorded with it, by the mode the guest paid.
 function FrontOfficeBookingModal({
   booking: b,
   today,
@@ -2809,7 +2812,7 @@ function FrontOfficeBookingModal({
 
         {/* Add-on charges, posted to the bill; no paid or unpaid choice here */}
         <div style={{ marginTop: 14 }}>
-          <AddOnChargesPanel booking={b} today={today} payment={false} />
+          <AddOnChargesPanel booking={b} today={today} />
         </div>
 
         <div className="modal-actions" style={{ marginTop: 16 }}>

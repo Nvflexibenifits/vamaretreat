@@ -151,28 +151,43 @@ function revenueRows(b: Booking): RevenueRow[] {
   ];
 }
 
-// One Revenue Register row for a confirmed B2B booking. Pure, like revenueRow.
+// One Revenue Register row for a confirmed or cancelled B2B booking. Pure,
+// like revenueRow, and cancelled the same way: a refund cancellation keeps
+// only what was retained, a credit-note cancellation keeps the full bill.
+// Refunds handed back are negative payment rows, so bank and cash are net.
 function b2bRevenueRow(b: B2BBooking): RevenueRow {
   const { roomNet, mealNet, other, otherByItem, gst5, gst18, gstOther } =
     b2bChargesBreakdown(b);
-  let bank = 0, cash = 0, tds = 0;
+  const isCancelled = b.status === "Cancelled";
+  const cd = b.cancellationDetails;
+  const isRefundCancel = isCancelled && cd?.resolution === "refund";
+  let bank = 0, cash = 0, tds = 0, creditNoteUsed = 0;
   (b.payments ?? []).forEach((p) => {
     const m = (p.mode || "").toLowerCase();
     tds += p.tds ?? 0;
     if (m.trim() === "tds") tds += p.amount;
+    else if (m.includes("credit note")) creditNoteUsed += p.amount;
     else if (m.includes("cash")) cash += p.amount;
     else bank += p.amount;
   });
   const received = bank + cash;
-  const total = b.grandTotal;
+  const retained = isCancelled ? (cd?.cancellationCharge ?? 0) + (cd?.creditNoteAmount ?? 0) : 0;
+  // Net of a redeemed credit note: that value was earned on the booking
+  // that issued the note.
+  const total = isRefundCancel ? retained : b.grandTotal - creditNoteUsed;
+  // TDS settles the bill like a payment; only the cash is less. On a refund
+  // cancellation a negative balance is the refund still to hand back.
+  let bal: number;
+  if (!isCancelled) bal = Math.round(total - received - tds);
+  else if (isRefundCancel) bal = Math.min(0, Math.round(retained - received));
+  else bal = Math.max(0, Math.round(total - received - tds));
   return {
     key: b.id,
     id: b.id, guest: b.orgName, mobile: b.contactNumber, checkin: b.checkin,
     checkout: b.checkout, statusLabel: b.status, source: `B2B · ${b.type}`, href: `/b2b/${b.id}`,
-    roomNet, mealNet, creditNoteUsed: 0, other, otherByItem, gst5, gst18, gstOther,
-    total, dedCommission: 0, dedSpecial: 0, bank, cash, tds, crNote: 0, deposit: 0,
-    // TDS settles the bill like a payment; only the cash is less.
-    bal: Math.round(total - received - tds), isCancelled: false, waivePending: false,
+    roomNet, mealNet, creditNoteUsed, other, otherByItem, gst5, gst18, gstOther,
+    total, dedCommission: 0, dedSpecial: 0, bank, cash, tds, crNote: creditNoteUsed, deposit: 0,
+    bal, isCancelled, waivePending: isCancelled && !isRefundCancel && bal >= 1,
   };
 }
 
@@ -334,7 +349,7 @@ export default function RevenuePage() {
   // not earned yet, so they stay out — matching countsAsRevenue for B2C.
   const b2bRows = useMemo(() => {
     return b2bBookings
-      .filter((b) => b.status === "Confirmed")
+      .filter((b) => b.status === "Confirmed" || b.status === "Cancelled")
       .filter((b) => {
         if (search.trim()) {
           const q = search.toLowerCase();
@@ -449,7 +464,7 @@ export default function RevenuePage() {
   const refundsDue = useMemo(() => {
     const negative = (bal: number) => (bal < 0 ? -bal : 0);
     const b2c = bookings.filter(countsAsRevenue).reduce((sum, b) => sum + revenueRows(b).reduce((s2, r) => s2 + negative(r.bal), 0), 0);
-    const b2b = b2bBookings.filter((b) => b.status === "Confirmed").reduce((sum, b) => sum + negative(b2bRevenueRow(b).bal), 0);
+    const b2b = b2bBookings.filter((b) => b.status === "Confirmed" || b.status === "Cancelled").reduce((sum, b) => sum + negative(b2bRevenueRow(b).bal), 0);
     return b2c + b2b;
   }, [bookings, b2bBookings]);
 

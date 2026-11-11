@@ -16,20 +16,19 @@ const PAID_MODES = ["Cash", "Bank Transfer", "Credit Card"];
 // corrected or removed on a cancelled booking, since a double posting may
 // only surface after the guest has left with a credit note.
 //
-// With `payment` off the panel only posts charges to the bill: no paid or
-// unpaid choice, no receipt. The room chart uses this, since the front office
-// is not the one recording money; a receipt already linked to a row is left
-// exactly as it is when the row is edited there.
+// A charge posted here is paid on the spot: the guest settles an add-on when
+// it is taken, so every row carries a receipt and the mode the money came in
+// by (cash, card or bank) must be chosen. There is no paid or unpaid choice.
+// Saving a row that has no receipt yet, say one posted before this rule,
+// records its receipt then.
 export function AddOnChargesPanel({
   booking: b,
   today,
   heading = true,
-  payment = true,
 }: {
   booking: Booking;
   today: string;
   heading?: boolean;
-  payment?: boolean;
 }) {
   const { currentRole, currentUser, addOnCategories, addExtra, updateExtra, removeExtra, showNotif } = useApp();
 
@@ -42,8 +41,8 @@ export function AddOnChargesPanel({
   const [amount, setAmount] = useState("");
   const [gstPct, setGstPct] = useState("18");
   const [date, setDate] = useState(today);
-  const [paid, setPaid] = useState(false);
-  const [payMode, setPayMode] = useState("Cash");
+  // No default: the mode is a deliberate choice, never a fallback
+  const [payMode, setPayMode] = useState("");
   // Row whose removal is being confirmed, and whether its receipt goes too
   const [removing, setRemoving] = useState<string | null>(null);
   const [removeReceipt, setRemoveReceipt] = useState(true);
@@ -54,8 +53,7 @@ export function AddOnChargesPanel({
     setAmount("");
     setGstPct("18");
     setDate(today);
-    setPaid(false);
-    setPayMode("Cash");
+    setPayMode("");
   };
   const startEdit = (e: Extra) => {
     setRemoving(null);
@@ -65,8 +63,7 @@ export function AddOnChargesPanel({
     setGstPct(e.amount > 0 && e.gst ? String(Math.round((e.gst / e.amount) * 10000) / 100) : "0");
     setDate(e.date || today);
     const receipt = b.payments.find((p) => p.extraId === e.id);
-    setPaid(!!receipt);
-    setPayMode(receipt?.mode ?? "Cash");
+    setPayMode(receipt?.mode ?? "");
   };
   const submit = () => {
     const amt = parseFloat(amount) || 0;
@@ -74,21 +71,24 @@ export function AddOnChargesPanel({
       showNotif("Enter the charge amount", "error");
       return;
     }
+    if (!payMode) {
+      showNotif("Select how the payment was received", "error");
+      return;
+    }
     const cat = category.trim() || "Add-on Charge";
     const gst = Math.round(amt * (parseFloat(gstPct) || 0)) / 100;
     const head = addOnCategories.find((c) => c.name === cat)?.head ?? extraHead({ name: cat, amount: amt, date: "", by: "" });
     const on = date || today;
-    const receiptNow = payment && paid;
     if (editingId) {
-      updateExtra(b.id, editingId, { name: cat, amount: amt, gst, head, date: on }, payment ? (receiptNow ? { mode: payMode, date: on } : null) : undefined);
+      updateExtra(b.id, editingId, { name: cat, amount: amt, gst, head, date: on }, { mode: payMode, date: on });
       showNotif("Charge updated", "success");
     } else {
       addExtra(
         b.id,
         { name: cat, amount: amt, gst, head, date: on, by: currentUser, source: "front-office" },
-        receiptNow ? { mode: payMode, date: on } : undefined
+        { mode: payMode, date: on }
       );
-      showNotif(receiptNow ? `${fmt(amt + gst)} charged and received` : `${fmt(amt + gst)} added to the bill`, "success");
+      showNotif(`${fmt(amt + gst)} charged, received by ${payMode}`, "success");
     }
     resetForm();
   };
@@ -124,7 +124,7 @@ export function AddOnChargesPanel({
               <th style={{ textAlign: "right" }}>Charges</th>
               <th style={{ textAlign: "right" }}>GST</th>
               <th style={{ textAlign: "right" }}>Total</th>
-              <th>Paid</th>
+              <th>Received by</th>
               <th>By</th>
               {canEditRows && <th style={{ width: 110 }}></th>}
             </tr>
@@ -133,7 +133,6 @@ export function AddOnChargesPanel({
             {b.extras.map((e, i) => {
               const mine = e.source === "front-office" && !!e.id;
               const receipt = b.payments.find((p) => p.extraId === e.id);
-              const isPaid = receipt ? true : (e.totalPaid ?? 0) >= (e.amount || 0) + (e.gst || 0);
               const gross = (e.amount || 0) + (e.gst || 0);
               const isRemoving = removing != null && removing === e.id;
               return (
@@ -146,9 +145,11 @@ export function AddOnChargesPanel({
                   <td style={{ textAlign: "right" }}>{fmt(e.gst || 0)}</td>
                   <td style={{ textAlign: "right", fontWeight: 700, color: "var(--t1)" }}>{fmt(gross)}</td>
                   <td>
-                    <span className="badge" style={{ fontSize: 10, background: isPaid ? "var(--grn-lt)" : "var(--amb-lt)", color: isPaid ? "var(--grn)" : "var(--amb)" }}>
-                      {isPaid ? `Paid${receipt ? ` · ${receipt.mode}` : ""}` : "Unpaid"}
-                    </span>
+                    {receipt ? (
+                      <span className="badge" style={{ fontSize: 10, background: "var(--grn-lt)", color: "var(--grn)" }}>{receipt.mode}</span>
+                    ) : (
+                      <span style={{ fontSize: 11, color: "var(--t3)" }}>—</span>
+                    )}
                   </td>
                   <td style={{ fontSize: 11, color: "var(--t3)" }}>{e.by}</td>
                   {canEditRows && (
@@ -195,7 +196,7 @@ export function AddOnChargesPanel({
 
       {canAdd || (editingId && canEditRows) ? (
         <>
-          <div style={{ display: "grid", gridTemplateColumns: payment ? "1.4fr 1fr .7fr 1fr 1fr" : "1.4fr 1fr .7fr 1fr", gap: 8, alignItems: "end" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr .7fr 1fr 1fr", gap: 8, alignItems: "end" }}>
             <div className="field">
               <label>Category</label>
               <select value={category} onChange={(e) => setCategory(e.target.value)}>
@@ -215,22 +216,17 @@ export function AddOnChargesPanel({
               <label>Date</label>
               <input type="date" value={date} max={today} onChange={(e) => setDate(e.target.value)} />
             </div>
-            {payment && (
-              <div className="field">
-                <label>Payment</label>
-                <select value={paid ? "paid" : "unpaid"} onChange={(e) => setPaid(e.target.value === "paid")}>
-                  <option value="unpaid">Unpaid · add to bill</option>
-                  <option value="paid">Paid</option>
-                </select>
-              </div>
-            )}
-          </div>
-          {payment && paid && (
-            <div className="field" style={{ marginTop: 8, maxWidth: 220 }}>
+            <div className="field">
               <label>Received by</label>
               <select value={payMode} onChange={(e) => setPayMode(e.target.value)}>
-                {PAID_MODES.map((m) => <option key={m}>{m}</option>)}
+                <option value="">Select mode</option>
+                {PAID_MODES.map((m) => <option key={m} value={m}>{m}</option>)}
               </select>
+            </div>
+          </div>
+          {editingId && !b.payments.some((p) => p.extraId === editingId) && (
+            <div style={{ fontSize: 11, color: "var(--t3)", marginTop: 6 }}>
+              This charge has no receipt yet. Saving records it as paid by the mode chosen.
             </div>
           )}
           <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center" }}>

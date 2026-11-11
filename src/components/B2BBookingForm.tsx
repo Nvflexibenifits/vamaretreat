@@ -56,7 +56,8 @@ type AddOnRow = {
   by?: string;
 };
 
-type PaymentRow = { uid: string; date: string; amount: string; tds: string; mode: string; kind?: "refund" };
+// cnCode is the credit note redeemed when mode is "Credit Note"
+type PaymentRow = { uid: string; date: string; amount: string; tds: string; mode: string; cnCode: string; kind?: "refund" };
 
 // Rooms and venues asked for on the form. Villas are picked on save from
 // what is free for the stay, exactly as the room chart's booking modal did.
@@ -84,6 +85,9 @@ export function B2BBookingForm({
     b2bBookings,
     createB2BBooking,
     updateB2BBooking,
+    creditNotes,
+    creditNoteSettings,
+    redeemCreditNote,
     addOnCategories,
     bookings,
     rooms,
@@ -152,7 +156,7 @@ export function B2BBookingForm({
   // they are: they document money already handed back.
   const [existingPayments, setExistingPayments] = useState<Payment[]>(initial?.payments ?? []);
   const [newPaymentRows, setNewPaymentRows] = useState<PaymentRow[]>([
-    { uid: newUid(), date: todayDate, amount: "", tds: "", mode: "Bank Transfer" },
+    { uid: newUid(), date: todayDate, amount: "", tds: "", mode: "Bank Transfer", cnCode: "" },
   ]);
 
   const [errors, setErrors] = useState<FieldErrors>({});
@@ -303,8 +307,47 @@ export function B2BBookingForm({
   };
 
   // ─── Save ───
+  // A credit note issued to this or any organisation can settle part of the
+  // bill. Each code must exist and have enough left, counted across rows.
+  const validateCreditNotes = (): boolean => {
+    const usage = new Map<string, number>();
+    for (const r of newPaymentRows) {
+      if (r.mode !== "Credit Note" || r.kind === "refund") continue;
+      const amt = parseFloat(r.amount) || 0;
+      if (amt <= 0) continue;
+      const code = r.cnCode.trim();
+      if (!code) {
+        showNotif("Enter the credit note code for the credit note payment", "error");
+        return false;
+      }
+      const cn = creditNotes.find((c) => c.code.toLowerCase() === code.toLowerCase());
+      if (!cn) {
+        showNotif(`Credit note ${code} not found`, "error");
+        return false;
+      }
+      usage.set(cn.code, (usage.get(cn.code) ?? 0) + amt);
+    }
+    for (const [code, amt] of usage.entries()) {
+      const cn = creditNotes.find((c) => c.code === code)!;
+      if (amt > cn.remainingAmount) {
+        showNotif(`${code} has only ${fmt(cn.remainingAmount)} remaining (entered ${fmt(amt)})`, "error");
+        return false;
+      }
+    }
+    return true;
+  };
+  const redeemCreditNoteRows = (bookingId: string) => {
+    newPaymentRows
+      .filter((r) => r.mode === "Credit Note" && r.kind !== "refund" && (parseFloat(r.amount) || 0) > 0)
+      .forEach((r) => {
+        const result = redeemCreditNote(r.cnCode, bookingId, parseFloat(r.amount) || 0);
+        if (!result.ok) showNotif(result.error, "error");
+      });
+  };
+
   const save = (intent: B2BStatus) => {
     if (!validate()) return;
+    if (!validateCreditNotes()) return;
     // Money received means a firm commitment — only Confirm is allowed then
     if (intent !== "Confirmed" && newAdvance > 0) {
       showNotif("Payment entered — use Confirm Booking", "error");
@@ -430,7 +473,8 @@ export function B2BBookingForm({
         if (r.kind === "refund") {
           return { date: r.date || todayDate, time: nowTime(), type: REFUND_TYPE, amount: -amt, mode: r.mode, by: currentUser };
         }
-        const tds = Math.max(0, parseFloat(r.tds) || 0);
+        const isNote = r.mode === "Credit Note";
+        const tds = isNote ? 0 : Math.max(0, parseFloat(r.tds) || 0);
         return {
           date: r.date || todayDate,
           time: nowTime(),
@@ -439,6 +483,7 @@ export function B2BBookingForm({
           mode: r.mode,
           by: currentUser,
           ...(tds > 0 ? { tds } : {}),
+          ...(isNote && r.cnCode.trim() ? { creditNoteCode: r.cnCode.trim() } : {}),
         };
       })
       // A payment settled entirely by TDS still counts
@@ -479,6 +524,7 @@ export function B2BBookingForm({
 
     if (isEdit) {
       updateB2BBooking(bookingId, common);
+      redeemCreditNoteRows(bookingId);
       showNotif(`${bookingId} updated${holdNote ? ` · ${holdNote}` : ""}`, "success");
       router.push(`/b2b/${bookingId}`);
       return;
@@ -491,6 +537,7 @@ export function B2BBookingForm({
       createdAt: new Date().toISOString(),
     };
     createB2BBooking(booking);
+    redeemCreditNoteRows(bookingId);
     showNotif(
       (intent === "Confirmed"
         ? `${bookingId} confirmed`
@@ -1093,7 +1140,8 @@ export function B2BBookingForm({
                   return existingPayments.map((p, i) => {
                     running += p.amount;
                     const isRefund = p.type === REFUND_TYPE || p.amount < 0;
-                    const editable = !isRefund;
+                    // A redeemed credit note is fixed: it is already drawn down on the note
+                    const editable = !isRefund && !p.creditNoteCode;
                     const upd = (patch: Partial<Payment>) =>
                       setExistingPayments((prev) => prev.map((x, j) => (j === i ? { ...x, ...patch } : x)));
                     return (
@@ -1114,7 +1162,10 @@ export function B2BBookingForm({
                               ))}
                             </select>
                           ) : (
-                            p.mode
+                            <>
+                              {p.mode}
+                              {p.creditNoteCode && <span style={{ fontSize: 11, color: "var(--t3)", marginLeft: 6 }}>{p.creditNoteCode}</span>}
+                            </>
                           )}
                         </td>
                         <td style={{ textAlign: "right" }}>
@@ -1213,7 +1264,7 @@ export function B2BBookingForm({
                     />
                   </td>
                   <td>
-                    {row.kind === "refund" ? (
+                    {row.kind === "refund" || row.mode === "Credit Note" ? (
                       <span style={{ color: "var(--t3)" }}>—</span>
                     ) : (
                       <input
@@ -1245,7 +1296,44 @@ export function B2BBookingForm({
                       {PAYMENT_MODES.map((m) => (
                         <option key={m}>{m}</option>
                       ))}
+                      {row.kind !== "refund" && <option>Credit Note</option>}
                     </select>
+                    {row.mode === "Credit Note" && row.kind !== "refund" && (() => {
+                      // Any note code is accepted: a bare number is a system
+                      // code padded the way they are issued (CRV-0016)
+                      const listId = `cn-list-${row.uid}`;
+                      const open = creditNotes.filter((c) => c.remainingAmount > 0);
+                      const match = row.cnCode.trim()
+                        ? creditNotes.find((c) => c.code.toLowerCase() === row.cnCode.trim().toLowerCase())
+                        : undefined;
+                      return (
+                        <div style={{ marginTop: 5 }}>
+                          <input
+                            type="text"
+                            list={listId}
+                            placeholder={`${creditNoteSettings.prefix}-0001 or older code`}
+                            value={row.cnCode}
+                            onChange={(e) => {
+                              const v = e.target.value.trim();
+                              const exact = creditNotes.find((c) => c.code.toLowerCase() === v.toLowerCase());
+                              const full = exact ? exact.code : /^\d+$/.test(v) ? `${creditNoteSettings.prefix}-${v.padStart(4, "0")}` : v;
+                              setNewPaymentRows((prev) => prev.map((r) => (r.uid === row.uid ? { ...r, cnCode: full } : r)));
+                            }}
+                            style={{ width: "100%", padding: "5px 8px", border: "1px solid var(--bd)", borderRadius: "var(--r3)", fontSize: 12, background: "var(--surf)" }}
+                          />
+                          <datalist id={listId}>
+                            {open.map((c) => (
+                              <option key={c.code} value={c.code}>{`${c.guestName} · ${fmt(c.remainingAmount)}`}</option>
+                            ))}
+                          </datalist>
+                          {row.cnCode.trim() && (
+                            <div style={{ fontSize: 10, marginTop: 3, color: match && match.remainingAmount > 0 ? "var(--grn)" : "var(--red)" }}>
+                              {match ? `${match.guestName} · ${fmt(match.remainingAmount)} available` : "Code not found"}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td>
                     {newPaymentRows.length > 1 && (
@@ -1272,7 +1360,7 @@ export function B2BBookingForm({
               onClick={() =>
                 setNewPaymentRows((prev) => [
                   ...prev,
-                  { uid: newUid(), date: todayDate, amount: "", tds: "", mode: "Bank Transfer" },
+                  { uid: newUid(), date: todayDate, amount: "", tds: "", mode: "Bank Transfer", cnCode: "" },
                 ])
               }
             >
@@ -1287,7 +1375,7 @@ export function B2BBookingForm({
                 onClick={() =>
                   setNewPaymentRows((prev) => [
                     ...prev,
-                    { uid: newUid(), date: todayDate, amount: String(-balance), tds: "", mode: "Bank Transfer", kind: "refund" },
+                    { uid: newUid(), date: todayDate, amount: String(-balance), tds: "", mode: "Bank Transfer", cnCode: "", kind: "refund" },
                   ])
                 }
               >
